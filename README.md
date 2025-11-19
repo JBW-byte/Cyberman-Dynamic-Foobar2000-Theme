@@ -33,8 +33,8 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk2
 
-JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378
-<br>
+JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378 <br>
+
 open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
 <br>
