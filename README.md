@@ -6,13 +6,6 @@ Simple cool layout using the default user interface and plugins for the 64bit ve
   <img src="https://github.com/user-attachments/assets/73e11aec-a9b3-480f-8e11-93d3c4bd4427"  width="32%" />
   <img src="https://github.com/user-attachments/assets/f12dcd1d-b4b2-4e7c-b328-09dbb9b18d88" width="32%" />
 </p>
-
-To install the theme goto Prefrences, Default User Interface and click import theme, select the .fth file, you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
-
-https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth<br>
-<br>
-<br>
-Extract my Profile folder to the root folder (e.g. Foobar2000/Profile)
 ##  
 ### Quick install Guide using my profile folder <br>
 <br>
@@ -20,6 +13,8 @@ Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org
 
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled<br>
 <br>
+Profile Folder https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
+
 My Full Profile folder with varoius scripts and additions that have been developed by many coders helping the community on https://hydrogenaudio.org/index.php?board=28.0
 
 ##  
@@ -52,6 +47,14 @@ VU skin, extract zip to foobar2000/components
 Scripts i use:-
 
 https://hydrogenaud.io/index.php/topic,110938.0.html Libray Tree spider monkey panel
+
+
+To install the theme goto Prefrences, Default User Interface and click import theme, select the .fth file, you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
+
+https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth<br>
+<br>
+<br>
+Extract my Profile folder to the root folder (e.g. Foobar2000/Profile)
 
 you will need to install these font's to see some icons https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/fontawesome.ttf
 
