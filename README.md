@@ -22,7 +22,7 @@ Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled
 <br>
 ##
-you will need to Download these Foobar2000 Component plugins.  <br><br>
+### you will need to Download these Foobar2000 Component plugins.  <br><br>
 Jscript panel3   https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
@@ -37,7 +37,7 @@ JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378
 <br>
 open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
-
+<br>
 VU skin, extract zip to foobar2000/components 
 
 Scripts i use:-
