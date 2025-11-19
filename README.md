@@ -19,7 +19,7 @@ Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.fi
 Profile Folder, extract to Foobar Root Folder (e.g. Foobar2000/profile) and start Foobar<br>
 https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
 
-Includes Varoius scripts and additions that have been developed by many coders helping the community on the<br>
+Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
 [hydrogenaudio Forum](https://hydrogenaudio.org/index.php?board=28.0)
 ##
 # Full Installation Guide
@@ -27,7 +27,8 @@ Includes Varoius scripts and additions that have been developed by many coders h
 
 Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows  
 
-Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled
+Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode<br>
+[portable_mode_enabled.file](https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled).<br>
 <br>
 ##
 ### you will need to Download these Foobar2000 Component plugins.  <br><br>
