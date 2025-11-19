@@ -17,6 +17,7 @@ https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Mo
 
 
 Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows 
+Add this file to Foobar root folder eg. Foobar2000/portable_mode_enabled.file to use portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled
 
 you will need these Foobar2000 Component plugins to install.
 
