@@ -17,7 +17,7 @@ Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.fi
 <br>
 Profile Folder, extract to Foobar Root Folder (e.g. Foobar2000/profile) https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
 
-My Full Profile folder with varoius scripts and additions that have been developed by many coders helping the community on https://hydrogenaudio.org/index.php?board=28.0
+Varoius scripts and additions that have been developed by many coders helping the community on https://hydrogenaudio.org/index.php?board=28.0
 
 ##
 # Full Installation Guide
