@@ -4,9 +4,9 @@ Simple cool layout using the default user interface using plugins and scripts fo
   <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.png" />
 
 <p float="left">
-  <img src="https://github.com/user-attachments/assets/8f24786b-f0c9-45df-afa3-d47345a2429b" width="32%" />
-  <img src="https://github.com/user-attachments/assets/73e11aec-a9b3-480f-8e11-93d3c4bd4427"  width="32%" />
-  <img src="https://github.com/user-attachments/assets/f12dcd1d-b4b2-4e7c-b328-09dbb9b18d88" width="32%" />
+  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_2.png" width="32%" />
+  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_3.png"  width="32%" />
+  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_4.png" width="32%" />
 </p>
 
 ##       
