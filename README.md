@@ -9,7 +9,18 @@ Simple cool layout using the default user interface and plugins for the 64bit ve
 
 To install the theme goto Prefrences, Default User Interface and click import theme, select the .fth file, you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
 
-https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth
+https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth<br>
+<br>
+<br>
+Extract my Profile folder to the root folder (e.g. Foobar2000/Profile)
+##  
+### Quick install Guide using my profile folder <br>
+<br>
+Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org/windows  
+
+Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled<br>
+<br>
+My Full Profile folder with varoius scripts and additions that have been developed by many coders helping the community on https://hydrogenaudio.org/index.php?board=28.0
 
 ##  
 ## Full Installation Guide
