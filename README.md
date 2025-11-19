@@ -11,7 +11,7 @@ Simple cool layout using the default user interface and plugins for the 64bit ve
 
 ### Quick install Guide using my profile folder <br>
 <br>
-Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org/windows  
+Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org/windows
 
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled<br>
 <br>
@@ -19,8 +19,8 @@ Profile Folder https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J
 
 My Full Profile folder with varoius scripts and additions that have been developed by many coders helping the community on https://hydrogenaudio.org/index.php?board=28.0
 
-##  
-## Full Installation Guide
+##
+# Full Installation Guide
 ##
 
 Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows  
