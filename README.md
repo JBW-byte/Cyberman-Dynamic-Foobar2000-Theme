@@ -22,8 +22,7 @@ Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled
 <br>
 ##
-you will need to Download these Foobar2000 Component plugins. 
-<br>
+you will need to Download these Foobar2000 Component plugins.  <br><br>
 Jscript panel3   https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
