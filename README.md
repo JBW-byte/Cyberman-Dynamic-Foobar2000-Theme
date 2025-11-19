@@ -13,21 +13,21 @@ Simple cool layout using the default user interface using plugins and scripts fo
 
 ### Quick install Guide using my profile folder <br>
 <br>
-Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org/windows
+Download and extract Foobar to a folder, Foobar2000 64bit https://www.foobar2000.org/windows
 
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode<br>
 [portable_mode_enabled.file](https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled).<br>
 <br>
-Profile Folder, extract to Foobar Root Folder (e.g. Foobar2000/profile) and start Foobar<br>
+Profile Folder, extract to Foobar2000 Root Folder (e.g. Foobar2000/profile) and start Foobar<br>
 https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
 
 Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
-[Hydrogenaudio Foobar Forum](https://hydrogenaudio.org/index.php?board=28.0)
+[Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)
 ##
 # Full Installation Guide
 ##
 
-Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows  
+Download and extract to a folder Foobar2000 64bit https://www.foobar2000.org/windows  
 
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode<br>
 [portable_mode_enabled.file](https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled).<br>
