@@ -18,7 +18,7 @@ Foobar 64bit https://www.foobar2000.org/windows
 you will need these Foobar2000 Component plugins to install.
 
 
-Jscript panel3         https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
+Jscript panel3   https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
 
