@@ -33,7 +33,7 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk2
 
-Jsplitter https://foobar2000.club/forum/viewtopic.php?t=6378
+JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378
 
 
 
