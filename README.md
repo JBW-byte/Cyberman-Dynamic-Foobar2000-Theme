@@ -12,11 +12,9 @@ To install the theme goto Prefrences, Default User Interface and click import th
 https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth
 
 ##  
-## Full Installation Guide   
+## Full Installation Guide
 <br>
-
-
-
+<br>
 Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows  
 
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled
@@ -35,7 +33,7 @@ MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk
 
 JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378 <br>
 
-open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
+Install -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
 <br>
 VU skin, extract zip to foobar2000/components 
