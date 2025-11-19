@@ -13,20 +13,20 @@ https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Mo
 
 ##  
 
-https://www.foobar2000.org/windows Foobar 64bit
+Foobar 64bit https://www.foobar2000.org/windows 
 
 you will need these Foobar2000 Component plugins to install.
 
 
-https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 Jscript panel3
+Jscript panel3 https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
-https://www.foobar2000.org/components/view/foo_wave_minibar_mod Waveform Minibar (mod)
+Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
 
-https://www.foobar2000.org/components/view/foo_vis_vumeter Analog VU Meter Visualisation
+Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis_vumeter
 
-https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer Spectrum Analyzer
+Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
 
-https://www.foobar2000.org/components/view/foo_vis_milk2 MilkDrop 2 Visualisation
+MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk2
 
 https://github.com/jscript-panel/release/releases Jscript panel3
 
