@@ -15,7 +15,7 @@ Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org
 
 Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.file) to use Foobar in portable mode https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled<br>
 <br>
-Profile Folder, extract to Foobar Root Folder (e.g. Foobar2000/profile) 
+Profile Folder, extract to Foobar Root Folder (e.g. Foobar2000/profile)<br>
 https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
 
 Includes Varoius scripts and additions that have been developed by many coders helping the community on the forum
