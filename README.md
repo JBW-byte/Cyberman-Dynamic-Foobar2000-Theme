@@ -20,7 +20,7 @@ Profile Folder, extract to Foobar Root Folder (e.g. Foobar2000/profile) and star
 https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
 
 Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
-[hydrogenaudio Forum](https://hydrogenaudio.org/index.php?board=28.0)
+[Hydrogenaudio Foobar Forum](https://hydrogenaudio.org/index.php?board=28.0)
 ##
 # Full Installation Guide
 ##
