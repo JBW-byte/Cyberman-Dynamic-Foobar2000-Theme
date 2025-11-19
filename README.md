@@ -1,5 +1,5 @@
 # "Modern Classic RGB" Skin Theme for Foobar2000 2.0+ 64Bit DUI
-Simple cool layout using the default user interface using plugins and scripts for the 64bit version of foobar2000 2.0+ portable mode.
+Simple cool layout using the default user interface using plugins and scripts for the 64bit version of foobar2000 2.0+ portable mode. You may need to adjust the box sizes ffor your monitor.
 
   <img src="Modern_Classic_RGB_Foobar_64bit.png" width="97%" />
 
