@@ -9,3 +9,7 @@ https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Mo
 
 ##  
 
+<img width="2560" height="1440" alt="Modern_Classic_RGB_Foobar_64bit" src="https://github.com/user-attachments/assets/8f24786b-f0c9-45df-afa3-d47345a2429b" />
+<img width="2560" height="1440" alt="Modern_Classic_RGB_Foobar_64bit_2" src="https://github.com/user-attachments/assets/73e11aec-a9b3-480f-8e11-93d3c4bd4427" />
+<img width="2560" height="1440" alt="Modern_Classic_RGB_Foobar_64bit_3" src="https://github.com/user-attachments/assets/f12dcd1d-b4b2-4e7c-b328-09dbb9b18d88" />
+<img width="2560" height="1440" alt="Modern_Classic_RGB_Foobar_64bit_4" src="https://github.com/user-attachments/assets/87332001-8c3e-4e60-b0bc-8ad07914b261" />
