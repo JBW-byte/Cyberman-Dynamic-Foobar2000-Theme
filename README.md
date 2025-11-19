@@ -6,7 +6,9 @@ Simple cool layout using the default user interface and plugins for the 64bit ve
   <img src="https://github.com/user-attachments/assets/73e11aec-a9b3-480f-8e11-93d3c4bd4427"  width="32%" />
   <img src="https://github.com/user-attachments/assets/f12dcd1d-b4b2-4e7c-b328-09dbb9b18d88" width="32%" />
 </p>
-##  
+
+##       
+
 ### Quick install Guide using my profile folder <br>
 <br>
 Download and extract Foobar to a folder, Foobar 64bit https://www.foobar2000.org/windows  
