@@ -12,8 +12,9 @@ To install the theme goto Prefrences, Default User Interface and click import th
 https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth
 
 ##  
+#Full Instal;lation Guide
 
-Foobar 64bit https://www.foobar2000.org/windows 
+Download and extract to a folder Foobar 64bit https://www.foobar2000.org/windows 
 
 you will need these Foobar2000 Component plugins to install.
 
