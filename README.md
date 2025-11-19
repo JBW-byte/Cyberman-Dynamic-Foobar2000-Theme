@@ -15,9 +15,9 @@ https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Mo
 
 you will need these plugin components to self install.
 
-https://www.foobar2000.org/windows Foobar 32bit
+https://www.foobar2000.org/windows Foobar 64bit
 
-https://github.com/TheQwertiest/foo_spider_monkey_panel/releases/tag/v1.6.1 Spider Monkey panel
+https://github.com/TheQwertiest/foo_spider_monkey_panel/releases/tag/v1.6.1 
 
 https://www.foobar2000.org/components/view/foo_wave_minibar_mod WaveSeekbar
 
@@ -25,9 +25,9 @@ https://hydrogenaud.io/index.php/topic,97404.0.html Musical Spectrum
 
 https://github.com/jscript-panel/release/releases Jscript panel3
 
-https://drive.google.com/file/d/0B-52fIoCowfjQ1EyWkpJblRUNGM/view?resourcekey=0-k0RBknhT569PMlJFzJ8pVw VU Meter
 
-VU skin, extract zip to foobar2000/components https://drive.google.com/file/d/1unlq7VnlLkxgKFc5LaIls-1bbw6_CY55/view?usp=share_link
+
+VU skin, extract zip to foobar2000/components 
 
 Scripts i use:-
 
