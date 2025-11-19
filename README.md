@@ -5,7 +5,7 @@ Simple cool layout using the default user interface using plugins and scripts fo
 
 <p float="left">
   <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_2.png" width="33%" />
-  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_3.png"  width="33%" />
+  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_3.png"  width="32%" />
   <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit_4.png" width="33%" />
 </p>
 
