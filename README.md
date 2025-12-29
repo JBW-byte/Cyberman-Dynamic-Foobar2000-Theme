@@ -35,6 +35,8 @@ Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases 
 
 Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
+many audio output options and audio codecs added from the foobar2000 components https://www.foobar2000.org/components
+
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api
 
 
