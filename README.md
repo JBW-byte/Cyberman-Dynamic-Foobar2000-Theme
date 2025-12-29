@@ -20,7 +20,7 @@ Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.fi
 [portable_mode_enabled.file](https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled).<br>
 <br>
 Profile Folder, extract to Foobar2000 Root Folder (e.g. Foobar2000/profile) and start Foobar<br>
-https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing
+https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing<br>
 
 Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
 [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)
