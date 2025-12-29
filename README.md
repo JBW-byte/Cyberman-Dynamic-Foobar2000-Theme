@@ -31,9 +31,7 @@ Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis
 
 Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
 
-MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk2
-
-JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378 <br>
+Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
 
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api
 
@@ -57,9 +55,7 @@ Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis
 
 Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
 
-MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk2
-
-JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378 <br>
+Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
 
 Install -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
