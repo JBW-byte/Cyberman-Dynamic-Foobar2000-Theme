@@ -33,7 +33,7 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
 
-Jscript panel3, many of the scripts came from this forum thread  https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
+Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api
 
