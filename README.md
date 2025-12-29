@@ -1,5 +1,5 @@
-# "Modern Classic RGB" Skin Theme for Foobar2000 2.0+ 64Bit DUI
-Simple cool layout using the default user interface using plugins and scripts for the 64bit version of foobar2000 2.0+ portable mode.<br>
+# "Cyberman-Dynamic" Skin Theme for Foobar2000 2.0+ 64Bit and 32bit DUI
+Simple cool layout using the default user interface using plugins and scripts for the 64bit or 32biy version of foobar2000 2.0+ portable mode.<br>
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p
 
   <img src="Modern_Classic_RGB_Foobar_64bit.png" width="97%" />
