@@ -25,6 +25,16 @@ https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=shari
 Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
 [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)
 
+Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
+
+Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis_vumeter
+
+Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
+
+MilkDrop 2 Visualisation https://www.foobar2000.org/components/view/foo_vis_milk2
+
+JSplitter v4.0.4.4-beta https://foobar2000.club/forum/viewtopic.php?t=6378 <br>
+
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api
 
 
