@@ -20,7 +20,7 @@ Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.fi
 [portable_mode_enabled.file](https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/portable_mode_enabled).<br>
 <br>
 Profile Folder, extract to Foobar2000 Root Folder (e.g. Foobar2000/profile) and start Foobar<br>
-https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing<br><br><br>
+https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing<br>
 
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br><br>
 
