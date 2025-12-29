@@ -66,7 +66,6 @@ To install the theme goto Prefrences, Default User Interface and click import th
 https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Modern_Classic_RGB_Foobar_64bit.fth<br>
 <br>
 <br>
-Extract my Profile folder to the root folder (e.g. Foobar2000/Profile)
 
 you will need to install these font's to see some icons https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/fontawesome.ttf
 
