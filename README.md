@@ -76,12 +76,12 @@ Scripts needed:-
 
 Extract the extra scirpts/images to the Foobar2000/profile folder https://drive.google.com/file/d/1CQD0EAV9oKIkXqHL3RXSSi-k9KIhz7CA/view?usp=sharing
 <br>
-Install VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
-extract zip to foobar2000/profile/vumeter.
+Install the VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
+extract the zip to foobar2000/profile/vumeter.
 <br> 
 <br> 
 Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
-Install the Theme goto Prefrences, Display. Default User Interface and click import theme, select the .fth file,
+Install the Theme goto Prefrences, Display, Default User Interface and click import theme, select the .fth file,
 <br><br> 
 There will be some errors on the first load, on the library tab panel, right click and cselect configure panel,<br> 
 select package and import, navigate to foobar2000/profile/packages/albumtree mod34.zip and open the zip, click ok,<br><br> 
