@@ -43,7 +43,7 @@ many audio output options and audio codecs added from the foobar2000 components 
 
 
 ##
-# Full Installation Guide
+# Full Manual Installation Guide
 ##
 
 Download and extract to a folder, Foobar2000 64bit https://www.foobar2000.org/windows  
