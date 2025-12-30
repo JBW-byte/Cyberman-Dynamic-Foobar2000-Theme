@@ -83,8 +83,8 @@ extract zip to foobar2000/profile/vumeter.
 Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
 To install the Theme goto Prefrences, Default User Interface and click import theme, select the .fth file,
 <br>
-There will be some errors on first load, on the library tab panel right click and click configure, select package and import<br>
-navigate to foobar2000/profile/packages/albumtree mod34.zip and open the zip, click ok,<br>
+There will be some errors on first load, on the library tab panel right click and click configure,<br> 
+select package and import, navigate to foobar2000/profile/packages/albumtree mod34.zip and open the zip, click ok,<br><br>
 reinstall the theme ftl to activate the theme again.<br>
 <br><br>
 you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
