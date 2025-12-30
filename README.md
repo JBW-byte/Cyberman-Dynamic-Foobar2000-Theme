@@ -74,7 +74,7 @@ INSTALL -> open Foobar goto file/prefrences click components and select install,
 
 Scripts needed:-
 
-https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729 Libray Tree mod34, spider monkey panel<br>
+Extract the extra scirpts/images to the Foobar2000/profile folder https://drive.google.com/file/d/1CQD0EAV9oKIkXqHL3RXSSi-k9KIhz7CA/view?usp=sharing
 <br>
 Install VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
 extract zip to foobar2000/profile/vumeter.
