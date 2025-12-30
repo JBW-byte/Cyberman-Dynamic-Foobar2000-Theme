@@ -22,7 +22,7 @@ You may need to adjust the layout box sizes for your monitor resolution. default
 Download and extract Foobar to a folder, Foobar2000 64bit https://www.foobar2000.org/windows <br>
 <br>
 Profile Folder and potable mode file, extract to Foobar2000 Root Folder (e.g. Foobar2000/profile) and start Foobar <br>
-https://drive.google.com/file/d/1dGhZ-glXJYcxID9NU0G1gYOqBPZNIJWZ/view?usp=sharing<br>
+https://drive.google.com/file/d/10ddGCHLCtHCx_I_XMGxaRe0NK9qsVetv/view?usp=sharing<br>
 <br>
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br> <br> 
 <br>
