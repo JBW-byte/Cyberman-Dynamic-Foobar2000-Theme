@@ -79,7 +79,7 @@ https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/Mo
 <br>
 <br>
 
-you will need to install these font's to see some icons https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/fontawesome.ttf
-
+you will need to install these font's to see some icons maybe <br>
+https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/fontawesome.ttf
 https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/Guifx%20v2%20Transports.ttf
 
