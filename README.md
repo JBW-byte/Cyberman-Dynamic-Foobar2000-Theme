@@ -63,7 +63,7 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
 
-Install -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
+INSTALL -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
 <br>
 VU skin, extract zip to foobar2000/components 
