@@ -71,8 +71,9 @@ Scripts needed:-
 
 https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729 Libray Tree mod34, spider monkey panel<br>
 <br>
-Install VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip
+Install VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
 extract zip to foobar2000/profile/vumeter.
+<br>
 <br>
 Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
 To install the Theme goto Prefrences, Default User Interface and click import theme, select the .fth file,
