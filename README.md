@@ -85,7 +85,7 @@ Install the Theme goto Prefrences, Display, Default User Interface and click imp
 <br><br> 
 There will be some errors on the first load, on the library tab panel, right click and cselect configure panel,<br> 
 select package and import, navigate to foobar2000/profile/packages/albumtree mod34.zip and open the zip, click ok,<br><br> 
-reinstall the theme ftl to activate the theme again.<br> 
+reinstall the theme ftl to activate the theme again. Prefrences, Display, Default User Interface and import .ftl<br> 
 <br><br> 
 you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
 <br> 
