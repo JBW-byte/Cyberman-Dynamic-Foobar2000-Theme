@@ -53,7 +53,7 @@ Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.fi
 <br>
 ##
 ### you will need to Download these Foobar2000 Component plugins.  <br><br>
-Jscript panel3, many of the scripts came from this forum thread  https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
+Jscript panel 3 https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
 
