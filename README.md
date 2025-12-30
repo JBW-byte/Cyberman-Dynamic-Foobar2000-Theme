@@ -66,12 +66,12 @@ Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases 
 INSTALL -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
 <br>
-VU skin, extract zip to foobar2000/components 
 
-Scripts i use:-
+Scripts needed:-
 
 https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729 Libray Tree mod34, spider monkey panel
 
+Install VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip extract zip to foobar2000/profile/vumeter.
 
 
 Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
