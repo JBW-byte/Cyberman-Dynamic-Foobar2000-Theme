@@ -70,7 +70,7 @@ VU skin, extract zip to foobar2000/components
 
 Scripts i use:-
 
-https://hydrogenaud.io/index.php/topic,110938.0.html Libray Tree spider monkey panel
+https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729 Libray Tree mod34, spider monkey panel
 
 
 To install the theme goto Prefrences, Default User Interface and click import theme, select the .fth file, you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
