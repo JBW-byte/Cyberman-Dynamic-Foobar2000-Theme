@@ -19,8 +19,8 @@ Download and extract Foobar to a folder, Foobar2000 64bit https://www.foobar2000
 Profile Folder, extract to Foobar2000 Root Folder (e.g. Foobar2000/profile) and start Foobar <br>
 https://drive.google.com/file/d/17c2RMuAsf7-hlYvNjceFJV0pgC-KuH9J/view?usp=sharing<br>
 <br>
-You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br><br>
-## 
+You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br> <br> 
+##     
 <br>
 Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
 [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)
