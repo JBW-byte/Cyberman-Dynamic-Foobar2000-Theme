@@ -73,13 +73,14 @@ Scripts i use:-
 https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729 Libray Tree mod34, spider monkey panel
 
 
-To install the theme goto Prefrences, Default User Interface and click import theme, select the .fth file, you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
+To install the Theme goto Prefrences, Default User Interface and click import theme, select the .fth file,
 
-https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
+Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
 <br>
 <br>
-
-you will need to install these font's to see some icons maybe <br>
+you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
+<br>
+you might need to install these font's to see some icons <br>
 https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/fontawesome.ttf
 https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/Guifx%20v2%20Transports.ttf
 
