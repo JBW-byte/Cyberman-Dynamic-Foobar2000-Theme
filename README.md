@@ -76,10 +76,10 @@ INSTALL -> open Foobar goto file/prefrences click components and select install,
 
 Scripts needed:-
 
-Extract these scirpts/images to the Foobar2000/profile folder https://drive.google.com/file/d/1CQD0EAV9oKIkXqHL3RXSSi-k9KIhz7CA/view?usp=sharing
+Extract these scirpts/images to the Foobar2000/profile folder https://drive.google.com/file/d/1CQD0EAV9oKIkXqHL3RXSSi-k9KIhz7CA/view?usp=sharing<br>
 <br>
 Install the VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
-extract the zip to foobar2000/profile/vumeter.
+extract the zip to foobar2000/profile/vumeter.<br>
 <br> 
 <br> 
 Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
