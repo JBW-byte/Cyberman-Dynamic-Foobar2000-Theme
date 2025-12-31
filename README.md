@@ -11,8 +11,8 @@ You may need to adjust the layout box sizes for your monitor resolution. default
 
 <p float="left">
   <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Modern_Classic_RGB_Foobar_64bit_2.png" width="32%" />
-  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/screenshots/Modern_Classic_RGB_Foobar_64bit_3.png"  width="32%" />
-  <img src="https://github.com/JBW-byte/Modern-Classic-RGB-Foobar2000-2.0-64bit/blob/main/screenshots/Modern_Classic_RGB_Foobar_64bit_4.png" width="32%" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Modern_Classic_RGB_Foobar_64bit_3.png"  width="32%" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Modern_Classic_RGB_Foobar_64bit_4.png" width="32%" />
 </p>
 
 ##       
