@@ -7,7 +7,7 @@ the artwork doesnt allways work well. Some small custom modifications to the scr
 
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p
 
-  <img src="screenshots/Modern_Classic_RGB_Foobar_64bit.png" width="97%" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Modern_Classic_RGB_Foobar_64bit.png" width="97%" />
 
 <p float="left">
   <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Modern_Classic_RGB_Foobar_64bit_2.png" width="32%" />
