@@ -87,6 +87,8 @@ Install the Theme goto File, Prefrences, Display, Default User Interface and cli
 There will be some errors on the first load, we need to setup the library panel, on the library tab panel, right click and select configure panel,<br> 
 select package and import, navigate to foobar2000/profile/packages/albumtree mod34.zip and open the zip, click ok,<br><br> 
 reinstall the theme ftl to activate the theme again. Prefrences, Display, Default User Interface and import .ftl<br> 
+<br>
+Spectrum presets, they are saved in the theme file as default without them, extract to the profile folder https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Spectrum%20preset.zip
 <br><br> 
 you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
 <br> 
