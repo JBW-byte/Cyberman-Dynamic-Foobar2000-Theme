@@ -71,6 +71,8 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
 
+Library Tree v2.4 mod34 https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729
+
 INSTALL -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
 <br>
