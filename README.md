@@ -71,7 +71,7 @@ Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis
 
 Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
 
-Spider Monkey Panel, requires this version at the moment https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/foo_spider_monkey_panel-1.7.25.12.30.fb2k-component <br>
+Spider Monkey Panel, requires this version at the moment, the latest update breaks the theme, for now https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/foo_spider_monkey_panel-1.7.25.12.30.fb2k-component <br>
 
 INSTALL -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
