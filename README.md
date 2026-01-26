@@ -29,7 +29,10 @@ Add your media files location on first load, goto File, Prefrences, Media Librar
 <br>
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br> <br> 
 <br>
-there maybe a bug currently when you update components, might need to manually close Foobar in taskmanger if it doesnt restart, hopefully this wil be fixed soon.
+you might need to install these font's to see some icons, .ttf files <br> 
+https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
+<br>
+there maybe a bug currently when you update components, might need to manually close Foobar in taskmanger if it doesnt restart, hopefully this wil be fixed soon, i will look into it.
 
 ##
 
@@ -96,7 +99,6 @@ Spectrum presets, they are saved in the theme file as default without them, extr
 <br><br> 
 you will need to use dark mode in foobar(display menu/colors and font) or on your desktop to match the borders.
 <br> 
-you might need to install these font's to see some icons <br> 
-https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/fontawesome.ttf
-https://github.com/TheQwertiest/CaTRoX_QWR/blob/master/fonts/Guifx%20v2%20Transports.ttf
+you might need to install these font's to see some icons, .ttf files <br> 
+https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 
