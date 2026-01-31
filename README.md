@@ -40,19 +40,19 @@ there maybe a bug currently when you update components, might need to manually c
 Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
 CD Spinner Script author "marc2003, mod by vnav, cd/mask from [TT-ReBORN.Georgia-ReBORN](https://hydrogenaudio.org/index.php?board=28.0)
 
-Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
+Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod by Case
 
-Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis_vumeter
+Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis_vumeter by oops
 
-Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
+Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer by pqyt
 
-Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
+Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases by marc2k3<br>
 
-Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
+Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 by marc2k3<
 
-Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP
+Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP by regor
 
-many audio output options and audio codecs added from the foobar2000 components https://www.foobar2000.org/components
+many audio output options and audio codecs added from the foobar2000 components https://www.foobar2000.org/components 
 
 
 
