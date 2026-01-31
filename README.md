@@ -48,7 +48,7 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases by marc2k3<br>
 
-Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 by marc2k3<
+Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 by marc2k3
 
 Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP by regor
 
