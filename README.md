@@ -5,6 +5,7 @@ Dynamic colour scheme based on the cover art of the current playing track/album,
 diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br>
 <br>
 Some small custom modifications to the scripts default values<br>
+Includes my own custom made buttons for play/stop etc.
 
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p
 
