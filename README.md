@@ -37,9 +37,8 @@ there maybe a bug currently when you update components, might need to manually c
 
 ##
 
-Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
-[Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
-Script cd mask from [TT-ReBORN.Georgia-ReBORN](https://hydrogenaudio.org/index.php?board=28.0)
+Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
+Script cd/mask from [TT-ReBORN.Georgia-ReBORN](https://hydrogenaudio.org/index.php?board=28.0)
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
 
@@ -87,7 +86,7 @@ INSTALL -> open Foobar goto file/prefrences click components and select install,
 
 Scripts needed:-
 
-Extract these scirpts/images to the Foobar2000/profile folder https://drive.google.com/file/d/1CQD0EAV9oKIkXqHL3RXSSi-k9KIhz7CA/view?usp=sharing<br>
+Extract these scirpts/images to the Foobar2000/profile folder https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/scripts_extra.zip<br>
 <br>
 Install the VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
 extract the zip to foobar2000/profile/vumeter.<br>
