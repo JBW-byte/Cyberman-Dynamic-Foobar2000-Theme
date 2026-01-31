@@ -77,7 +77,7 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 Spider Monkey Panel, https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
 <br>
-Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP<br>
+Library-Tree-SMP-1-0-0-package.zip https://github.com/regorxxx/Library-Tree-SMP<br>
 
 INSTALL -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
