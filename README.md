@@ -38,7 +38,8 @@ there maybe a bug currently when you update components, might need to manually c
 ##
 
 Includes Various scripts and additions that have been developed by many coders helping the community on the<br>
-[Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)
+[Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
+Script cd mask from [TT-ReBORN.Georgia-ReBORN](https://hydrogenaudio.org/index.php?board=28.0)
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
 
