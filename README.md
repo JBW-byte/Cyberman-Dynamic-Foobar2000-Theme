@@ -89,7 +89,7 @@ Scripts needed:-
 Extract these scirpts/images to the Foobar2000/profile folder https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/scripts_extra.zip<br>
 <br>
 Install the VU Meter skins, https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/vumeter.zip<br>
-extract the zip to foobar2000/profile/vumeter.<br>
+extract the zip to foobar2000/profile/.<br>
 <br> 
 Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth<br>
 Install the Theme goto File, Prefrences, Display, Default User Interface and click import theme, select the .fth file,
