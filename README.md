@@ -49,7 +49,7 @@ Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases 
 
 Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
-Library Tree v2.4 mod34 https://hydrogenaudio.org/index.php/topic,111060.msg1073729.html#msg1073729
+Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP
 
 many audio output options and audio codecs added from the foobar2000 components https://www.foobar2000.org/components
 
@@ -76,6 +76,8 @@ Analog VU Meter Visualisation https://www.foobar2000.org/components/view/foo_vis
 Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer
 
 Spider Monkey Panel, https://github.com/marc2k3/spider-monkey-panel-x64/releases <br>
+<br>
+Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP<br>
 
 INSTALL -> open Foobar goto file/prefrences click components and select install, select all the plugins you have downloaded and click open and apply, foobar will restart.
 ##
@@ -92,7 +94,7 @@ Download Theme https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blo
 Install the Theme goto File, Prefrences, Display, Default User Interface and click import theme, select the .fth file,
 <br><br> 
 There will be some errors on the first load, we need to setup the library panel, on the library tab panel, right click and select configure panel,<br> 
-select package and import, navigate to foobar2000/profile/packages/albumtree mod34.zip and open the zip, click ok,<br><br> 
+select package and import, navigate to your location for Library-Tree-SMP-1-0-0-package.zip and open the zip, click ok,<br><br> 
 reinstall the theme ftl to activate the theme again. Prefrences, Display, Default User Interface and import .ftl<br> 
 <br>
 Spectrum presets, they are saved in the theme file as default without them, extract to the profile folder https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Spectrum%20preset.zip
