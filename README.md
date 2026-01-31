@@ -33,7 +33,7 @@ You will need to sign up to last.fm for an API key for the Bio(right click set A
 you might need to install these font's to see some icons, .ttf files <br> 
 https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 <br><br>
-there maybe a bug currently when you update components, might need to manually close Foobar in taskmanger if it doesnt restart, hopefully this wil be fixed soon, i will look into it.
+there maybe a bug currently when you update components, might need to manually close Foobar in taskmanger if it doesnt restart, I will look into it.
 
 ##
 
