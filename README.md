@@ -24,7 +24,7 @@ You may need to adjust the layout box sizes for your monitor resolution. default
 Download and extract Foobar to a folder, Foobar2000 64bit https://www.foobar2000.org/windows <br>
 <br>
 Profile Folder and potable mode file, extract to Foobar2000 Root Folder (e.g. Foobar2000/) and start Foobar <br>
-https://drive.google.com/file/d/1rbt565eTzlPOWeJIfT3RrfoZncBm9rTf/view?usp=drive_link<br>
+https://drive.google.com/file/d/1rbt565eTzlPOWeJIfT3RrfoZncBm9rTf/view?usp=sharing<br>
 <br>
 Add your media files location on first load, goto File, Prefrences, Media Library, and click +folder to add files location<br>
 <br>
