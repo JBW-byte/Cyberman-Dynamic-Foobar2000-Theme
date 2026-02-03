@@ -49,7 +49,7 @@ Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases 
 
 Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP by regor
 
-Audio output options and audio codecs are available from the foobar2000 components https://www.foobar2000.org/components 
+Audio output options and audio codecs are available from the foobar2000 components https://www.foobar2000.org/components <br> 
 SACD codec/component https://sourceforge.net/projects/sacddecoder/
 
 
