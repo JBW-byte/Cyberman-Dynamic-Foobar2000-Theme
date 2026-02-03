@@ -37,7 +37,7 @@ https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 ##
 
 Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
-Removed Jscript panel 3 as its not supported anymore, impplemented my own CD spinner script, Volume Knob, and Artwork Blur panel, ye the spinner is a bit dark but hey it works will look into it.
+Removed Jscript panel 3 as its not supported anymore, implementedmy own CD spinner script, Volume Knob, and Artwork Blur panel, ye the spinner is a bit dark but hey it works will look into it.
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod by Case
 
