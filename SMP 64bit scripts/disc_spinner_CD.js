@@ -1,28 +1,26 @@
 // ================= AUTHOR L.E.D. AI ASSISTED =================
+// SMP 64-bit – Disc / Album Art (Fully Separated Pipelines)
 
-// ---------------- COLOR HELPERS ----------------
+// ---------------- COLOR ----------------
 function RGBA(r, g, b, a) {
     return ((a << 24) | (r << 16) | (g << 8) | b);
 }
 
 // ---------------- CONFIG ----------------
+var TIMER_INTERVAL = 50;
 var SPIN_SPEED = 2.5;
 var ROTATION_EASE = 0.12;
-var TIMER_INTERVAL = 50;
 var PADDING = 10;
 
 // ---------------- STATE ----------------
 var discImage = null;
-var discBuffer = null;
 var albumArtImage = null;
+var discBuffer = null;
 
-var angle = 0;        // current angle
-var targetAngle = 0;  // target angle
+var angle = 0;
+var targetAngle = 0;
 
-var discDrawWidth = 0;
-var discDrawHeight = 0;
-var discX = 0;
-var discY = 0;
+var drawX = 0, drawY = 0, drawW = 0, drawH = 0;
 
 var discCache = {};
 var spinningEnabled = true;
@@ -32,9 +30,8 @@ var useAlbumArt = window.GetProperty("UseAlbumArt", false);
 // ---------------- PATH HELPERS ----------------
 function normalizePath(p) {
     if (!p) return null;
-    if (p.indexOf("file:///") === 0) {
+    if (p.indexOf("file:///") === 0)
         p = p.replace("file:///", "").replace(/\//g, "\\");
-    }
     return p;
 }
 
@@ -48,7 +45,7 @@ function sanitize(s) {
     return s ? s.replace(/[\\\/:*?"<>|]/g, "_").trim() : "";
 }
 
-// ---------------- IMAGE LOAD & CACHE ----------------
+// ---------------- IMAGE CACHE ----------------
 function tryLoadCached(path) {
     if (!path) return null;
     if (discCache[path]) return discCache[path];
@@ -61,45 +58,59 @@ function tryLoadCached(path) {
     return null;
 }
 
+// ---------------- ALBUM ART ----------------
+function loadAlbumArt() {
+    albumArtImage = null;
+    var metadb = fb.GetNowPlaying();
+    if (!metadb) return;
+
+    albumArtImage = utils.GetAlbumArtV2(metadb, 0) || null;
+}
+
 // ---------------- DISC BUFFER ----------------
 function createDiscBuffer() {
-    if (!discImage || discOnlyMode || useAlbumArt) {
-        discBuffer = null;
-        return;
-    }
+    discBuffer = null;
 
-    var w = Math.max(1, discDrawWidth);
-    var h = Math.max(1, discDrawHeight);
+    if (!discImage || discOnlyMode || useAlbumArt) return;
+    if (drawW < 1 || drawH < 1) return;
 
-    discBuffer = gdi.CreateImage(w, h);
-    if (!discBuffer) return;
+    var img = gdi.CreateImage(drawW, drawH);
+    if (!img) return;
 
-    var gr = discBuffer.GetGraphics();
+    var gr = img.GetGraphics();
     gr.SetSmoothingMode(2);
 
     gr.DrawImage(
         discImage,
-        0, 0, w, h,
+        0, 0, drawW, drawH,
         0, 0, discImage.Width, discImage.Height
     );
 
-    discBuffer.ReleaseGraphics(gr);
+    img.ReleaseGraphics(gr);
+    discBuffer = img;
 }
 
 // ---------------- LAYOUT ----------------
-function computeDiscDrawParams() {
-    var img = useAlbumArt && albumArtImage ? albumArtImage : discImage;
-    if (!img) return;
+function computeLayout() {
+    var img = useAlbumArt ? albumArtImage : discImage;
+    if (!img || img.Width <= 0 || img.Height <= 0) {
+        drawW = drawH = 0;
+        discBuffer = null;
+        return;
+    }
 
-    var maxW = window.Width - PADDING * 2;
-    var maxH = window.Height - PADDING * 2;
+    var pad = useAlbumArt ? 0 : PADDING;
+
+    var maxW = Math.max(1, window.Width - pad * 2);
+    var maxH = Math.max(1, window.Height - pad * 2);
 
     var scale = Math.min(maxW / img.Width, maxH / img.Height);
+    if (scale <= 0) return;
 
-    discDrawWidth  = Math.floor(img.Width  * scale);
-    discDrawHeight = Math.floor(img.Height * scale);
-    discX = Math.floor((window.Width  - discDrawWidth)  / 2);
-    discY = Math.floor((window.Height - discDrawHeight) / 2);
+    drawW = Math.max(1, Math.floor(img.Width * scale));
+    drawH = Math.max(1, Math.floor(img.Height * scale));
+    drawX = Math.floor((window.Width - drawW) / 2);
+    drawY = Math.floor((window.Height - drawH) / 2);
 
     if (!useAlbumArt) createDiscBuffer();
 }
@@ -109,10 +120,9 @@ function loadDisc() {
     discImage = null;
 
     var folder = getTrackFolder();
-    if (folder) {
+    if (folder)
         discImage = tryLoadCached(folder + "disc.png") ||
                     tryLoadCached(folder + "disc.jpg");
-    }
 
     if (!discImage) {
         var album = sanitize(fb.TitleFormat("%album%").Eval());
@@ -139,28 +149,20 @@ function loadDisc() {
     }
 
     angle = targetAngle = 0;
-
-    computeDiscDrawParams();
-    window.Repaint();
 }
 
-// ---------------- LOAD ALBUM ART ----------------
-function loadAlbumArt() {
-    var metadb = fb.GetNowPlaying();
-    if (!metadb) {
-        albumArtImage = null;
-        return;
-    }
-    var art = utils.GetAlbumArtV2(metadb, 0);
-    albumArtImage = art || null;
+// ---------------- MASTER LOAD ----------------
+function reloadAll() {
+    if (useAlbumArt) loadAlbumArt();
+    else loadDisc();
 
-    computeDiscDrawParams();
+    computeLayout();
     window.Repaint();
 }
 
 // ---------------- TIMER ----------------
 var timer = window.SetInterval(function () {
-    if (!discOnlyMode && !useAlbumArt && spinningEnabled && fb.IsPlaying && !fb.IsPaused && discBuffer) {
+    if (!useAlbumArt && !discOnlyMode && spinningEnabled && fb.IsPlaying && !fb.IsPaused && discBuffer) {
         targetAngle += SPIN_SPEED;
         angle += (targetAngle - angle) * ROTATION_EASE;
         window.Repaint();
@@ -168,36 +170,51 @@ var timer = window.SetInterval(function () {
 }, TIMER_INTERVAL);
 
 // ---------------- EVENTS ----------------
-function on_playback_new_track() {
-    loadDisc();
-    loadAlbumArt();
-}
+function on_playback_new_track() { reloadAll(); }
 function on_playback_stop() { angle = targetAngle = 0; window.Repaint(); }
-function on_size() { computeDiscDrawParams(); window.Repaint(); }
+function on_size() { computeLayout(); window.Repaint(); }
 
 // ---------------- PAINT ----------------
 function on_paint(gr) {
     gr.FillSolidRect(0, 0, window.Width, window.Height, RGBA(18,18,18,255));
+
+    if (drawW < 1 || drawH < 1) return;
+
     gr.SetSmoothingMode(2);
 
-    var img = useAlbumArt && albumArtImage ? albumArtImage : discImage;
-    if (!img) return;
-
-    if (useAlbumArt || !discBuffer || discOnlyMode) {
-        gr.DrawImage(img, discX, discY, discDrawWidth, discDrawHeight,
-                     0, 0, img.Width, img.Height);
+    // ---- ALBUM ART PIPELINE ----
+    if (useAlbumArt && albumArtImage) {
+        gr.DrawImage(
+            albumArtImage,
+            drawX, drawY, drawW, drawH,
+            0, 0, albumArtImage.Width, albumArtImage.Height
+        );
         return;
     }
 
-    var drawAngle = angle % 360;
-    if (drawAngle < 0) drawAngle += 360;
+    // ---- DISC ONLY PIPELINE ----
+    if (discOnlyMode || !discBuffer) {
+        if (!discImage) return;
+        gr.DrawImage(
+            discImage,
+            drawX, drawY, drawW, drawH,
+            0, 0, discImage.Width, discImage.Height
+        );
+        return;
+    }
 
-    gr.DrawImage(discBuffer,
-                 discX, discY, discDrawWidth, discDrawHeight,
-                 0, 0, discBuffer.Width, discBuffer.Height,
-                 drawAngle,
-                 discX + discDrawWidth/2,
-                 discY + discDrawHeight/2);
+    // ---- SPINNING DISC PIPELINE ----
+    var a = angle % 360;
+    if (a < 0) a += 360;
+
+    gr.DrawImage(
+        discBuffer,
+        drawX, drawY, drawW, drawH,
+        0, 0, discBuffer.Width, discBuffer.Height,
+        a,
+        drawX + drawW / 2,
+        drawY + drawH / 2
+    );
 }
 
 // ---------------- MENU ----------------
@@ -205,40 +222,34 @@ function on_mouse_rbtn_up(x, y) {
     var m = window.CreatePopupMenu();
     var i = 1;
 
+    m.AppendMenuItem(useAlbumArt ? 0x8 : 0, i++, "Use album art");
     m.AppendMenuItem(discOnlyMode ? 0x8 : 0, i++, "Disc only mode");
-    m.AppendMenuItem(useAlbumArt ? 0x8 : 0, i++, "Use Album Art");
     m.AppendMenuSeparator();
     m.AppendMenuItem(0, i++, "Spin speed: Slow");
     m.AppendMenuItem(0, i++, "Spin speed: Normal");
     m.AppendMenuItem(0, i++, "Spin speed: Fast");
     m.AppendMenuSeparator();
-    m.AppendMenuItem(0, i++, "Reload disc");
-    m.AppendMenuItem(0, i++, "Reload album art");
-    m.AppendMenuItem(0, i++, "Clear image cache");
+    m.AppendMenuItem(0, i++, "Reload image");
+    m.AppendMenuItem(0, i++, "Clear cache");
 
     var r = m.TrackPopupMenu(x, y);
 
     switch (r) {
         case 1:
-            discOnlyMode = !discOnlyMode;
-            window.SetProperty("DiscOnlyMode", discOnlyMode);
-            createDiscBuffer();
-            break;
-        case 2:
             useAlbumArt = !useAlbumArt;
             window.SetProperty("UseAlbumArt", useAlbumArt);
-            computeDiscDrawParams();
+            reloadAll();
+            break;
+        case 2:
+            discOnlyMode = !discOnlyMode;
+            window.SetProperty("DiscOnlyMode", discOnlyMode);
+            computeLayout();
             break;
         case 3: SPIN_SPEED = 1.0; break;
         case 4: SPIN_SPEED = 2.5; break;
         case 5: SPIN_SPEED = 5.0; break;
-        case 6: loadDisc(); break;
-        case 7: loadAlbumArt(); break;
-        case 8:
-            discCache = {};
-            loadDisc();
-            loadAlbumArt();
-            break;
+        case 6: reloadAll(); break;
+        case 7: discCache = {}; reloadAll(); break;
     }
 
     window.Repaint();
@@ -246,8 +257,9 @@ function on_mouse_rbtn_up(x, y) {
 }
 
 // ---------------- UNLOAD ----------------
-function on_unload() { window.ClearInterval(timer); }
+function on_unload() {
+    window.ClearInterval(timer);
+}
 
 // ---------------- INIT ----------------
-loadDisc();
-loadAlbumArt();
+reloadAll();
