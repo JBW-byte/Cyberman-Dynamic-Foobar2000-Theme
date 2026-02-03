@@ -4,8 +4,7 @@ Simple cool layout using the default user interface using plugins and scripts fo
 Dynamic colour scheme based on the cover art of the current playing track/album, custom made play buttons and several VU Meter skins.<br><br>
 
 Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br>
-<br>
-Some small custom modifications to the scripts default values<br><br><br>
+Some small custom modifications to the scripts default values<br><br>
 Includes my own custom made Scripts for SMP 64bit.
 Includes my own custom made buttons for play/stop etc.
 
