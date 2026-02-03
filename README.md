@@ -33,7 +33,6 @@ You will need to sign up to last.fm for an API key for the Bio(right click set A
 you might need to install these font's to see some icons, .ttf files <br> 
 https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 <br><br>
-there maybe a bug currently when you update components, might need to manually close Foobar in taskmanger if it doesnt restart, I will look into it.
 
 ##
 
@@ -66,7 +65,6 @@ Add this file to the Foobar root folder (eg. Foobar2000/portable_mode_enabled.fi
 <br>
 ##
 ### you will need to Download these Foobar2000 Component plugins.  <br><br>
-Jscript panel 3 https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod
 
