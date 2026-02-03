@@ -3,10 +3,9 @@ Simple cool layout using the default user interface using plugins and scripts fo
 #
 Dynamic colour scheme based on the cover art of the current playing track/album, custom made play buttons and several VU Meter skins.<br><br>
 
-Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br>
-Some small custom modifications to the scripts default values<br><br>
-Includes my own custom made Scripts for SMP 64bit.
-Includes my own custom made buttons for play/stop etc.
+Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br><br>
+Some small custom modifications to the scripts default values<br>
+Includes my own custom made Scripts for SMP 64bit and my custom made buttons for play/stop etc.
 
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p
 
@@ -39,7 +38,7 @@ there maybe a bug currently when you update components, might need to manually c
 ##
 
 Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
-CD Spinner Script author "marc2003, mod by vnav, cd/mask from [TT-ReBORN.Georgia-ReBORN](https://github.com/TT-ReBORN/Georgia-ReBORN)
+Removed Jscript panel 3 as its not supported anymore, impplemented my own CD spinner script, Volume Knob, and Artwork Blur panel, ye the spinner is a bit dark but hey it works will look into it.
 
 Waveform Minibar (mod) https://www.foobar2000.org/components/view/foo_wave_minibar_mod by Case
 
@@ -49,11 +48,9 @@ Spectrum Analyzer https://www.foobar2000.org/components/view/foo_vis_spectrum_an
 
 Spider Monkey Panel https://github.com/marc2k3/spider-monkey-panel-x64/releases by marc2k3<br>
 
-Jscript panel 3, https://hydrogenaudio.org/index.php/topic,110516.msg1067716.html#msg1067716 by marc2k3
-
 Library Tree SMP https://github.com/regorxxx/Library-Tree-SMP by regor
 
-many audio output options and audio codecs added from the foobar2000 components https://www.foobar2000.org/components 
+Audio output options and audio codecs are available from the foobar2000 components https://www.foobar2000.org/components 
 
 
 
