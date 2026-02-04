@@ -1,7 +1,7 @@
 # "Cyberman-Dynamic" Skin Theme for Foobar2000 2.0+ 64Bit DUI
 Simple cool layout using the default user interface using plugins and scripts for the 64bit version of foobar2000 2.0+ portable mode.<br>
-#
 *** Updated 4 Feb 2026 ***
+#
 Dynamic colour scheme based on the cover art of the current playing track/album, custom made play buttons and several VU Meter skins.<br><br>
 
 Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br><br>
