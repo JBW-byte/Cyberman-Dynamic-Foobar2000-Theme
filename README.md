@@ -4,7 +4,6 @@ Simple cool layout using the default user interface using plugins and scripts fo
 Dynamic colour scheme based on the cover art of the current playing track/album, custom made play buttons and several VU Meter skins.<br><br>
 
 Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br><br>
-Some small custom modifications to the scripts default values<br>
 
 Implemented CD Spinner with Album Art or CD option, Volume Knob, and Artwork Blur panel scripts in SMP 64bit.<br>
 If your disc image has a non-transparent background it will show the whole image, no masking as yet. 
