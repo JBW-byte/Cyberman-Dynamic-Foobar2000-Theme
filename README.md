@@ -10,7 +10,9 @@ If your disc image has a non-transparent background it will show the whole image
 Named disc, vinyl, cd, CD, .jpg or .png<br><br>
 My panels have right click options.<br><br>
 
-You may need to adjust the layout box sizes for your monitor resolution. default 1440p
+You may need to adjust the layout box sizes for your monitor resolution. default 1440p 
+
+ Updated 4 Feb 2026
 
   <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/cyberman-dynamic.png" width="97%" />
 
