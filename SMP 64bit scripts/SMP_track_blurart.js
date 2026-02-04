@@ -1,3 +1,5 @@
+// ================= AUTHOR L.E.D. AI ASSISTED =================
+
 window.DefineScript('StackBlur+Panel', { author: 'marc2003' });
 
 include('docs/Helpers.js');
