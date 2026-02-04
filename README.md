@@ -30,14 +30,14 @@ Add your media files location on first load, goto File, Prefrences, Media Librar
 <br>
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br> <br> 
 <br>
-you might need to install these font's to see some icons, .ttf files <br> 
+You might need to install these font's to see some icons, .ttf files <br> 
 https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 <br><br>
 
 ##
-implemented my own CD Spinner with Album Art or CD option, Volume Knob, and Artwork Blur panel.<br>
-if you disc image is non-transparent background it will show the hole image, no masking as yet.<br>
-my panels have right click options.<br><br>
+Implemented my own CD Spinner with Album Art or CD option(named disc.png or cd.png), Volume Knob, and Artwork Blur panel.<br>
+If your disc image has a non-transparent background it will show the whole image, no masking as yet.<br>
+My panels have right click options.<br><br>
 
 Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
 
