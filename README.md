@@ -6,7 +6,7 @@ Dynamic colour scheme based on the cover art of the current playing track/album,
 Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br><br>
 Some small custom modifications to the scripts default values<br>
 
-Implemented my own CD Spinner with Album Art or CD option(named disc.png or cd.png), Volume Knob, and Artwork Blur panel scripts in SMP 64bit.<br>
+Implemented CD Spinner with Album Art or CD option(named disc.png or cd.png), Volume Knob, and Artwork Blur panel scripts in SMP 64bit.<br>
 If your disc image has a non-transparent background it will show the whole image, no masking as yet.<br>
 My panels have right click options.<br><br>
 
