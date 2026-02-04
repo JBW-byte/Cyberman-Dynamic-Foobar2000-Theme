@@ -1,3 +1,5 @@
+// ================= AUTHOR L.E.D. AI ASSISTED =================
+
 const tf_path = fb.TitleFormat("$directory_path(%path%)");
 let img = null;
 let maskImg = null;
