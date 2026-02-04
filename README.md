@@ -36,7 +36,6 @@ https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 
 ##
 implemented my own CD Spinner with Album Art or CD option, Volume Knob, and Artwork Blur panel.<br><br>
-
 my panels have right click options.<br><br>
 
 Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
