@@ -5,7 +5,10 @@ Dynamic colour scheme based on the cover art of the current playing track/album,
 
 Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br><br>
 Some small custom modifications to the scripts default values<br>
-Includes my own custom made Scripts for SMP 64bit and my custom made buttons for play/stop etc.
+
+Implemented my own CD Spinner with Album Art or CD option(named disc.png or cd.png), Volume Knob, and Artwork Blur panel scripts in SMP 64bit.<br>
+If your disc image has a non-transparent background it will show the whole image, no masking as yet.<br>
+My panels have right click options.<br><br>
 
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p
 
@@ -35,9 +38,6 @@ https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
 <br><br>
 
 ##
-Implemented my own CD Spinner with Album Art or CD option(named disc.png or cd.png), Volume Knob, and Artwork Blur panel.<br>
-If your disc image has a non-transparent background it will show the whole image, no masking as yet.<br>
-My panels have right click options.<br><br>
 
 Includes Various scripts and additions that have been developed by many coders helping the community [Hydrogenaudio Foobar2000 Forum](https://hydrogenaudio.org/index.php?board=28.0)<br>
 
