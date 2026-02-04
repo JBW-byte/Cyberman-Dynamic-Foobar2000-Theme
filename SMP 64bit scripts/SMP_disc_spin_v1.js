@@ -59,7 +59,7 @@ function loadDiscImage(metadb) {
     isDiscImage = false; 
 
     if (!useAlbumArtOnly) {
-        const files = ["\\disc.png", "\\cd.png", "\\vinyl.png", "\\disc.jpg"];
+        const files = ["\\disc.png", "\\cd.png", "\\CD.png", "\\CD.jpg", "\\cd.jpg", "\\disc.jpg", "\\vinyl.jpg", "\\vinyl.png"];
         for (let f of files) {
             if (utils.FileTest(folderPath + f, "e")) { 
                 foundPath = folderPath + f; 
