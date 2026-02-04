@@ -7,7 +7,8 @@ Diffrent layouts and custom spectrum patterns, presets included in the profile f
 Some small custom modifications to the scripts default values<br>
 
 Implemented CD Spinner with Album Art or CD option, Volume Knob, and Artwork Blur panel scripts in SMP 64bit.<br>
-If your disc image has a non-transparent background it will show the whole image, no masking as yet. Named disc, vinyl, cd, CD, .jpg or .png<br>
+If your disc image has a non-transparent background it will show the whole image, no masking as yet. 
+Named disc, vinyl, cd, CD, .jpg or .png<br><br>
 My panels have right click options.<br><br>
 
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p
