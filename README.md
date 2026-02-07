@@ -33,6 +33,7 @@ https://drive.google.com/file/d/1rbt565eTzlPOWeJIfT3RrfoZncBm9rTf/view?usp=shari
 <br>
 Add your media files location on first load, goto File, Prefrences, Media Library, and click +folder to add files location<br>
 <br>
+If you dont have any artwork or a diffrent folder struckture(may try fix this) try this plugin to pull artwok down, https://github.com/jame25/foo_artwork/releases
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br> <br> 
 <br>
 You might need to install these font's to see some icons, .ttf files <br> 
