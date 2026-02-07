@@ -2,9 +2,9 @@
 	      // === Polished Panel Artwork and Trackinfo v1 === \\
 	     // === Blur Artwork + Trackinfo + AI eats code  ==== \\
 
-   // ===================*** Foobar2000 64bit ***================== \\
-  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
- // === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
+  // =================*** Foobar2000 64bit ***================== \\
+ // ====== For Spider Monekey Panel 64bit, author: marc2003 ====== \\
+// === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
 
 window.DefineScript('SMP_64_PanelArt', { author: 'L.E.D.' });
 
@@ -341,3 +341,4 @@ function on_playback_stop(){
 // Init
 // ------------------------------
 load_album_art();
+
