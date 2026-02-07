@@ -1,19 +1,22 @@
-	        // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-	       // ======= SMP 64bit Disc Spin V1 Script ======= \\
-	      // ======= Spins Disc + Artwork + Cover  ========= \\
+	       // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+	      // ======= SMP 64bit Disc Spin V1 Script ======= \\
+	     // ======= Spins Disc + Artwork + Cover  ========= \\
 
-   // ===================*** Foobar2000 64bit ***================== \\
-  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
- // === ==================   ============   ===================== === \\
+  // ===================*** Foobar2000 64bit ***================== \\
+ // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
+// ==== No Working Mask yet, had some performance  issues/bugs  ==== \\
 
 window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
+
+include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 
 const tf_path = fb.TitleFormat("$directory_path(%path%)");
 let img = null;
 let angle = 0;
 let isDiscImage = false; 
-const timerInterval = 30;
-const MAX_IMAGE_SIZE = 256; // Increased for better quality on large panels
+const timerInterval = 50;
+const MAX_IMAGE_SIZE = 256; // Increase for better quality on large panels
 let timerId = null;
 
 const DEFAULT_DISC_PATH = fb.ProfilePath + "skins\\default_disc.png"; 
@@ -68,7 +71,7 @@ function loadDiscImage(metadb) {
     isDiscImage = false; 
 
     if (!useAlbumArtOnly) {
-        const files = ["\\disc.png", "\\cd.png", "\\CD.png", "\\CD.jpg", "\\cd.jpg", "\\disc.jpg", "\\vinyl.jpg", "\\vinyl.png"];
+        const files = ["\\disc.png", "\\cd.png", "\\CD.png", "\\CD.jpg", "\\cd.jpg", "\\media.png", "\\media.jpg", "\\disc.jpg", "\\vinyl.jpg", "\\vinyl.png"];
         for (let f of files) {
             if (utils.FileTest(folderPath + f, "e")) { 
                 foundPath = folderPath + f; 
