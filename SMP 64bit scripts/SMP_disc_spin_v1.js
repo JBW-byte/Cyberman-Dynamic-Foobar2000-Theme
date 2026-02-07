@@ -1,4 +1,13 @@
-// ================= AUTHOR L.E.D. AI ASSISTED (HYBRID + MENU) =================
+	        // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+	       // ======= SMP 64bit Disc Spin V1 Script ======= \\
+	      // ======= Spins Disc + Artwork + Cover  ========= \\
+
+   // ===================*** Foobar2000 64bit ***================== \\
+  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
+ // === ==================   ============   ===================== === \\
+
+window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
+
 const tf_path = fb.TitleFormat("$directory_path(%path%)");
 let img = null;
 let angle = 0;
