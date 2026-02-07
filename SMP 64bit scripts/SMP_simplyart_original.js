@@ -1,4 +1,6 @@
-// ================= AUTHOR L.E.D. AI ASSISTED =================
+    // ================= AUTHOR L.E.D. AI ASSISTED =================\\
+  // ============= Original Simple Artwork and Trackinfo =============\\
+// =========== Archive of the Original Script Before I Move On =========\\
 
 window.DefineScript('StackBlur+Panel', { author: 'marc2003' });
 
@@ -269,3 +271,4 @@ function on_mouse_rbtn_up(x, y) {
     window.Repaint();
     return true;
 }
+
