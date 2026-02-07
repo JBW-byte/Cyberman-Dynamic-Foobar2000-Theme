@@ -105,7 +105,7 @@ function build_blur() {
 }
 
 // ------------------------------
-// Album art load (top cover removed)
+// Album art load
 // ------------------------------
 function load_album_art() {
     update_text();
@@ -178,7 +178,6 @@ function on_paint(gr) {
         ? Math.ceil(gr.CalcTextHeight(cur_extra, font_extra, ww))
         : 0;
 
-    // Total overlay height including tighter gaps
     var text_total_h =
         title_h +
         gap_title_artist +
@@ -215,7 +214,7 @@ function on_paint(gr) {
 }
 
 // ------------------------------
-// Mouse
+// Mouse wheel
 // ------------------------------
 function on_mouse_wheel(step) {
     if (!blur_enabled || !src_img) return;
@@ -234,7 +233,6 @@ function on_mouse_rbtn_up(x, y) {
     var s_dark = window.CreatePopupMenu();
     var s_bord = window.CreatePopupMenu();
 
-    // Main menu options (top cover removed)
     m.AppendMenuItem(0,1,'Enable blur'); m.CheckMenuItem(1,blur_enabled);
     m.AppendMenuItem(0,2,'Show text background'); m.CheckMenuItem(2,text_bg_enabled);
     m.AppendMenuItem(0,3,'Text shadow'); m.CheckMenuItem(3,text_shadow_enabled);
@@ -269,14 +267,13 @@ function on_mouse_rbtn_up(x, y) {
     m.AppendMenuItem(0,2001,'Set Artist Font Size...');
     m.AppendMenuItem(0,2002,'Set Extra Font Size...');
 
-    // Layout options
+    // Layout
     m.AppendMenuSeparator();
     m.AppendMenuItem(0,10,'Layout: Center');
     m.AppendMenuItem(0,11,'Layout: Bottom');
     m.AppendMenuItem(0,12,'Layout: Minimal');
     m.CheckMenuRadioItem(10,12,10+layout);
 
-    // Track selection
     var r = m.TrackPopupMenu(x,y);
     if(r>0){
         if(r===1){ blur_enabled=!blur_enabled; window.SetProperty('blur_enabled',blur_enabled); }
@@ -319,7 +316,6 @@ function on_mouse_rbtn_up(x, y) {
 
     return true;
 }
-
 
 // ------------------------------
 // Playback
