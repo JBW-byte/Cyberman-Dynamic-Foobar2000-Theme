@@ -25,7 +25,7 @@ rebuild_fonts();
 // ------------------------------
 // Line spacing control (tighter title → artist gap)
 // ------------------------------
-var gap_title_artist = 2;   // <<<<<< tighter spacing
+var gap_title_artist = 2;   // tighter spacing
 var gap_artist_extra = 6;
 var overlay_padding  = 6;
 
@@ -46,7 +46,6 @@ var text_shadow_enabled = window.GetProperty('text_shadow_enabled', true);
 var layout          = window.GetProperty('layout', 0);
 var extra_info_enabled = window.GetProperty('extra_info_enabled', true);
 var darken_value    = window.GetProperty('darken_value', 20);
-var show_top_art    = window.GetProperty('show_top_art', false);
 var border_size     = window.GetProperty('border_size', 0);
 var border_color    = window.GetProperty('border_color', RGB(255,255,255));
 
@@ -106,7 +105,7 @@ function build_blur() {
 }
 
 // ------------------------------
-// Album art load
+// Album art load (top cover removed)
 // ------------------------------
 function load_album_art() {
     update_text();
@@ -235,13 +234,14 @@ function on_mouse_rbtn_up(x, y) {
     var s_dark = window.CreatePopupMenu();
     var s_bord = window.CreatePopupMenu();
 
+    // Main menu options (top cover removed)
     m.AppendMenuItem(0,1,'Enable blur'); m.CheckMenuItem(1,blur_enabled);
     m.AppendMenuItem(0,2,'Show text background'); m.CheckMenuItem(2,text_bg_enabled);
     m.AppendMenuItem(0,3,'Text shadow'); m.CheckMenuItem(3,text_shadow_enabled);
     m.AppendMenuItem(0,4,'Show extra track info'); m.CheckMenuItem(4,extra_info_enabled);
-    m.AppendMenuItem(0,5,'Show top cover'); m.CheckMenuItem(5,show_top_art);
     m.AppendMenuSeparator();
 
+    // Blur submenu
     for (var i=0;i<=10;i++){
         var v=i*20;
         s_blur.AppendMenuItem(0,40+i,'Radius: '+v);
@@ -250,6 +250,7 @@ function on_mouse_rbtn_up(x, y) {
     s_blur.AppendMenuItem(0,51,'Max: 254');
     s_blur.AppendTo(m,0,'Blur Settings');
 
+    // Darken submenu
     for (var d=0;d<=5;d++){
         var dv=d*10;
         s_dark.AppendMenuItem(0,70+d,'Level: '+dv+'%');
@@ -257,28 +258,31 @@ function on_mouse_rbtn_up(x, y) {
     }
     s_dark.AppendTo(m,0,'Darken Background');
 
+    // Border submenu
     s_bord.AppendMenuItem(0,1001,'Set Border Size...');
     s_bord.AppendMenuItem(0,101,'Change Color...');
     s_bord.AppendTo(m,0,'Border Appearance');
 
+    // Font sizes
     m.AppendMenuSeparator();
     m.AppendMenuItem(0,2000,'Set Title Font Size...');
     m.AppendMenuItem(0,2001,'Set Artist Font Size...');
     m.AppendMenuItem(0,2002,'Set Extra Font Size...');
 
+    // Layout options
     m.AppendMenuSeparator();
     m.AppendMenuItem(0,10,'Layout: Center');
     m.AppendMenuItem(0,11,'Layout: Bottom');
     m.AppendMenuItem(0,12,'Layout: Minimal');
     m.CheckMenuRadioItem(10,12,10+layout);
 
-    var r=m.TrackPopupMenu(x,y);
+    // Track selection
+    var r = m.TrackPopupMenu(x,y);
     if(r>0){
         if(r===1){ blur_enabled=!blur_enabled; window.SetProperty('blur_enabled',blur_enabled); }
         else if(r===2){ text_bg_enabled=!text_bg_enabled; window.SetProperty('text_bg_enabled',text_bg_enabled); }
         else if(r===3){ text_shadow_enabled=!text_shadow_enabled; window.SetProperty('text_shadow_enabled',text_shadow_enabled); }
         else if(r===4){ extra_info_enabled=!extra_info_enabled; window.SetProperty('extra_info_enabled',extra_info_enabled); update_text(); }
-        else if(r===5){ show_top_art=!show_top_art; window.SetProperty('show_top_art',show_top_art); }
         else if(r>=40&&r<=50){ radius=(r-40)*20; window.SetProperty('blur_radius',radius); }
         else if(r===51){ radius=254; window.SetProperty('blur_radius',radius); }
         else if(r>=70&&r<=75){ darken_value=(r-70)*10; window.SetProperty('darken_value',darken_value); }
@@ -312,8 +316,10 @@ function on_mouse_rbtn_up(x, y) {
         build_blur();
         window.Repaint();
     }
+
     return true;
 }
+
 
 // ------------------------------
 // Playback
