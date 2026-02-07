@@ -1,17 +1,33 @@
 // ================= AUTHOR L.E.D. AI ASSISTED =================
-
 window.DefineScript('StackBlur+Panel', { author: 'marc2003' });
 
 include('docs/Helpers.js');
 
-function RGB(r,g,b) { return 0xFF000000 | (r<<16) | (g<<8) | b; }
-function RGBA(r,g,b,a) { return ((a<<24) | (r<<16) | (g<<8) | b); }
+function RGB(r, g, b) { return 0xFF000000 | (r << 16) | (g << 8) | b; }
+function RGBA(r, g, b, a) { return ((a << 24) | (r << 16) | (g << 8) | b); }
 
 // ------------------------------
-// Fonts
+// Font sizes (persistent)
 // ------------------------------
-var font_title  = gdi.Font('Segoe UI', 24, 1);
-var font_artist = gdi.Font('Segoe UI', 16);
+var title_font_size  = window.GetProperty('title_font_size', 24);
+var artist_font_size = window.GetProperty('artist_font_size', 16);
+var extra_font_size  = window.GetProperty('extra_font_size', 14);
+
+var font_title, font_artist, font_extra;
+
+function rebuild_fonts() {
+    font_title  = gdi.Font('Segoe UI', title_font_size, 1);
+    font_artist = gdi.Font('Segoe UI', artist_font_size, 0);
+    font_extra  = gdi.Font('Segoe UI', extra_font_size, 0);
+}
+rebuild_fonts();
+
+// ------------------------------
+// Line spacing control (tighter title → artist gap)
+// ------------------------------
+var gap_title_artist = 2;   // <<<<<< tighter spacing
+var gap_artist_extra = 6;
+var overlay_padding  = 6;
 
 // ------------------------------
 // Globals / Settings
@@ -19,253 +35,298 @@ var font_artist = gdi.Font('Segoe UI', 16);
 var src_img  = null;
 var blur_img = null;
 
-var radius   = window.GetProperty('blur_radius', 20);
+var cur_title = '';
+var cur_artist = '';
+var cur_extra = '';
+
+var radius          = window.GetProperty('blur_radius', 20);
 var blur_enabled    = window.GetProperty('blur_enabled', true);
 var text_bg_enabled = window.GetProperty('text_bg_enabled', true);
 var text_shadow_enabled = window.GetProperty('text_shadow_enabled', true);
-var layout          = window.GetProperty('layout', 0); // 0=center, 1=bottom, 2=minimal
+var layout          = window.GetProperty('layout', 0);
 var extra_info_enabled = window.GetProperty('extra_info_enabled', true);
-var darken_value = window.GetProperty('darken_value', 20); // 0-50%
-var show_top_art = window.GetProperty('show_top_art', false);
+var darken_value    = window.GetProperty('darken_value', 20);
+var show_top_art    = window.GetProperty('show_top_art', false);
+var border_size     = window.GetProperty('border_size', 0);
+var border_color    = window.GetProperty('border_color', RGB(255,255,255));
 
-var ww = 0;
-var wh = 0;
-
-// Fade animation
+var ww = 0, wh = 0;
 var alpha = 255;
 var fading = false;
 
 // ------------------------------
-// Album Art / Blur
+// Text update
 // ------------------------------
-function build_blur() {
-    if (!src_img || !blur_enabled) {
-        blur_img = null;
+function update_text() {
+    var metadb = fb.GetNowPlaying();
+    if (!metadb) {
+        cur_title = 'No track playing';
+        cur_artist = '';
+        cur_extra = '';
         return;
     }
-    blur_img = src_img.Clone(0, 0, src_img.Width, src_img.Height);
-    blur_img.StackBlur(radius);
+
+    cur_title  = fb.TitleFormat('%title%').Eval();
+    cur_artist = fb.TitleFormat('%artist%').Eval();
+    cur_extra  = '';
+
+    if (extra_info_enabled) {
+        var a = fb.TitleFormat('%album%').Eval();
+        var y = fb.TitleFormat('%date%').Eval();
+        var l = fb.TitleFormat('%length%').Eval();
+        if (a) cur_extra += a;
+        if (y) cur_extra += (cur_extra ? ' | ' : '') + y;
+        if (l) cur_extra += (cur_extra ? ' | ' : '') + l;
+    }
 }
 
+// ------------------------------
+// Blur builder (safe)
+// ------------------------------
+function build_blur() {
+    if (blur_img && blur_img.CreatedByUs) {
+        blur_img.Dispose();
+        blur_img = null;
+    }
+
+    if (!src_img || !blur_enabled || !ww || !wh) return;
+
+    try {
+        blur_img = gdi.CreateImage(ww, wh);
+        blur_img.CreatedByUs = true;
+        var g = blur_img.GetGraphics();
+        g.DrawImage(src_img, 0, 0, ww, wh, 0, 0, src_img.Width, src_img.Height);
+        g.ReleaseGraphics();
+        blur_img.StackBlur(radius);
+    } catch (e) {
+        blur_img = src_img.Clone(0, 0, src_img.Width, src_img.Height);
+        blur_img.CreatedByUs = false;
+        blur_img.StackBlur(radius);
+    }
+}
+
+// ------------------------------
+// Album art load
+// ------------------------------
 function load_album_art() {
+    update_text();
+
+    if (blur_img && blur_img.CreatedByUs) {
+        blur_img.Dispose();
+        blur_img = null;
+    }
+
+    src_img = null;
     var metadb = fb.GetNowPlaying();
-    if (!metadb) return;
-
-    var art = utils.GetAlbumArtV2(metadb, 0);
-    if (!art) return;
-
-    src_img = art;
-    build_blur();
-
-    alpha = 0;
-    fading = true;
-
+    if (metadb) {
+        var art = utils.GetAlbumArtV2(metadb, 0);
+        if (art) {
+            src_img = art;
+            build_blur();
+            alpha = 0;
+            fading = true;
+        }
+    }
     window.Repaint();
 }
 
 // ------------------------------
-// Panel callbacks
+// Callbacks
 // ------------------------------
 function on_size(w, h) {
-    ww = w;
-    wh = h;
+    ww = w; wh = h;
+    build_blur();
 }
 
+// ------------------------------
+// Paint
+// ------------------------------
 function on_paint(gr) {
     if (!ww || !wh) return;
 
-    // Fade animation
     if (fading) {
         alpha += 20;
-        if (alpha >= 255) {
-            alpha = 255;
-            fading = false;
-        }
-        window.Repaint();
+        if (alpha >= 255) { alpha = 255; fading = false; }
+        else setTimeout(() => window.Repaint(), 30);
     }
 
-    // ------------------------------
     // Background
-    // ------------------------------
     if (src_img) {
-        var bg = blur_enabled && blur_img ? blur_img : src_img;
+        var bg = (blur_enabled && blur_img) ? blur_img : src_img;
         gr.DrawImage(bg, 0, 0, ww, wh, 0, 0, bg.Width, bg.Height, 0, alpha);
-
         if (darken_value > 0) {
             var op = Math.floor(darken_value / 100 * 255);
-            gr.FillSolidRect(0, 0, ww, wh, (op << 24));
+            gr.FillSolidRect(0, 0, ww, wh, RGBA(0,0,0,op));
         }
     } else {
         gr.FillSolidRect(0, 0, ww, wh, RGB(25,25,25));
     }
 
-    // ------------------------------
-    // Track info
-    // ------------------------------
-    var title  = fb.TitleFormat('%title%').Eval();
-    var artist = fb.TitleFormat('%artist%').Eval();
-
-    if (!title && !artist) {
-        title = 'No track playing';
-        artist = '';
+    // Border
+    if (border_size > 0) {
+        var s = border_size / 2;
+        gr.DrawRect(s, s, ww - border_size, wh - border_size, border_size, border_color);
     }
 
-    var extra_info_text = '';
-    if (extra_info_enabled) {
-        var album = fb.TitleFormat('%album%').Eval();
-        var year = fb.TitleFormat('%date%').Eval();
-        var length = fb.TitleFormat('%length%').Eval();
-        if (album) extra_info_text += album;
-        if (year) extra_info_text += (extra_info_text ? ' | ' : '') + year;
-        if (length) extra_info_text += (extra_info_text ? ' | ' : '') + length;
-    }
+    // ---- Text layout ----
+    var flags_center = 0x0001 | 0x0040;
+    var flags_wrap   = flags_center | 0x0010;
+    var flags_clip   = flags_center | 0x0008;
 
-    var title_h = 34;
-    var artist_h = 28;
-    var extra_h = (extra_info_enabled && extra_info_text) ? 20 : 0;
-    var text_total_h = title_h + artist_h + extra_h;
-    var overlay_h = text_total_h + 10;
+    var title_h  = Math.ceil(gr.CalcTextHeight(cur_title || 'A', font_title, ww));
+    var artist_h = Math.ceil(gr.CalcTextHeight(cur_artist || 'A', font_artist, ww));
+    var extra_h  = (extra_info_enabled && cur_extra)
+        ? Math.ceil(gr.CalcTextHeight(cur_extra, font_extra, ww))
+        : 0;
 
-    var cy;
-    if (layout === 0) cy = Math.floor((wh - overlay_h) / 2);
-    else if (layout === 1) cy = wh - overlay_h - 20;
-    else cy = 20;
+    // Total overlay height including tighter gaps
+    var text_total_h =
+        title_h +
+        gap_title_artist +
+        artist_h +
+        (extra_h ? gap_artist_extra + extra_h : 0);
 
-    // ------------------------------
-    // Top album art (scaled)
-    // ------------------------------
-    var top_margin = 10;
+    var overlay_h = text_total_h + overlay_padding * 2;
 
-    if (show_top_art && src_img) {
-        var available_h = cy - top_margin * 2;
-        if (available_h > 20) {
-            var aspect = src_img.Width / src_img.Height;
+    var cy = (layout === 0) ? Math.floor((wh - overlay_h) / 2)
+           : (layout === 1) ? wh - overlay_h - 20
+           : 20;
 
-            var art_w = ww - top_margin * 2;
-            var art_h = art_w / aspect;
-
-            if (art_h > available_h) {
-                art_h = available_h;
-                art_w = art_h * aspect;
-            }
-
-            var x = Math.floor((ww - art_w) / 2);
-            var y = top_margin;
-
-            gr.DrawImage(src_img, x, y, art_w, art_h, 0, 0, src_img.Width, src_img.Height);
-            cy = Math.max(cy, y + art_h + top_margin);
-        }
-    }
-
-    // ------------------------------
-    // Text background
-    // ------------------------------
-    if (text_bg_enabled) {
+    if (text_bg_enabled)
         gr.FillSolidRect(0, cy, ww, overlay_h, 0xAA000000);
-    }
 
-    var title_y = cy + Math.floor((overlay_h - text_total_h) / 2);
-    var artist_y = title_y + title_h;
-    var extra_y = artist_y + artist_h;
+    var ty = cy + overlay_padding;
+    var ay = ty + title_h + gap_title_artist;
+    var ey = ay + artist_h + gap_artist_extra;
 
-    // ------------------------------
-    // Text shadow
-    // ------------------------------
+    // Shadow
     if (text_shadow_enabled) {
-        var sc = 0x88000000;
-        var so = 2;
-        gr.GdiDrawText(title, font_title, sc, so, title_y + so, ww, title_h, 0x0001 | 0x0040);
-        gr.GdiDrawText(artist, font_artist, sc, so, artist_y + so, ww, artist_h, 0x0001 | 0x0040);
+        var sc = 0x88000000, d = 2;
+        gr.GdiDrawText(cur_title,  font_title,  sc, d, ty+d, ww, title_h,  flags_wrap);
+        gr.GdiDrawText(cur_artist, font_artist, sc, d, ay+d, ww, artist_h, flags_clip);
         if (extra_h)
-            gr.GdiDrawText(extra_info_text, font_artist, sc, so, extra_y + so, ww, extra_h, 0x0001 | 0x0040);
+            gr.GdiDrawText(cur_extra, font_extra, sc, d, ey+d, ww, extra_h, flags_clip);
     }
 
-    // ------------------------------
     // Text
-    // ------------------------------
-    gr.GdiDrawText(title, font_title, RGB(255,255,255), 0, title_y, ww, title_h, 0x0001 | 0x0040);
-    gr.GdiDrawText(artist, font_artist, RGB(200,200,200), 0, artist_y, ww, artist_h, 0x0001 | 0x0040);
+    gr.GdiDrawText(cur_title,  font_title,  RGB(255,255,255), 0, ty, ww, title_h,  flags_wrap);
+    gr.GdiDrawText(cur_artist, font_artist, RGB(200,200,200), 0, ay, ww, artist_h, flags_clip);
     if (extra_h)
-        gr.GdiDrawText(extra_info_text, font_artist, RGB(180,180,180), 0, extra_y, ww, extra_h, 0x0001 | 0x0040);
+        gr.GdiDrawText(cur_extra, font_extra, RGB(180,180,180), 0, ey, ww, extra_h, flags_clip);
 }
 
 // ------------------------------
-// Mouse wheel blur
+// Mouse
 // ------------------------------
 function on_mouse_wheel(step) {
     if (!blur_enabled || !src_img) return;
-    radius += step * 5;
-    radius = Math.max(2, Math.min(254, radius));
+    radius = Math.max(2, Math.min(254, radius + step * 5));
     window.SetProperty('blur_radius', radius);
     build_blur();
     window.Repaint();
+}
+
+// ------------------------------
+// Right-click menu
+// ------------------------------
+function on_mouse_rbtn_up(x, y) {
+    var m = window.CreatePopupMenu();
+    var s_blur = window.CreatePopupMenu();
+    var s_dark = window.CreatePopupMenu();
+    var s_bord = window.CreatePopupMenu();
+
+    m.AppendMenuItem(0,1,'Enable blur'); m.CheckMenuItem(1,blur_enabled);
+    m.AppendMenuItem(0,2,'Show text background'); m.CheckMenuItem(2,text_bg_enabled);
+    m.AppendMenuItem(0,3,'Text shadow'); m.CheckMenuItem(3,text_shadow_enabled);
+    m.AppendMenuItem(0,4,'Show extra track info'); m.CheckMenuItem(4,extra_info_enabled);
+    m.AppendMenuItem(0,5,'Show top cover'); m.CheckMenuItem(5,show_top_art);
+    m.AppendMenuSeparator();
+
+    for (var i=0;i<=10;i++){
+        var v=i*20;
+        s_blur.AppendMenuItem(0,40+i,'Radius: '+v);
+        if(radius===v) s_blur.CheckMenuItem(40+i,true);
+    }
+    s_blur.AppendMenuItem(0,51,'Max: 254');
+    s_blur.AppendTo(m,0,'Blur Settings');
+
+    for (var d=0;d<=5;d++){
+        var dv=d*10;
+        s_dark.AppendMenuItem(0,70+d,'Level: '+dv+'%');
+        if(darken_value===dv) s_dark.CheckMenuItem(70+d,true);
+    }
+    s_dark.AppendTo(m,0,'Darken Background');
+
+    s_bord.AppendMenuItem(0,1001,'Set Border Size...');
+    s_bord.AppendMenuItem(0,101,'Change Color...');
+    s_bord.AppendTo(m,0,'Border Appearance');
+
+    m.AppendMenuSeparator();
+    m.AppendMenuItem(0,2000,'Set Title Font Size...');
+    m.AppendMenuItem(0,2001,'Set Artist Font Size...');
+    m.AppendMenuItem(0,2002,'Set Extra Font Size...');
+
+    m.AppendMenuSeparator();
+    m.AppendMenuItem(0,10,'Layout: Center');
+    m.AppendMenuItem(0,11,'Layout: Bottom');
+    m.AppendMenuItem(0,12,'Layout: Minimal');
+    m.CheckMenuRadioItem(10,12,10+layout);
+
+    var r=m.TrackPopupMenu(x,y);
+    if(r>0){
+        if(r===1){ blur_enabled=!blur_enabled; window.SetProperty('blur_enabled',blur_enabled); }
+        else if(r===2){ text_bg_enabled=!text_bg_enabled; window.SetProperty('text_bg_enabled',text_bg_enabled); }
+        else if(r===3){ text_shadow_enabled=!text_shadow_enabled; window.SetProperty('text_shadow_enabled',text_shadow_enabled); }
+        else if(r===4){ extra_info_enabled=!extra_info_enabled; window.SetProperty('extra_info_enabled',extra_info_enabled); update_text(); }
+        else if(r===5){ show_top_art=!show_top_art; window.SetProperty('show_top_art',show_top_art); }
+        else if(r>=40&&r<=50){ radius=(r-40)*20; window.SetProperty('blur_radius',radius); }
+        else if(r===51){ radius=254; window.SetProperty('blur_radius',radius); }
+        else if(r>=70&&r<=75){ darken_value=(r-70)*10; window.SetProperty('darken_value',darken_value); }
+        else if(r===1001){
+            var i=utils.InputBox(window.ID,'Border Size','Enter border size (0–50 px):',border_size.toString(),false);
+            var v=parseInt(i);
+            if(!isNaN(v)){ border_size=Math.max(0,Math.min(50,v)); window.SetProperty('border_size',border_size); }
+        }
+        else if(r===101){
+            var c=utils.ColourPicker(window.ID,border_color);
+            if(c!==border_color){ border_color=c; window.SetProperty('border_color',border_color); }
+        }
+        else if(r>=2000&&r<=2002){
+            var labels=['Title','Artist','Extra'];
+            var sizes=[title_font_size,artist_font_size,extra_font_size];
+            var idx=r-2000;
+            var v=utils.InputBox(window.ID,'Font Size','Set '+labels[idx]+' Font Size:',sizes[idx].toString(),false);
+            var fs=parseInt(v);
+            if(!isNaN(fs)&&fs>6&&fs<200){
+                if(idx===0) title_font_size=fs;
+                if(idx===1) artist_font_size=fs;
+                if(idx===2) extra_font_size=fs;
+                window.SetProperty('title_font_size',title_font_size);
+                window.SetProperty('artist_font_size',artist_font_size);
+                window.SetProperty('extra_font_size',extra_font_size);
+                rebuild_fonts();
+            }
+        }
+        else if(r>=10&&r<=12){ layout=r-10; window.SetProperty('layout',layout); }
+
+        build_blur();
+        window.Repaint();
+    }
+    return true;
 }
 
 // ------------------------------
 // Playback
 // ------------------------------
-function on_playback_new_track() { load_album_art(); }
-function on_playback_stop() { window.Repaint(); }
-
-// ------------------------------
-// Context menu
-// ------------------------------
-function on_mouse_rbtn_up(x, y) {
-    var m = window.CreatePopupMenu();
-
-    m.AppendMenuItem(0, 1, 'Enable blur');              m.CheckMenuItem(1, blur_enabled);
-    m.AppendMenuItem(0, 2, 'Show text background');    m.CheckMenuItem(2, text_bg_enabled);
-    m.AppendMenuItem(0, 3, 'Text shadow');             m.CheckMenuItem(3, text_shadow_enabled);
-    m.AppendMenuItem(0, 4, 'Show extra track info');   m.CheckMenuItem(4, extra_info_enabled);
-    m.AppendMenuItem(0, 5, 'Show top cover');          m.CheckMenuItem(5, show_top_art);
-
-    m.AppendMenuSeparator();
-
-    m.AppendMenuItem(0, 10, 'Layout: Center');
-    m.AppendMenuItem(0, 11, 'Layout: Bottom');
-    m.AppendMenuItem(0, 12, 'Layout: Minimal');
-    m.CheckMenuRadioItem(10, 12, 10 + layout);
-
-    m.AppendMenuSeparator();
-
-    for (var i = 0; i <= 10; i++) {
-        var v = i * 20;
-        m.AppendMenuItem(0, 40 + i, 'Blur: ' + v);
-        if (radius === v) m.CheckMenuItem(40 + i, true);
-    }
-    m.AppendMenuItem(0, 51, 'Blur: 254');
-    if (radius === 254) m.CheckMenuItem(51, true);
-
-    m.AppendMenuSeparator();
-
-    for (var d = 0; d <= 5; d++) {
-        var dv = d * 10;
-        m.AppendMenuItem(0, 70 + d, 'Darken: ' + dv + '%');
-        if (darken_value === dv) m.CheckMenuItem(70 + d, true);
-    }
-
-    var r = m.TrackPopupMenu(x, y);
-
-    if (r === 1) blur_enabled = !blur_enabled;
-    else if (r === 2) text_bg_enabled = !text_bg_enabled;
-    else if (r === 3) text_shadow_enabled = !text_shadow_enabled;
-    else if (r === 4) extra_info_enabled = !extra_info_enabled;
-    else if (r === 5) show_top_art = !show_top_art;
-    else if (r >= 10 && r <= 12) layout = r - 10;
-    else if (r >= 40 && r <= 50) radius = (r - 40) * 20;
-    else if (r === 51) radius = 254;
-    else if (r >= 70 && r <= 75) darken_value = (r - 70) * 10;
-
-    window.SetProperty('blur_enabled', blur_enabled);
-    window.SetProperty('text_bg_enabled', text_bg_enabled);
-    window.SetProperty('text_shadow_enabled', text_shadow_enabled);
-    window.SetProperty('extra_info_enabled', extra_info_enabled);
-    window.SetProperty('show_top_art', show_top_art);
-    window.SetProperty('layout', layout);
-    window.SetProperty('blur_radius', radius);
-    window.SetProperty('darken_value', darken_value);
-
-    build_blur();
+function on_playback_new_track(){ load_album_art(); }
+function on_playback_stop(){
+    if(blur_img&&blur_img.CreatedByUs){ blur_img.Dispose(); blur_img=null; }
+    src_img=null;
+    update_text();
     window.Repaint();
-    return true;
 }
+
+// ------------------------------
+// Init
+// ------------------------------
+load_album_art();
