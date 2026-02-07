@@ -138,7 +138,7 @@ function on_size(w, h) {
 }
 
 // ------------------------------
-// Paint
+// Paint (with cleaned vertical overlay)
 // ------------------------------
 function on_paint(gr) {
     if (!ww || !wh) return;
@@ -178,6 +178,7 @@ function on_paint(gr) {
         ? Math.ceil(gr.CalcTextHeight(cur_extra, font_extra, ww))
         : 0;
 
+    // Total overlay height including tighter gaps
     var text_total_h =
         title_h +
         gap_title_artist +
@@ -186,9 +187,11 @@ function on_paint(gr) {
 
     var overlay_h = text_total_h + overlay_padding * 2;
 
-    var cy = (layout === 0) ? Math.floor((wh - overlay_h) / 2)
-           : (layout === 1) ? wh - overlay_h - 20
-           : 20;
+    // Vertical positioning
+    var cy;
+    if (layout === 0) cy = Math.floor((wh - overlay_h) / 2);     // Center
+    else if (layout === 1) cy = wh - overlay_h - 20;             // Bottom
+    else cy = 20;                                                // Minimal top
 
     if (text_bg_enabled)
         gr.FillSolidRect(0, cy, ww, overlay_h, 0xAA000000);
@@ -212,6 +215,7 @@ function on_paint(gr) {
     if (extra_h)
         gr.GdiDrawText(cur_extra, font_extra, RGB(180,180,180), 0, ey, ww, extra_h, flags_clip);
 }
+
 
 // ------------------------------
 // Mouse wheel
