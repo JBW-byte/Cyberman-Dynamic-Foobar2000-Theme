@@ -1,25 +1,28 @@
-	       // ======== AUTHOR L.E.D. AI ASSISTED ========= \\
-	      // ====== SMP 64bit Volume Knob V1 Script ======= \\
-	     // ====== Volume Knob left click up or down  ====== \\
-
-  // ===================*** Foobar2000 64bit ***================== \\
- // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
-// ==== ================  =================  =================  ==== \\
+// ======== AUTHOR L.E.D. (AI-assisted) ==================
+// ====== SMP 64bit Volume Knob V1.1 (Optimized) =========
+// ====== Spider Monkey Panel 64bit =====================
 
 window.DefineScript('SMP 64bit Volume Knob', { author: 'L.E.D.' });
 
-// ==================== CONFIG =========================
+// =====================================================
+// CONFIG
+// =====================================================
 var CONFIG = {
     DRAG_SCALE: 0.5,
     WHEEL_STEP: 2,
-    ANGLE_SPEED: 0.2,
-    DRAG_EASING: 0.3,
     SNAP_ENABLED: true,
     SNAP_TOLERANCE_DB: 0.5,
     PADDING: 20
 };
 
-// -------------------- COLOR --------------------------
+// --- Motion tuning ---
+var DRAG_FOLLOW_SPEED = 1.0;   // instant follow while dragging
+var RELEASE_EASING    = 0.18;  // smooth settle after release
+var ANGLE_EPSILON     = 0.01;  // animation stop threshold
+
+// =====================================================
+// COLORS
+// =====================================================
 function RGB(r,g,b){ return 0xFF000000 | (r<<16) | (g<<8) | b; }
 function RGBA(r,g,b,a){ return (a<<24)|(r<<16)|(g<<8)|b; }
 
@@ -36,26 +39,31 @@ var THEMES = [
     { name:"Gold Brass",   knob:RGB(95,85,50), inner:RGB(70,60,35), tick:RGB(230,210,150), marker:RGB(255,235,180) },
     { name:"Neon Pink",    knob:RGB(90,50,70), inner:RGB(65,35,50), tick:RGB(230,150,200), marker:RGB(255,170,220) }
 ];
-
 var currentThemeId = window.GetProperty("VolumeKnob.Theme", 0);
 
-// -------------------- SWEEP SETTINGS ----------------
+// =====================================================
+// SWEEP / GEOMETRY
+// =====================================================
 var ANGLE_MIN = 120;
 var ANGLE_MAX = 420;
 var SWEEP_TOTAL = ANGLE_MAX - ANGLE_MIN;
-var SWEEP_HALF = SWEEP_TOTAL / 2;
-var TICK_COUNT = 21;
+var SWEEP_HALF  = SWEEP_TOTAL / 2;
+var TICK_COUNT  = 21;
 var ROTATION_OFFSET = -270;
 var DEG2RAD = Math.PI / 180;
 
-// -------------------- INTERNAL -----------------------
+// =====================================================
+// INTERNAL STATE
+// =====================================================
 var knobImg = null;
 var dragging = false;
 var lastY = 0;
+
 var uiVolume = 50;
 var currentAngle = 0;
 var targetAngle = 0;
 var dragTargetAngle = 0;
+
 var CURSOR_ARROW = 32512;
 var CURSOR_HAND  = 32649;
 
@@ -64,18 +72,21 @@ var CURSOR_HAND  = 32649;
 // =====================================================
 function on_init(){
     try {
-        knobImg = gdi.Image(window.ScriptInfo.Path.replace(/[^\\]+$/, "") + "knob.png");
+        knobImg = gdi.Image(
+            window.ScriptInfo.Path.replace(/[^\\]+$/, "") + "knob.png"
+        );
     } catch(e){}
+
     syncFromFoobar();
 }
 
 // =====================================================
-// VOLUME CURVE (CORRECTED)
+// VOLUME CURVE
 // =====================================================
 function uiVolumeToFbVolume(v){
-    if (v <= 25)  return -100 + (v / 25) * 80;       // -100 → -20
-    if (v <= 50)  return -20 + ((v - 25) / 25) * 11.5; // -20 → -8.5
-    return -8.5 + ((v - 50) / 50) * 8.5;            // -8.5 → 0
+    if (v <= 25) return -100 + (v / 25) * 80;       // -100 → -20
+    if (v <= 50) return -20 + ((v - 25) / 25) * 11.5; // -20 → -8.5
+    return -8.5 + ((v - 50) / 50) * 8.5;           // -8.5 → 0
 }
 
 function fbVolumeToUiVolume(db){
@@ -110,7 +121,9 @@ function syncFromFoobar(){
     window.Repaint();
 }
 
-function on_volume_change(){ syncFromFoobar(); }
+function on_volume_change(){
+    if (!dragging) syncFromFoobar();
+}
 
 // =====================================================
 // DRAW
@@ -120,72 +133,70 @@ function on_paint(gr){
     if (!w || !h) return;
 
     var theme = THEMES[currentThemeId];
-    var cx = w/2, cy = h/2;
-    var size = Math.min(w,h) - CONFIG.PADDING*2;
-    var x = cx - size/2, y = cy - size/2;
+    var cx = w / 2, cy = h / 2;
+    var size = Math.min(w, h) - CONFIG.PADDING * 2;
+    var x = cx - size / 2, y = cy - size / 2;
 
-    gr.FillEllipse(x,y,size,size,theme.knob);
+    gr.FillEllipse(x, y, size, size, theme.knob);
 
     if (knobImg)
-        gr.DrawImage(knobImg,x,y,size,size,0,0,knobImg.Width,knobImg.Height);
+        gr.DrawImage(knobImg, x, y, size, size, 0, 0, knobImg.Width, knobImg.Height);
 
-    var inner = size*0.92;
-    gr.FillEllipse(cx-inner/2,cy-inner/2,inner,inner,theme.inner);
+    var inner = size * 0.92;
+    gr.FillEllipse(cx - inner/2, cy - inner/2, inner, inner, theme.inner);
 
-    var radius = size*0.5, tickLen = size*0.04;
-    for (var i=0;i<TICK_COUNT;i++){
-        var a=(ANGLE_MIN+i/(TICK_COUNT-1)*SWEEP_TOTAL+ROTATION_OFFSET)*DEG2RAD;
-        var sa=Math.sin(a), ca=Math.cos(a);
+    var radius = size * 0.5;
+    var tickLen = size * 0.04;
+
+    for (var i = 0; i < TICK_COUNT; i++){
+        var a = (ANGLE_MIN + i/(TICK_COUNT-1) * SWEEP_TOTAL + ROTATION_OFFSET) * DEG2RAD;
+        var sa = Math.sin(a), ca = Math.cos(a);
         gr.DrawLine(
-            cx+sa*(radius-tickLen), cy-ca*(radius-tickLen),
-            cx+sa*radius,          cy-ca*radius,
-            2, theme.tick
+            cx + sa * (radius - tickLen),
+            cy - ca * (radius - tickLen),
+            cx + sa * radius,
+            cy - ca * radius,
+            2,
+            theme.tick
         );
     }
 
-    // Smooth interpolation
+    // --- Angle interpolation ---
     var prevAngle = currentAngle;
-    currentAngle += (dragTargetAngle - currentAngle) * CONFIG.DRAG_EASING;
-    currentAngle += (targetAngle - currentAngle) * CONFIG.ANGLE_SPEED;
+
+    if (dragging) {
+        currentAngle += (dragTargetAngle - currentAngle) * DRAG_FOLLOW_SPEED;
+    } else {
+        currentAngle += (targetAngle - currentAngle) * RELEASE_EASING;
+    }
+
+    if (Math.abs(currentAngle - targetAngle) < ANGLE_EPSILON)
+        currentAngle = targetAngle;
 
     var rad = (currentAngle + ROTATION_OFFSET) * DEG2RAD;
     var sr = Math.sin(rad), cr = Math.cos(rad);
-    var alpha = fb.IsMuted ? 90 : 255;
+    var alpha = fb.IsMuted && fb.IsMuted() ? 90 : 255;
 
-    for (var s=0;s<10;s++){
-        var t0 = 0.5 + s/10*0.5, t1 = 0.5 + (s+1)/10*0.5;
+    for (var s = 0; s < 10; s++){
+        var t0 = 0.5 + s/10 * 0.5;
+        var t1 = 0.5 + (s+1)/10 * 0.5;
         gr.DrawLine(
-            cx + sr*size*0.45*t0, cy - cr*size*0.45*t0,
-            cx + sr*size*0.45*t1, cy - cr*size*0.45*t1,
-            Math.max(1, size*0.015),
-            RGBA((theme.marker>>16)&255, (theme.marker>>8)&255, theme.marker&255, alpha)
+            cx + sr * size * 0.45 * t0,
+            cy - cr * size * 0.45 * t0,
+            cx + sr * size * 0.45 * t1,
+            cy - cr * size * 0.45 * t1,
+            Math.max(1, size * 0.015),
+            RGBA(
+                (theme.marker >> 16) & 255,
+                (theme.marker >> 8) & 255,
+                theme.marker & 255,
+                alpha
+            )
         );
     }
 
-    // Only repaint if angle changed significantly
-    if (Math.abs(currentAngle - prevAngle) > 0.01)
+    if (Math.abs(currentAngle - prevAngle) > ANGLE_EPSILON)
         window.Repaint();
-}
-
-// =====================================================
-// RIGHT CLICK MENU (RESTORED)
-// =====================================================
-function on_mouse_rbtn_up(x, y){
-    var menu = window.CreatePopupMenu();
-
-    for (var i = 0; i < THEMES.length; i++){
-        menu.AppendMenuItem(0, i + 1, THEMES[i].name);
-        if (i === currentThemeId)
-            menu.CheckMenuItem(i + 1, true);
-    }
-
-    var id = menu.TrackPopupMenu(x, y);
-    if (id > 0){
-        currentThemeId = id - 1;
-        window.SetProperty("VolumeKnob.Theme", currentThemeId);
-        window.Repaint();
-    }
-    return true;
 }
 
 // =====================================================
@@ -202,22 +213,26 @@ function on_mouse_lbtn_down(x,y){
 function on_mouse_lbtn_up(){
     if (!dragging) return false;
     dragging = false;
+    targetAngle = dragTargetAngle;
     window.SetCursor(CURSOR_ARROW);
+    window.Repaint();
     return true;
 }
 
 function on_mouse_move(x,y){
     if (!dragging) return false;
 
-    var newVolume = Math.max(0, Math.min(100, uiVolume + (lastY - y) * CONFIG.DRAG_SCALE));
-    newVolume = Math.round(newVolume * 10) / 10; // Round to 0.1 step to reduce micro jitter
+    var newVolume = uiVolume + (lastY - y) * CONFIG.DRAG_SCALE;
+    newVolume = Math.max(0, Math.min(100, newVolume));
+    newVolume = Math.round(newVolume * 10) / 10;
 
-    if (Math.abs(newVolume - uiVolume) >= 0.1){ // Only update if meaningful change
+    if (Math.abs(newVolume - uiVolume) >= 0.1){
         uiVolume = newVolume;
-        targetAngle = dragTargetAngle = uiVolumeToAngle(uiVolume);
+        dragTargetAngle = targetAngle = uiVolumeToAngle(uiVolume);
 
         var newFbVol = applySnap(uiVolumeToFbVolume(uiVolume));
-        if (Math.abs(newFbVol - fb.Volume) >= 0.1) fb.Volume = newFbVol;
+        if (Math.abs(newFbVol - fb.Volume) >= 0.1)
+            fb.Volume = newFbVol;
 
         window.Repaint();
     }
@@ -226,24 +241,19 @@ function on_mouse_move(x,y){
     return true;
 }
 
-
 function on_mouse_wheel(step){
-    var newVolume = Math.max(0, Math.min(100, uiVolume + step * CONFIG.WHEEL_STEP));
+    var newVolume = uiVolume + step * CONFIG.WHEEL_STEP;
+    newVolume = Math.max(0, Math.min(100, newVolume));
     newVolume = Math.round(newVolume * 10) / 10;
 
     if (Math.abs(newVolume - uiVolume) >= 0.1){
         uiVolume = newVolume;
-        targetAngle = dragTargetAngle = uiVolumeToAngle(uiVolume);
-
-        var newFbVol = applySnap(uiVolumeToFbVolume(uiVolume));
-        if (Math.abs(newFbVol - fb.Volume) >= 0.1) fb.Volume = newFbVol;
-
+        dragTargetAngle = targetAngle = uiVolumeToAngle(uiVolume);
+        fb.Volume = applySnap(uiVolumeToFbVolume(uiVolume));
         window.Repaint();
     }
-
     return true;
 }
-
 
 function on_mouse_lbtn_dblclk(x,y){
     if (!hitKnob(x,y)) return false;
@@ -252,13 +262,34 @@ function on_mouse_lbtn_dblclk(x,y){
 }
 
 // =====================================================
+// RIGHT CLICK MENU
+// =====================================================
+function on_mouse_rbtn_up(x,y){
+    var menu = window.CreatePopupMenu();
+    for (var i = 0; i < THEMES.length; i++){
+        menu.AppendMenuItem(0, i+1, THEMES[i].name);
+        if (i === currentThemeId)
+            menu.CheckMenuItem(i+1, true);
+    }
+
+    var id = menu.TrackPopupMenu(x,y);
+    if (id > 0){
+        currentThemeId = id - 1;
+        window.SetProperty("VolumeKnob.Theme", currentThemeId);
+        window.Repaint();
+    }
+    return true;
+}
+
+// =====================================================
 // HIT TEST
 // =====================================================
 function hitKnob(x,y){
-    var cx=window.Width/2, cy=window.Height/2;
-    var r=Math.min(window.Width,window.Height)/2-CONFIG.PADDING;
-    var dx=x-cx, dy=y-cy;
-    return dx*dx+dy*dy<=r*r;
+    var cx = window.Width / 2;
+    var cy = window.Height / 2;
+    var r  = Math.min(window.Width, window.Height) / 2 - CONFIG.PADDING;
+    var dx = x - cx, dy = y - cy;
+    return dx*dx + dy*dy <= r*r;
 }
 
 // =====================================================
