@@ -7,7 +7,7 @@ Dynamic colour scheme based on the cover art of the current playing track/album,
 Diffrent layouts and custom spectrum patterns, presets included in the profile folder, some artwork based colour and some fixed, the artwork doesnt allways work well on the spectrum.<br>
 
 Implemented CD Spinner with Album Art or CD option, Volume Knob, and Artwork Blur panel scripts in SMP 64bit.<br>
-Disc media named, media, disc, vinyl, cd, CD, .jpg or .png. Currently artwork must be in same folder as the album/track.<br><br>
+Disc media named, media, disc, vinyl, cd, CD, .jpg or .png. Currently artwork must be in same folder as the album/track, masking added for disc media and makes a disc from the album art.<br><br>
 My panels have right click options.<br><br>
 
 You may need to adjust the layout box sizes for your monitor resolution. default 1440p 
