@@ -36,7 +36,8 @@ If you dont have any artwork or a diffrent folder structure(may try fix this) tr
 You will need to sign up to last.fm for an API key for the Bio(right click set API) and Album cover art scrapper, https://www.last.fm/api<br> <br> 
 <br>
 You might need to install these font's to see some icons, .ttf files <br> 
-https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts
+https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts<br>
+https://www.fontrepo.com/font/27754/guifx-v2-transports
 <br><br>
 
 ##
