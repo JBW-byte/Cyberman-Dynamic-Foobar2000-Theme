@@ -29,9 +29,12 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 
 ![Main layout](screenshots/cyberman-dynamic.png)
 
-![Layout variations](screenshots/cyberman-dynamic_2.png)
-![Layout variations](screenshots/cyberman-dynamic_3.png)
-![Layout variations](screenshots/cyberman-dynamic_4.png)
+
+<p float="left">
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/cyberman-dynamic_2.png" width="32%" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/cyberman-dynamic_3.png"  width="32%" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/cyberman-dynamic_4.png" width="32%" />
+</p>
 
 ---
 
