@@ -125,7 +125,7 @@ This theme includes and depends on community-developed components and scripts fr
   [https://sourceforge.net/projects/sacddecoder/](https://sourceforge.net/projects/sacddecoder/)
 
 ---
-
+<br>
 ## Full Manual Installation
 
 Use this method if you prefer a clean or custom setup.
