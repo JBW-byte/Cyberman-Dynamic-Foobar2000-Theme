@@ -12,7 +12,7 @@ Simple sensible right click options. For larger panels and FPS increase, change 
 Coming Soon LCD TimerPro
 <br><br>
 # Path Tree Structure 
-<code><pre><br>
+<p><code><pre><br>
 Foobar2000 64Bit/
 └── profile/
 │   └── skins/
@@ -26,4 +26,4 @@ Foobar2000 64Bit/
 │   │   ├── vinyl_mask.png
 │   │   ├── center_album_rim.png
 │   │   └── default_disc.png
-</pre></code>
+</pre></code></p>
