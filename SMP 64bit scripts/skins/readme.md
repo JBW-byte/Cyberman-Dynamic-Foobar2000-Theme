@@ -10,8 +10,8 @@ Simple sensible right click options. For larger panels and FPS increase, change 
 * PanelArt: Simple Track display and album art background blur/darkness. several options in right click menu. Probably try and expand this more in future.<br><br>
 
 Coming Soon LCD TimerPro<br><br>
-* Path Tree Structure
-<code><pre><br>
+* Path Tree Structure  
+<pre>
 Foobar2000 64Bit/
 └── profile/
 │   └── skins/
@@ -24,5 +24,4 @@ Foobar2000 64Bit/
 │   │   ├── mask.png
 │   │   ├── vinyl_mask.png
 │   │   ├── center_album_rim.png
-│   │   └── default_disc.png
-</pre></code>
+│   │   └── default_disc.png</pre>
