@@ -115,18 +115,16 @@ This theme includes and depends on community-developed components and scripts fr
 
 * **Library Tree SMP** — regor
   [https://github.com/regorxxx/Library-Tree-SMP](https://github.com/regorxxx/Library-Tree-SMP)
-
 ### Optional Components
 
 * Additional audio outputs and codecs:
   [https://www.foobar2000.org/components](https://www.foobar2000.org/components)
 
 * SACD Decoder:
-  [https://sourceforge.net/projects/sacddecoder/](https://sourceforge.net/projects/sacddecoder/)
+  [https://sourceforge.net/projects/sacddecoder/](https://sourceforge.net/projects/sacddecoder/)<br><br><br>
 
 ---
-<br>
-## Full Manual Installation
+# Full Manual Installation
 
 Use this method if you prefer a clean or custom setup.
 
@@ -204,7 +202,7 @@ Extract to the `profile/` folder.
 
 ---
 
-## Appearance Notes
+### Appearance Notes
 
 * Enable **Dark Mode** in:
 
