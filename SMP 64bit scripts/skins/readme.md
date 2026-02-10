@@ -10,9 +10,22 @@ Simple sensible right click options. For larger panels and FPS increase, change 
 * PanelArt: Simple Track display and album art background blur/darkness. several options in right click menu. Probably try and expand this more in future.<br><br>
 
 Coming Soon LCD TimerPro
+<br><br>
 
-
-
+Fobar2000 64Bit/
+│
+├── profile/
+│   ├── skins/
+│   │   ├── scripts/
+│   │   │   │   ├── VolumeKnob/
+│   │   │   │   │   └── VoloumeKnob.js
+│   │   │   ├── SMP_64_DiscSpin.js
+│   │   │   ├── SMP_64_PanelArt
+│   │   │   └── SMP_simplyart_archived.js
+│   │   ├── mask.png
+│   │   ├── vinyl_mask.png
+│   │   ├── center_album_rim.png
+│   │   └── default_disc.png
 
 
 
