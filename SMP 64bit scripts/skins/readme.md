@@ -7,7 +7,9 @@ Simple sensible right click options.<br>
 
 * VolumeKnob: Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control.<br>
 
-* PanelArt: Simple Track display and album art background blur/darkness. several options in right click menu. Probably try and expand this more in future.
+* PanelArt: Simple Track display and album art background blur/darkness. several options in right click menu. Probably try and expand this more in future.<br><br>
+
+Coming Soon LCD TimerPro
 
 
 
