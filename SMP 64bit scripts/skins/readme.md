@@ -3,7 +3,7 @@ skins folder should be in FooBar2000/Profile folder for all the correct file pat
 
 * Disc Spinner: requires my mask's and art files for the CD, Mask's automaticly. Generates a Disc from album art if you have no disc art,
 falls back to default disc if non, Seperate Vinyl mask if your art is called vinyl. Can add more options in the script for file names and paths.<br>
-Simple sensible right click options. For larger panels and FPS increase, change the values near the top of the script, MAX_IMAGE_SIZE and timerInterval.<br>
+Simple sensible right click options. For larger panels and FPS increase, to change the values near the top of the script, MAX_IMAGE_SIZE and timerInterval.<br>
 
 * VolumeKnob: Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control. Could probably be adapted to any type of Knob.<br>
 
