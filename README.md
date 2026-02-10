@@ -49,7 +49,7 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 
 ---
 
-## Quick Install (Recommended)
+# Quick Install (Recommended)
 
 This method uses a preconfigured **profile folder**.
 
@@ -220,4 +220,4 @@ This theme is shared for personal use. Individual components remain licensed und
 
 ## Acknowledgements
 
-Thanks to the Foobar2000 modding community and all script and component authors who made this theme possible.
+Thanks to the Foobar2000 Devs and modding community and all script and component authors who made this theme possible.
