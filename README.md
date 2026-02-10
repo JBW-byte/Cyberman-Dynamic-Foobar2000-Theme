@@ -13,7 +13,7 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 * Dynamic colour scheme derived from the currently playing album art
 * Multiple layouts with custom spectrum analyzer presets
 * Custom play buttons and volume knob
-* CD spinner panel (album art or CD-style disc)
+* Disk spinner panel (album art or CD-style disc)
 * Artwork blur panel
 * Multiple VU meter skins
 * Right-click configuration options on custom panels
