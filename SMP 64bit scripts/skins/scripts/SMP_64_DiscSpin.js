@@ -12,7 +12,7 @@ window.DefineScript('SMP 64bit Disc Spin v2', { author: 'L.E.D.' });
 // =================== SETTINGS ===================
 
 const tf_path = fb.TitleFormat("$directory_path(%path%)");
-const timerInterval = 50;     // Lower for More FPS, Performance Hit
+const timerInterval = 42;     // Lower for More FPS, Performance Hit
 const MAX_IMAGE_SIZE = 500;   // 250 to 1000 rec. Raise for Large Panels, Performance Hit
 
 const DEFAULT_DISC_PATH = fb.ProfilePath + "skins\\default_disc.png";
@@ -304,3 +304,4 @@ function on_mouse_rbtn_up(x, y) {
     window.Repaint();
     return true;
 }
+
