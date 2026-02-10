@@ -18,9 +18,9 @@ Coming Soon LCD TimerPro
 ## Path Tree Structure <code>
 Fpobar2000 64Bit/
 └── profile/
-│   ├── skins/
-│   │   ├── scripts/
-│   │   │   ├── VolumeKnob/
+│   └── skins/
+│   │   └── scripts/
+│   │   │   └── VolumeKnob/
 │   │   │   │   └── VoloumeKnob.js
 │   │   │   ├── SMP_64_DiscSpin.js
 │   │   │   ├── SMP_64_PanelArt
