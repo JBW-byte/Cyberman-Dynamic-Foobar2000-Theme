@@ -16,7 +16,7 @@ Coming Soon LCD TimerPro
 
 
 ## Path Tree Structure <code>
-Fobar2000 64Bit/
+Fpobar2000 64Bit/
 └── profile/
 │   ├── skins/
 │   │   ├── scripts/
