@@ -1,12 +1,3 @@
-	        // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-	       // ======= SMP 64bit Disc Spin V2 Script ======= \\
-	      // ======= Spins Disc + Artwork + Cover  ========= \\
-
-   // ===================*** Foobar2000 64bit ***================== \\
-  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
- // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
-// ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
-
 // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
 // ======= SMP 64bit Disc Spin V2 Script ======= \\
 // ======= Spins Disc + Artwork + Cover  ========= \\
@@ -639,7 +630,7 @@ function on_mouse_rbtn_up(x, y) {
         case 22:
         case 23:
         case 24:
-            const newMode = INTERPOLATION_MODES[idx - 22].value;
+            const newMode = INTERPOLATION_MODES[idx - 20].value;
             if (interpolationMode !== newMode) {
                 interpolationMode = newMode;
                 window.SetProperty("RP.InterpolationMode", interpolationMode);
