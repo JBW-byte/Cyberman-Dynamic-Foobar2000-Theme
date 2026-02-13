@@ -12,8 +12,8 @@ window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 // ====================== CONSTANTS ======================
 const tf_path = fb.TitleFormat("$directory_path(%path%)");
 
-const TIMER_INTERVAL = 42;          // ~30 FPS balanced
-const MAX_IMAGE_SIZE = 300;
+const TIMER_INTERVAL = 42;          // ~24 FPS balanced lower for increased FPS. Performance hit
+const MAX_IMAGE_SIZE = 250;			// Increase for larger panels. Performance hit
 const MAX_CACHE_ENTRIES = 50;
 const MAX_MASK_CACHE = 10;
 const MAX_RIM_CACHE = 10;
