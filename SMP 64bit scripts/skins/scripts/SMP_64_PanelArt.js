@@ -1,7 +1,12 @@
-// ========= AUTHOR L.E.D. AI ASSISTED ========= \\
-// === Polished Panel Artwork and Trackinfo v1 No BG === \\
+	       // ========= AUTHOR L.E.D. AI ASSISTED ========= \\
+	      // === Polished Panel Artwork and Trackinfo v1 === \\
+	     // === Blur Artwork + Trackinfo + AI eats code  ==== \\
 
-window.DefineScript('SMP_64_PanelArt_NoBG', { author: 'L.E.D.' });
+   // ===================*** Foobar2000 64bit ***================== \\
+  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
+ // === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
+
+window.DefineScript('SMP_64_PanelArt', { author: 'L.E.D.' });
 
 function RGB(r, g, b) { return 0xFF000000 | (r << 16) | (g << 8) | b; }
 function RGBA(r, g, b, a) { return ((a << 24) | (r << 16) | (g << 8) | b); }
