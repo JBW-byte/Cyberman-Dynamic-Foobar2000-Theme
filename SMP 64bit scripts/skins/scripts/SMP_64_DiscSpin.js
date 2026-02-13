@@ -7,6 +7,10 @@
  // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
 // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
 
+// ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+// ======= SMP 64bit Disc Spin V2 Script ======= \\
+// ======= Spins Disc + Artwork + Cover  ========= \\
+
 window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 
 // ====================== CONSTANTS ======================
@@ -31,9 +35,17 @@ const DISC_FILES = Object.freeze([
     "\\vinyl.png", "\\vinyl.jpg"
 ]);
 
-const INTERPOLATION_MODE = 5;       // 1 to 5 recommended, Heavy Performance Hit if Higher, High Quality Bicubic 
+// Interpolation mode options
+const INTERPOLATION_MODES = Object.freeze([
+    { name: "Nearest Neighbor (Fastest)", value: 5 },
+    { name: "Low Quality", value: 1 },
+    { name: "Bilinear", value: 3 },
+    { name: "High Quality Bilinear", value: 6 },
+    { name: "High Quality Bicubic (Best)", value: 7 }
+]);
+
 const SMOOTHING_MODE = 4;           // AntiAlias
-const DISC_SCALE_FACTOR = 0.95;		// Lower is Effectively More Padding
+const DISC_SCALE_FACTOR = 0.98;     // Lower is Effectively More Padding
 const ANGLE_MODULO = 360;
 const LOAD_DEBOUNCE_MS = 100;
 
@@ -68,6 +80,7 @@ let spinningEnabled = window.GetProperty("RP.SpinningEnabled", true);
 let spinSpeed = window.GetProperty("RP.SpinSpeed", 2.0);
 let useAlbumArtOnly = window.GetProperty("RP.UseAlbumArtOnly", false);
 let keepAspectRatio = window.GetProperty("RP.KeepAspectRatio", true);
+let interpolationMode = window.GetProperty("RP.InterpolationMode", 5);
 let savedPath = window.GetProperty("RP.SavedPath", "");
 let savedIsDisc = window.GetProperty("RP.SavedIsDisc", false);
 
@@ -191,7 +204,7 @@ function scaleImage(raw, maxSize) {
 
     const newImg = gdi.CreateImage(nw, nh);
     const g = newImg.GetGraphics();
-    g.SetInterpolationMode(INTERPOLATION_MODE);
+    g.SetInterpolationMode(interpolationMode);
     g.DrawImage(raw, 0, 0, nw, nh, 0, 0, w, h);
     newImg.ReleaseGraphics(g);
 
@@ -493,7 +506,7 @@ function on_paint(gr) {
 
     if (!isDiscImage) {
         // Static album art
-        gr.SetInterpolationMode(INTERPOLATION_MODE);
+        gr.SetInterpolationMode(interpolationMode);
         gr.DrawImage(
             img, 
             paintCache.staticX, 
@@ -506,7 +519,7 @@ function on_paint(gr) {
         );
     } else {
         // Spinning disc
-        gr.SetInterpolationMode(INTERPOLATION_MODE);
+        gr.SetInterpolationMode(interpolationMode);
         gr.SetSmoothingMode(SMOOTHING_MODE);
 
         const size = paintCache.discSize;
@@ -540,6 +553,7 @@ function on_paint(gr) {
 function on_mouse_rbtn_up(x, y) {
     const menu = window.CreatePopupMenu();
     const speedMenu = window.CreatePopupMenu();
+    const interpMenu = window.CreatePopupMenu();
 
     menu.AppendMenuItem(0, 1, "Album Art Only (Static)");
     menu.CheckMenuItem(1, useAlbumArtOnly);
@@ -550,6 +564,7 @@ function on_mouse_rbtn_up(x, y) {
     menu.AppendMenuItem(0, 3, "Keep Aspect Ratio");
     menu.CheckMenuItem(3, keepAspectRatio);
 
+    // Speed submenu
     speedMenu.AppendMenuItem(0, 10, "Slow (0.5x)");
     speedMenu.AppendMenuItem(0, 11, "Normal (2.0x)");
     speedMenu.AppendMenuItem(0, 12, "Fast (5.0x)");
@@ -558,6 +573,16 @@ function on_mouse_rbtn_up(x, y) {
     speedMenu.CheckMenuRadioItem(10, 12, speedIdx);
 
     speedMenu.AppendTo(menu, 0, "Rotation Speed");
+
+    // Interpolation mode submenu
+    INTERPOLATION_MODES.forEach((mode, i) => {
+        interpMenu.AppendMenuItem(0, 20 + i, mode.name);
+        if (interpolationMode === mode.value) {
+            interpMenu.CheckMenuItem(20 + i, true);
+        }
+    });
+
+    interpMenu.AppendTo(menu, 0, "Image Quality");
 
     const idx = menu.TrackPopupMenu(x, y);
     let changed = false;
@@ -604,6 +629,26 @@ function on_mouse_rbtn_up(x, y) {
             if (spinSpeed !== 5.0) {
                 spinSpeed = 5.0;
                 window.SetProperty("RP.SpinSpeed", spinSpeed);
+                changed = true;
+            }
+            break;
+
+        // Interpolation mode cases
+        case 20:
+        case 21:
+        case 22:
+        case 23:
+        case 24:
+            const newMode = INTERPOLATION_MODES[idx - 20].value;
+            if (interpolationMode !== newMode) {
+                interpolationMode = newMode;
+                window.SetProperty("RP.InterpolationMode", interpolationMode);
+                // Clear image cache to force re-render with new quality
+                imageCache.clear();
+                // Reload current image
+                if (currentMetadb) {
+                    loadDiscImage(currentMetadb, true);
+                }
                 changed = true;
             }
             break;
