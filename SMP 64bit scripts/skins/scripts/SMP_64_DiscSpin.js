@@ -1,14 +1,18 @@
-// =====================================================
-// SMP 64bit Disc Spin V3 - Optimized + Center Rim
-// Full Functionality Restored + Rim Overlay
-// =====================================================
+	        // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+	       // ======= SMP 64bit Disc Spin V2 Script ======= \\
+	      // ======= Spins Disc + Artwork + Cover  ========= \\
 
-window.DefineScript('SMP Disc Spin V3 - Optimized + Rim', { author: 'L.E.D.' });
+   // ===================*** Foobar2000 64bit ***================== \\
+  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
+ // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
+// ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
+
+window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 
 // ====================== CONSTANTS ======================
 const tf_path = fb.TitleFormat("$directory_path(%path%)");
 
-const TIMER_INTERVAL = 33;          // ~30 FPS balanced
+const TIMER_INTERVAL = 42;          // ~30 FPS balanced
 const MAX_IMAGE_SIZE = 300;
 const MAX_CACHE_ENTRIES = 50;
 const MAX_MASK_CACHE = 10;
@@ -376,4 +380,12 @@ function init() {
     }
 }
 
-window.SetTimeout(init, 300);
+// Adaptive init: waits until panel and FB API are ready
+(function waitForReady() {
+    if(window.Width > 0 && window.Height > 0 && fb.GetNowPlaying() !== null) {
+        init(); // call your init function when ready
+    } else {
+        // try again in 50ms
+        window.SetTimeout(waitForReady, 50);
+    }
+})();
