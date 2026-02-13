@@ -17,29 +17,41 @@ const CONFIG = Object.freeze({
     MAX_CACHE_ENTRIES: 50,
     MAX_MASK_CACHE: 10,
     MAX_RIM_CACHE: 10,
-    MAX_FILE_CACHE: 100,
+    MAX_FILE_CACHE: 200,
     
     MIN_DISC_SIZE: 50,
     MAX_DISC_SIZE: 2000,
     MIN_SPIN_SPEED: 0.1,
     MAX_SPIN_SPEED: 10,
     
-    SMOOTHING_MODE: 3,
+    SMOOTHING_MODE: 4,
     DISC_SCALE_FACTOR: 0.98,
     ANGLE_MODULO: 360,
     LOAD_DEBOUNCE_MS: 100,
+    MAX_SUBFOLDER_DEPTH: 4,
+    MAX_CUSTOM_FOLDERS: 5,
     
     PATHS: {
         DEFAULT_DISC: fb.ProfilePath + "skins\\default_disc.png",
-        MASK: fb.ProfilePath + "skins\\mask.png",
-        RIM: fb.ProfilePath + "skins\\center_album_rim.png"
+        RIM: fb.ProfilePath + "skins\\center_album_rim.png",
+        SKINS_DIR: fb.ProfilePath + "skins\\"
     },
     
-    DISC_FILES: [
-        "\\disc.png", "\\disc.jpg", "\\cd.png", "\\cd.jpg",
-        "\\CD.png", "\\CD.jpg", "\\media.png", "\\media.jpg",
-        "\\vinyl.png", "\\vinyl.jpg"
+    MASK_TYPES: [
+        { name: "CD Mask", file: "mask.png", id: 0 },
+        { name: "Vinyl Mask", file: "vinyl_mask.png", id: 1 },
+        { name: "No Mask", file: null, id: 2 }
     ],
+    
+    DISC_PATTERNS: [
+        "disc", "cd", "CD", "media", "vinyl", "Disc", "Vinyl", "Media"
+    ],
+    
+    COVER_PATTERNS: [
+        "cover", "front", "folder", "Cover", "Front", "Folder", "albumart", "AlbumArt"
+    ],
+    
+    EXTENSIONS: [".png", ".jpg", ".jpeg", ".webp", ".bmp"],
     
     INTERPOLATION_MODES: [
         { name: "Nearest Neighbor (Fastest)", value: 5 },
@@ -55,6 +67,12 @@ const CONFIG = Object.freeze({
         { name: "Large (500px)", value: 500 },
         { name: "XL (750px)", value: 750 },
         { name: "XXL (1000px)", value: 1000 }
+    ],
+    
+    SPEED_PRESETS: [
+        { name: "Slow (1.0x)", value: 1.0 },
+        { name: "Normal (2.0x)", value: 2.0 },
+        { name: "Fast (3.0x)", value: 3.0 }
     ],
     
     IMAGE_TYPE: {
@@ -80,16 +98,45 @@ const Utils = {
         }
     },
     
+    sanitizeFilename(str) {
+        if (!str) return "";
+        return str.replace(/[\\/:*?"<>|]/g, '').trim();
+    },
+    
+    normalizeString(str) {
+        if (!str) return "";
+        return str.toLowerCase().trim();
+    },
+    
     getImageType(path) {
         if (!path) return null;
         if (path === CONFIG.PATHS.DEFAULT_DISC) return CONFIG.IMAGE_TYPE.DEFAULT_DISC;
         
         const pathLower = path.toLowerCase();
-        const isRealDisc = CONFIG.DISC_FILES.some(file => 
-            pathLower.endsWith(file.toLowerCase())
-        );
         
-        return isRealDisc ? CONFIG.IMAGE_TYPE.REAL_DISC : CONFIG.IMAGE_TYPE.ALBUM_ART;
+        for (let pattern of CONFIG.DISC_PATTERNS) {
+            if (pathLower.includes(pattern.toLowerCase())) {
+                return CONFIG.IMAGE_TYPE.REAL_DISC;
+            }
+        }
+        
+        return CONFIG.IMAGE_TYPE.ALBUM_ART;
+    },
+    
+    detectMaskFromPath(path) {
+        if (!path) return null;
+        
+        const pathLower = path.toLowerCase();
+        
+        if (pathLower.includes("vinyl")) {
+            return 1; // Vinyl Mask
+        }
+        
+        if (pathLower.includes("disc") || pathLower.includes("cd")) {
+            return 0; // CD Mask
+        }
+        
+        return null;
     }
 };
 
@@ -155,8 +202,167 @@ const FileManager = {
         return exists;
     },
     
+    isDirectory(path) {
+        if (!path) return false;
+        try {
+            return utils.FileTest(path, "d");
+        } catch (e) {
+            return false;
+        }
+    },
+    
+    getSubfolders(folder) {
+        const subfolders = [];
+        
+        if (!this.isDirectory(folder)) {
+            return subfolders;
+        }
+        
+        try {
+            const fso = new ActiveXObject("Scripting.FileSystemObject");
+            const folderObj = fso.GetFolder(folder);
+            const subFoldersEnum = new Enumerator(folderObj.SubFolders);
+            
+            for (; !subFoldersEnum.atEnd(); subFoldersEnum.moveNext()) {
+                const subFolder = subFoldersEnum.item();
+                subfolders.push(subFolder.Path);
+            }
+        } catch (e) {
+            try {
+                const items = utils.Glob(folder + "\\*").toArray();
+                for (let i = 0; i < items.length; i++) {
+                    if (this.isDirectory(items[i])) {
+                        subfolders.push(items[i]);
+                    }
+                }
+            } catch (e2) {
+                // Silent fail
+            }
+        }
+        
+        return subfolders;
+    },
+    
+    enumSubfolders(folder, depth = 0, maxDepth = CONFIG.MAX_SUBFOLDER_DEPTH) {
+        const folders = [folder];
+        
+        if (depth >= maxDepth || !this.isDirectory(folder)) {
+            return folders;
+        }
+        
+        const subfolders = this.getSubfolders(folder);
+        
+        for (let i = 0; i < subfolders.length; i++) {
+            const subFolder = subfolders[i];
+            const deepFolders = this.enumSubfolders(subFolder, depth + 1, maxDepth);
+            folders.push(...deepFolders);
+        }
+        
+        return folders;
+    },
+    
+    buildSearchPaths(folder, patterns, metadataNames = []) {
+        const paths = [];
+        const allPatterns = [...patterns];
+        
+        metadataNames.forEach(name => {
+            const sanitized = Utils.sanitizeFilename(name);
+            if (sanitized) allPatterns.push(sanitized);
+        });
+        
+        allPatterns.forEach(pattern => {
+            CONFIG.EXTENSIONS.forEach(ext => {
+                paths.push(folder + "\\" + pattern + ext);
+            });
+        });
+        
+        return paths;
+    },
+    
+    findImageInPaths(paths) {
+        for (let i = 0; i < paths.length; i++) {
+            if (this.exists(paths[i])) {
+                return paths[i];
+            }
+        }
+        return null;
+    },
+    
+    matchesFolderName(folderPath, searchNames) {
+        if (!folderPath || !searchNames || searchNames.length === 0) return false;
+        
+        const folderName = folderPath.split('\\').pop().toLowerCase();
+        
+        for (let name of searchNames) {
+            if (!name) continue;
+            const normalized = Utils.normalizeString(Utils.sanitizeFilename(name));
+            if (normalized && folderName === normalized) {
+                return true;
+            }
+        }
+        
+        return false;
+    },
+    
     clear() {
         this.cache.clear();
+    }
+};
+
+// ====================== CUSTOM FOLDERS MANAGER ======================
+const CustomFolders = {
+    folders: [],
+    
+    load() {
+        try {
+            const saved = window.GetProperty("RP.CustomFolders", "");
+            if (saved) {
+                this.folders = JSON.parse(saved);
+            }
+        } catch (e) {
+            console.log("Error loading custom folders:", e);
+            this.folders = [];
+        }
+    },
+    
+    save() {
+        try {
+            window.SetProperty("RP.CustomFolders", JSON.stringify(this.folders));
+        } catch (e) {
+            console.log("Error saving custom folders:", e);
+        }
+    },
+    
+    add(folder) {
+        if (!folder || !FileManager.isDirectory(folder)) return false;
+        
+        if (this.folders.indexOf(folder) !== -1) return false;
+        
+        if (this.folders.length >= CONFIG.MAX_CUSTOM_FOLDERS) {
+            this.folders.shift();
+        }
+        
+        this.folders.push(folder);
+        this.save();
+        return true;
+    },
+    
+    remove(index) {
+        if (index >= 0 && index < this.folders.length) {
+            this.folders.splice(index, 1);
+            this.save();
+            return true;
+        }
+        return false;
+    },
+    
+    clear() {
+        this.folders = [];
+        this.save();
+    },
+    
+    getAll() {
+        return [...this.folders];
     }
 };
 
@@ -166,16 +372,36 @@ const AssetManager = {
     rimSource: null,
     maskCache: new LRUCache(CONFIG.MAX_MASK_CACHE),
     rimCache: new LRUCache(CONFIG.MAX_RIM_CACHE),
+    currentMaskType: 0,
+    userOverrideMask: false,
     
     init() {
+        this.currentMaskType = window.GetProperty("RP.MaskType", 0);
+        this.userOverrideMask = window.GetProperty("RP.UserOverrideMask", false);
+        this.loadMask();
+        this.loadRim();
+    },
+    
+    loadMask() {
+        Utils.safeDispose(this.maskSource);
+        this.maskSource = null;
+        this.maskCache.clear();
+        
+        const maskType = CONFIG.MASK_TYPES[this.currentMaskType];
+        if (!maskType || !maskType.file) return;
+        
+        const maskPath = CONFIG.PATHS.SKINS_DIR + maskType.file;
+        
         try {
-            if (FileManager.exists(CONFIG.PATHS.MASK)) {
-                this.maskSource = gdi.Image(CONFIG.PATHS.MASK);
+            if (FileManager.exists(maskPath)) {
+                this.maskSource = gdi.Image(maskPath);
             }
         } catch (e) {
-            console.log("Failed to load mask:", e);
+            console.log("Failed to load mask:", maskPath, e);
         }
-        
+    },
+    
+    loadRim() {
         try {
             if (FileManager.exists(CONFIG.PATHS.RIM)) {
                 this.rimSource = gdi.Image(CONFIG.PATHS.RIM);
@@ -183,6 +409,40 @@ const AssetManager = {
         } catch (e) {
             console.log("Failed to load rim:", e);
         }
+    },
+    
+    setMaskType(index, isUserOverride = true) {
+        if (index === this.currentMaskType) return false;
+        
+        this.currentMaskType = index;
+        this.userOverrideMask = isUserOverride;
+        
+        window.SetProperty("RP.MaskType", index);
+        window.SetProperty("RP.UserOverrideMask", isUserOverride);
+        
+        this.loadMask();
+        return true;
+    },
+    
+    autoSelectMask(imagePath) {
+        if (this.userOverrideMask) return false;
+        
+        const detectedMask = Utils.detectMaskFromPath(imagePath);
+        if (detectedMask !== null && detectedMask !== this.currentMaskType) {
+            return this.setMaskType(detectedMask, false);
+        }
+        
+        return false;
+    },
+    
+    hasMask() {
+        return this.maskSource !== null;
+    },
+    
+    shouldShowRim(imageType) {
+        return imageType === CONFIG.IMAGE_TYPE.ALBUM_ART && 
+               this.currentMaskType === 0 && 
+               this.hasMask();
     },
     
     getMask(size) {
@@ -242,10 +502,10 @@ const ImageProcessor = {
             const g = newImg.GetGraphics();
             g.SetInterpolationMode(interpolationMode);
             
-            // Fill black background
-            g.FillSolidRect(0, 0, targetSize, targetSize, 0xFF000000);
+            if (AssetManager.hasMask()) {
+                g.FillSolidRect(0, 0, targetSize, targetSize, 0xFF000000);
+            }
             
-            // Center and scale
             const scale = targetSize / Math.min(w, h);
             const scaledW = Math.floor(w * scale);
             const scaledH = Math.floor(h * scale);
@@ -313,13 +573,14 @@ const ImageProcessor = {
     processForDisc(raw, targetSize, imageType, interpolationMode) {
         if (!raw) return null;
         
-        // Scale to target size
         let processed = this.scaleToSquare(raw, targetSize, interpolationMode);
         if (!processed) return null;
         
-        // Apply mask based on type
-        if (imageType === CONFIG.IMAGE_TYPE.REAL_DISC || 
-            imageType === CONFIG.IMAGE_TYPE.ALBUM_ART) {
+        const shouldMask = AssetManager.hasMask() && 
+                          (imageType === CONFIG.IMAGE_TYPE.REAL_DISC || 
+                           imageType === CONFIG.IMAGE_TYPE.ALBUM_ART);
+        
+        if (shouldMask) {
             processed = this.applyMask(processed, targetSize);
         }
         
@@ -329,30 +590,26 @@ const ImageProcessor = {
 
 // ====================== STATE MANAGER ======================
 const State = {
-    // Current state
     img: null,
     angle: 0,
     isDiscImage: false,
     imageType: CONFIG.IMAGE_TYPE.REAL_DISC,
     currentMetadb: null,
     
-    // Timers
     spinTimer: null,
     loadTimer: null,
     
-    // Settings
     settings: {
         spinningEnabled: true,
         spinSpeed: 2.0,
         useAlbumArtOnly: false,
         keepAspectRatio: true,
-        interpolationMode: 5,
+        interpolationMode: 1,
         maxImageSize: 250,
         savedPath: "",
         savedIsDisc: false
     },
     
-    // Paint cache
     paintCache: {
         windowWidth: 0,
         windowHeight: 0,
@@ -376,7 +633,7 @@ const State = {
         s.spinSpeed = Utils.clamp(window.GetProperty("RP.SpinSpeed", 2.0), CONFIG.MIN_SPIN_SPEED, CONFIG.MAX_SPIN_SPEED);
         s.useAlbumArtOnly = window.GetProperty("RP.UseAlbumArtOnly", false);
         s.keepAspectRatio = window.GetProperty("RP.KeepAspectRatio", true);
-        s.interpolationMode = window.GetProperty("RP.InterpolationMode", 5);
+        s.interpolationMode = window.GetProperty("RP.InterpolationMode", 1);
         s.maxImageSize = Utils.clamp(window.GetProperty("RP.MaxImageSize", 250), CONFIG.MIN_DISC_SIZE, CONFIG.MAX_DISC_SIZE);
         s.savedPath = window.GetProperty("RP.SavedPath", "");
         s.savedIsDisc = window.GetProperty("RP.SavedIsDisc", false);
@@ -487,10 +744,13 @@ const State = {
 const ImageLoader = {
     cache: new LRUCache(CONFIG.MAX_CACHE_ENTRIES),
     tf_path: fb.TitleFormat("$directory_path(%path%)"),
+    tf_artist: fb.TitleFormat("%artist%"),
+    tf_album: fb.TitleFormat("%album%"),
+    tf_title: fb.TitleFormat("%title%"),
     
     loadCached(path, imageType) {
         const s = State.settings;
-        const key = `${path}|${s.maxImageSize}|${imageType}`;
+        const key = `${path}|${s.maxImageSize}|${imageType}|${AssetManager.currentMaskType}`;
         
         let cached = this.cache.get(key);
         if (cached) return cached;
@@ -519,15 +779,152 @@ const ImageLoader = {
         }
     },
     
-    searchForDisc(folderPath) {
-        for (let i = 0; i < CONFIG.DISC_FILES.length; i++) {
-            const path = folderPath + CONFIG.DISC_FILES[i];
-            const img = this.loadCached(path, CONFIG.IMAGE_TYPE.REAL_DISC);
-            
-            if (img) {
-                return { img, path, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+    getMetadataNames(metadb) {
+        return {
+            artist: this.tf_artist.EvalWithMetadb(metadb),
+            album: this.tf_album.EvalWithMetadb(metadb),
+            title: this.tf_title.EvalWithMetadb(metadb)
+        };
+    },
+    
+    searchInFolder(folder, patterns, metadata) {
+        const paths = FileManager.buildSearchPaths(folder, patterns, [metadata.album, metadata.title]);
+        return FileManager.findImageInPaths(paths);
+    },
+    
+    searchForDisc(metadb, baseFolder) {
+        const metadata = this.getMetadataNames(metadb);
+        const searchNames = [metadata.artist, metadata.album, metadata.title];
+        
+        const allFolders = FileManager.enumSubfolders(baseFolder);
+        
+        const priorityFolders = [];
+        const otherFolders = [];
+        
+        allFolders.forEach(folder => {
+            if (FileManager.matchesFolderName(folder, searchNames)) {
+                priorityFolders.push(folder);
+            } else {
+                otherFolders.push(folder);
+            }
+        });
+        
+        for (let folder of priorityFolders) {
+            const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
+            if (found) {
+                const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+                if (img) {
+                    AssetManager.autoSelectMask(found);
+                    return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                }
             }
         }
+        
+        for (let folder of otherFolders) {
+            const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
+            if (found) {
+                const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+                if (img) {
+                    AssetManager.autoSelectMask(found);
+                    return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                }
+            }
+        }
+        
+        const customFolders = CustomFolders.getAll();
+        for (let customFolder of customFolders) {
+            const allCustomFolders = FileManager.enumSubfolders(customFolder);
+            
+            const customPriorityFolders = [];
+            const customOtherFolders = [];
+            
+            allCustomFolders.forEach(folder => {
+                if (FileManager.matchesFolderName(folder, searchNames)) {
+                    customPriorityFolders.push(folder);
+                } else {
+                    customOtherFolders.push(folder);
+                }
+            });
+            
+            for (let folder of customPriorityFolders) {
+                const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
+                if (found) {
+                    const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+                    if (img) {
+                        AssetManager.autoSelectMask(found);
+                        return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                    }
+                }
+            }
+            
+            for (let folder of customOtherFolders) {
+                const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
+                if (found) {
+                    const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+                    if (img) {
+                        AssetManager.autoSelectMask(found);
+                        return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                    }
+                }
+            }
+        }
+        
+        return null;
+    },
+    
+    searchForCover(metadb, baseFolder) {
+        const metadata = this.getMetadataNames(metadb);
+        const searchNames = [metadata.artist, metadata.album];
+        
+        const allFolders = FileManager.enumSubfolders(baseFolder);
+        
+        const priorityFolders = [];
+        const otherFolders = [];
+        
+        allFolders.forEach(folder => {
+            if (FileManager.matchesFolderName(folder, searchNames)) {
+                priorityFolders.push(folder);
+            } else {
+                otherFolders.push(folder);
+            }
+        });
+        
+        for (let folder of priorityFolders) {
+            const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
+            if (found) return found;
+        }
+        
+        for (let folder of otherFolders) {
+            const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
+            if (found) return found;
+        }
+        
+        const customFolders = CustomFolders.getAll();
+        for (let customFolder of customFolders) {
+            const allCustomFolders = FileManager.enumSubfolders(customFolder);
+            
+            const customPriorityFolders = [];
+            const customOtherFolders = [];
+            
+            allCustomFolders.forEach(folder => {
+                if (FileManager.matchesFolderName(folder, searchNames)) {
+                    customPriorityFolders.push(folder);
+                } else {
+                    customOtherFolders.push(folder);
+                }
+            });
+            
+            for (let folder of customPriorityFolders) {
+                const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
+                if (found) return found;
+            }
+            
+            for (let folder of customOtherFolders) {
+                const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
+                if (found) return found;
+            }
+        }
+        
         return null;
     },
     
@@ -545,9 +942,8 @@ const ImageLoader = {
             
             const folderPath = this.tf_path.EvalWithMetadb(metadb);
             
-            // Search for real disc
             if (!State.settings.useAlbumArtOnly) {
-                const result = this.searchForDisc(folderPath);
+                const result = this.searchForDisc(metadb, folderPath);
                 if (result) {
                     State.setImage(result.img, true, result.type);
                     State.saveSetting('savedPath', result.path);
@@ -557,7 +953,29 @@ const ImageLoader = {
                 }
             }
             
-            // Fallback to album art
+            const coverPath = this.searchForCover(metadb, folderPath);
+            if (coverPath && State.settings.useAlbumArtOnly) {
+                try {
+                    let raw = gdi.Image(coverPath);
+                    if (raw) {
+                        const scaled = ImageProcessor.scaleProportional(
+                            raw,
+                            CONFIG.MAX_STATIC_SIZE,
+                            State.settings.interpolationMode
+                        );
+                        if (scaled) {
+                            State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART);
+                            State.saveSetting('savedPath', coverPath);
+                            State.saveSetting('savedIsDisc', false);
+                            State.updateTimer();
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.log("Cover load error:", e);
+                }
+            }
+            
             utils.GetAlbumArtAsync(window.ID, metadb, 0);
         };
         
@@ -579,7 +997,6 @@ const ImageLoader = {
         try {
             if (image) {
                 if (s.useAlbumArtOnly) {
-                    // Static mode
                     const scaled = ImageProcessor.scaleProportional(
                         image, 
                         CONFIG.MAX_STATIC_SIZE, 
@@ -590,7 +1007,6 @@ const ImageLoader = {
                         if (image_path) State.saveSetting('savedPath', image_path);
                     }
                 } else {
-                    // Disc mode
                     const processed = ImageProcessor.processForDisc(
                         image, 
                         s.maxImageSize, 
@@ -603,7 +1019,6 @@ const ImageLoader = {
                     }
                 }
             } else {
-                // Load default disc
                 this.loadDefaultDisc();
             }
         } catch (e) {
@@ -675,7 +1090,6 @@ const Renderer = {
         const x = pc.discX;
         const y = pc.discY;
         
-        // Draw disc
         gr.DrawImage(
             State.img,
             x, y, size, size,
@@ -683,8 +1097,7 @@ const Renderer = {
             State.angle
         );
         
-        // Draw rim for album art only
-        if (State.imageType === CONFIG.IMAGE_TYPE.ALBUM_ART) {
+        if (AssetManager.shouldShowRim(State.imageType)) {
             const rim = AssetManager.getRim(Math.floor(size));
             if (rim) {
                 gr.DrawImage(
@@ -713,8 +1126,8 @@ const MenuManager = {
         menu.AppendMenuItem(0, 3, "Keep Aspect Ratio");
         menu.CheckMenuItem(3, s.keepAspectRatio);
         
-        this.addSpeedMenu(menu);
-        this.addQualityMenu(menu);
+        this.addImageSettingsMenu(menu);
+        this.addCustomFoldersMenu(menu);
         
         const idx = menu.TrackPopupMenu(x, y);
         this.handleSelection(idx);
@@ -722,41 +1135,43 @@ const MenuManager = {
         return true;
     },
     
+    addImageSettingsMenu(parent) {
+        const settingsMenu = window.CreatePopupMenu();
+        
+        this.addSpeedMenu(settingsMenu);
+        this.addScalingMenu(settingsMenu);
+        this.addSizeMenu(settingsMenu);
+        this.addMaskMenu(settingsMenu);
+        
+        settingsMenu.AppendTo(parent, 0, "Image Settings");
+    },
+    
     addSpeedMenu(parent) {
         const speedMenu = window.CreatePopupMenu();
         const s = State.settings;
         
-        speedMenu.AppendMenuItem(0, 10, "Slow (0.5x)");
-        speedMenu.AppendMenuItem(0, 11, "Normal (2.0x)");
-        speedMenu.AppendMenuItem(0, 12, "Fast (5.0x)");
+        CONFIG.SPEED_PRESETS.forEach((preset, i) => {
+            speedMenu.AppendMenuItem(0, 10 + i, preset.name);
+        });
         
-        const idx = s.spinSpeed <= 0.5 ? 10 : (s.spinSpeed >= 5.0 ? 12 : 11);
-        speedMenu.CheckMenuRadioItem(10, 12, idx);
+        const speedIdx = s.spinSpeed <= 1.0 ? 10 : (s.spinSpeed >= 3.0 ? 12 : 11);
+        speedMenu.CheckMenuRadioItem(10, 12, speedIdx);
         
         speedMenu.AppendTo(parent, 0, "Rotation Speed");
     },
     
-    addQualityMenu(parent) {
-        const qualityMenu = window.CreatePopupMenu();
-        
-        this.addInterpMenu(qualityMenu);
-        this.addSizeMenu(qualityMenu);
-        
-        qualityMenu.AppendTo(parent, 0, "Image Quality");
-    },
-    
-    addInterpMenu(parent) {
-        const interpMenu = window.CreatePopupMenu();
+    addScalingMenu(parent) {
+        const scalingMenu = window.CreatePopupMenu();
         const s = State.settings;
         
         CONFIG.INTERPOLATION_MODES.forEach((mode, i) => {
-            interpMenu.AppendMenuItem(0, 20 + i, mode.name);
+            scalingMenu.AppendMenuItem(0, 20 + i, mode.name);
             if (s.interpolationMode === mode.value) {
-                interpMenu.CheckMenuItem(20 + i, true);
+                scalingMenu.CheckMenuItem(20 + i, true);
             }
         });
         
-        interpMenu.AppendTo(parent, 0, "Interpolation Mode");
+        scalingMenu.AppendTo(parent, 0, "Image Scaling");
     },
     
     addSizeMenu(parent) {
@@ -771,6 +1186,40 @@ const MenuManager = {
         });
         
         sizeMenu.AppendTo(parent, 0, "Disc Size");
+    },
+    
+    addMaskMenu(parent) {
+        const maskMenu = window.CreatePopupMenu();
+        
+        CONFIG.MASK_TYPES.forEach((mask, i) => {
+            maskMenu.AppendMenuItem(0, 40 + i, mask.name);
+            if (AssetManager.currentMaskType === i) {
+                maskMenu.CheckMenuItem(40 + i, true);
+            }
+        });
+        
+        maskMenu.AppendTo(parent, 0, "Mask Type");
+    },
+    
+    addCustomFoldersMenu(parent) {
+        const customMenu = window.CreatePopupMenu();
+        
+        customMenu.AppendMenuItem(0, 50, "Add Custom Folder...");
+        
+        const folders = CustomFolders.getAll();
+        if (folders.length > 0) {
+            customMenu.AppendMenuSeparator();
+            
+            folders.forEach((folder, i) => {
+                const displayName = folder.length > 50 ? "..." + folder.substring(folder.length - 47) : folder;
+                customMenu.AppendMenuItem(0, 60 + i, displayName);
+            });
+            
+            customMenu.AppendMenuSeparator();
+            customMenu.AppendMenuItem(0, 70, "Clear All Custom Folders");
+        }
+        
+        customMenu.AppendTo(parent, 0, "Custom Artwork Folders");
     },
     
     handleSelection(idx) {
@@ -796,23 +1245,10 @@ const MenuManager = {
                 changed = true;
                 break;
             
-            case 10:
-                if (s.spinSpeed !== 0.5) {
-                    State.saveSetting('spinSpeed', 0.5);
-                    changed = true;
-                }
-                break;
-            
-            case 11:
-                if (s.spinSpeed !== 2.0) {
-                    State.saveSetting('spinSpeed', 2.0);
-                    changed = true;
-                }
-                break;
-            
-            case 12:
-                if (s.spinSpeed !== 5.0) {
-                    State.saveSetting('spinSpeed', 5.0);
+            case 10: case 11: case 12:
+                const newSpeed = CONFIG.SPEED_PRESETS[idx - 10].value;
+                if (s.spinSpeed !== newSpeed) {
+                    State.saveSetting('spinSpeed', newSpeed);
                     changed = true;
                 }
                 break;
@@ -837,6 +1273,39 @@ const MenuManager = {
                     if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
                     changed = true;
                 }
+                break;
+            
+            case 40: case 41: case 42:
+                if (AssetManager.setMaskType(idx - 40, true)) {
+                    ImageLoader.cache.clear();
+                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                    changed = true;
+                }
+                break;
+            
+            case 50:
+                try {
+                    const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
+                    if (folder && CustomFolders.add(folder)) {
+                        if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                        changed = true;
+                    }
+                } catch (e) {
+                    console.log("Error adding custom folder:", e);
+                }
+                break;
+            
+            case 60: case 61: case 62: case 63: case 64:
+                if (CustomFolders.remove(idx - 60)) {
+                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                    changed = true;
+                }
+                break;
+            
+            case 70:
+                CustomFolders.clear();
+                if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                changed = true;
                 break;
         }
         
@@ -901,6 +1370,7 @@ function on_script_unload() {
 function init() {
     State.loadSettings();
     AssetManager.init();
+    CustomFolders.load();
     
     const nowPlaying = fb.GetNowPlaying();
     
