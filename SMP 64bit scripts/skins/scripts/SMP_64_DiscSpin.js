@@ -639,7 +639,7 @@ function on_mouse_rbtn_up(x, y) {
         case 22:
         case 23:
         case 24:
-            const newMode = INTERPOLATION_MODES[idx - 20].value;
+            const newMode = INTERPOLATION_MODES[idx - 22].value;
             if (interpolationMode !== newMode) {
                 interpolationMode = newMode;
                 window.SetProperty("RP.InterpolationMode", interpolationMode);
