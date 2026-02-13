@@ -1,4 +1,4 @@
-skins folder should be in FooBar2000/Profile folder for all the correct file paths, can be changed in the script.
+skins folder should be in FooBar2000/Profile folder for all the correct file paths.
 <br><br>
 
 * Disc Spinner: requires my mask's and art files for the CD, Mask's automaticly. Generates a Disc from album art if you have no disc art,
