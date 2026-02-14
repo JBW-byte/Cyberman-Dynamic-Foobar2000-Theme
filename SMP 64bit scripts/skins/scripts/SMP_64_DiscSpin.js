@@ -1,11 +1,12 @@
-	        // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-	       // ======= SMP 64bit Disc Spin V3 Script ======= \\
-	      // ======= Spins Disc + Artwork + Cover  ========= \\
+	         // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+	        // ======= SMP 64bit Disc Spin V3 Script ======= \\
+	       // ======= Spins Disc + Artwork + Cover  ========= \\
 
-   // ===================*** Foobar2000 64bit ***================== \\
-  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
- // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
-// ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
+    // ===================*** Foobar2000 64bit ***================== \\
+   // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
+  // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
+ // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
+// ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
 
 window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 
@@ -1474,5 +1475,6 @@ function init() {
     }
 
 })();
+
 
 
