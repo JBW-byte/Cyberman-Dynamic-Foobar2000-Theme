@@ -44,7 +44,7 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 
   * `media`, `disc`, `vinyl`, `cd`, `CD`, `Media`, `Disc`,
 * Supported formats: `.jpg`, `.png` `.jpeg` `.webp` `.bmp`
-* Artwork **Multiple locations supported and sub folders** some edge cases might not work depending on naming.
+* Artwork **Multiple locations supported, any sub folder in a named folder** some edge cases might not work depending on naming.
 * Disc masking is applied automatically to generate disc visuals from album art
 
 ---
