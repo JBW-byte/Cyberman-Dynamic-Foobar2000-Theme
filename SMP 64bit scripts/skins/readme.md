@@ -28,5 +28,9 @@ Foobar2000 64Bit/
         └── default_disc.png
 </pre>
 
+## License
+
+These scripts and images are shared for personal use. Individual components remain licensed under their respective authors.
+
 
         
