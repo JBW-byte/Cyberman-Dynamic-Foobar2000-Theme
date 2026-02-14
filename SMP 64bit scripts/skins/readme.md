@@ -30,7 +30,7 @@ Foobar2000 64Bit/
 
 ## License
 
-These scripts and images are shared for personal use. Individual components remain licensed under their respective authors.
+These Scripts and Images are Shared for Personal Use. Individual components remain licensed under their respective authors.
 
 
         
