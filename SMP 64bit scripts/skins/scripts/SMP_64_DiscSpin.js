@@ -622,7 +622,6 @@ const State = {
         staticH: 0,
         staticX: 0,
         staticY: 0,
-        bgColor: 0,
         imgWidth: 0,
         imgHeight: 0,
         keepAspectRatio: true,
@@ -1120,7 +1119,6 @@ const Renderer = {
         State.updatePaintCache();
         
         const pc = State.paintCache;
-        gr.FillSolidRect(0, 0, pc.windowWidth, pc.windowHeight, pc.bgColor);
         
         if (!State.img) return;
         
@@ -1475,6 +1473,7 @@ function init() {
     }
 
 })();
+
 
 
 
