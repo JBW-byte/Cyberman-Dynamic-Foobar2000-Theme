@@ -23,6 +23,8 @@ Foobar2000 64Bit/
         ├── mask.png
         ├── vinyl_mask.png
         ├── center_album_rim.png
-        └── default_disc.png</pre>
+        └── default_disc.png
+</pre>
+
 
         
