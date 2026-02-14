@@ -4,7 +4,7 @@
 
 It features a **dynamic colour scheme based on album artwork**, custom playback controls, multiple VU meter skins, and configurable spectrum and layout presets.
 
-> **Last updated:** 13 February 2026
+> **Last updated:** 14 February 2026
 
 ---
 
