@@ -1,14 +1,32 @@
-	         // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-	        // ======= SMP 64bit Disc Spin V2 Script ======= \\
-	       // ======= Spins Disc + Artwork + Cover  ========= \\
-
-    // ===================*** Foobar2000 64bit ***================== \\
-   // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
-  // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
- // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
-// ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
+// ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+// ======= SMP 64bit Disc Spin V3 Script ======= \\
+// ======= WITH CLEAR CACHE OPTION ========= \\
 
 window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
+
+// ====================== UI DETECTION ======================
+const UI = {
+    isDUI() {
+        return window.InstanceType === 1 || typeof window.InstanceType === 'undefined';
+    },
+    
+    isCUI() {
+        return window.InstanceType === 1;
+    },
+
+    getBackgroundColor() {
+        try {
+            if (this.isDUI()) {
+                return window.GetColourDUI(0);
+            } else {
+                return UI.getBackgroundColor(1);
+            }
+        } catch (e) {
+            // Fallback to black
+            return 0xFF000000;
+        }
+    }
+};
 
 // ====================== CONFIGURATION ======================
 const CONFIG = Object.freeze({
@@ -489,7 +507,7 @@ const AssetManager = {
 
 // ====================== IMAGE PROCESSOR ======================
 const ImageProcessor = {
-    scaleToSquare(raw, targetSize, interpolationMode) {
+    scaleToSquare(raw, targetSize, interpolationMode, imageType) {
         if (!raw) return null;
         
         const w = raw.Width;
@@ -502,7 +520,9 @@ const ImageProcessor = {
             const g = newImg.GetGraphics();
             g.SetInterpolationMode(interpolationMode);
             
-            if (AssetManager.hasMask()) {
+            // Only fill black for album art being converted to disc format
+            // Real disc images and default disc already have proper backgrounds
+            if (AssetManager.hasMask() && imageType === CONFIG.IMAGE_TYPE.ALBUM_ART) {
                 g.FillSolidRect(0, 0, targetSize, targetSize, 0xFF000000);
             }
             
@@ -573,7 +593,7 @@ const ImageProcessor = {
     processForDisc(raw, targetSize, imageType, interpolationMode) {
         if (!raw) return null;
         
-        let processed = this.scaleToSquare(raw, targetSize, interpolationMode);
+        let processed = this.scaleToSquare(raw, targetSize, interpolationMode, imageType);
         if (!processed) return null;
         
         const shouldMask = AssetManager.hasMask() && 
@@ -675,7 +695,6 @@ const State = {
         pc.windowWidth = w;
         pc.windowHeight = h;
         pc.keepAspectRatio = s.keepAspectRatio;
-        pc.bgColor = window.GetColourDUI(1);
         
         if (this.img) {
             pc.imgWidth = this.img.Width;
@@ -744,6 +763,7 @@ const State = {
 const ImageLoader = {
     cache: new LRUCache(CONFIG.MAX_CACHE_ENTRIES),
     tf_path: fb.TitleFormat("$directory_path(%path%)"),
+    tf_folder: fb.TitleFormat("$directory(%path%)"),
     tf_artist: fb.TitleFormat("%artist%"),
     tf_album: fb.TitleFormat("%album%"),
     tf_title: fb.TitleFormat("%title%"),
@@ -780,37 +800,69 @@ const ImageLoader = {
     },
     
     getMetadataNames(metadb) {
+        const artist = this.tf_artist.EvalWithMetadb(metadb);
+        const album = this.tf_album.EvalWithMetadb(metadb);
+        const title = this.tf_title.EvalWithMetadb(metadb);
+        const folder = this.tf_folder.EvalWithMetadb(metadb);
+        
+        // Create "Artist - Title" combination
+        const artistTitle = (artist && title) ? `${artist} - ${title}` : "";
+        
         return {
-            artist: this.tf_artist.EvalWithMetadb(metadb),
-            album: this.tf_album.EvalWithMetadb(metadb),
-            title: this.tf_title.EvalWithMetadb(metadb)
+            artist: artist,
+            album: album,
+            title: title,
+            folder: folder,
+            artistTitle: artistTitle
         };
     },
     
     searchInFolder(folder, patterns, metadata) {
-        const paths = FileManager.buildSearchPaths(folder, patterns, [metadata.album, metadata.title]);
+        const metadataNames = [
+            metadata.album, 
+            metadata.title, 
+            metadata.artist,
+            metadata.folder,
+            metadata.artistTitle
+        ].filter(name => name); // Remove empty strings
+        
+        const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames);
+        return FileManager.findImageInPaths(paths);
+    },
+    
+    searchInFolderAnyFile(folder, patterns) {
+        const paths = FileManager.buildSearchPaths(folder, patterns, []);
         return FileManager.findImageInPaths(paths);
     },
     
     searchForDisc(metadb, baseFolder) {
         const metadata = this.getMetadataNames(metadb);
-        const searchNames = [metadata.artist, metadata.album, metadata.title];
+        const searchNames = [
+            metadata.artist, 
+            metadata.album, 
+            metadata.title, 
+            metadata.folder,
+            metadata.artistTitle
+        ].filter(name => name);
         
-        const allFolders = FileManager.enumSubfolders(baseFolder);
+        // ===== PHASE 1: Search in current track's folder tree =====
         
-        const priorityFolders = [];
-        const otherFolders = [];
-        
-        allFolders.forEach(folder => {
-            if (FileManager.matchesFolderName(folder, searchNames)) {
-                priorityFolders.push(folder);
-            } else {
-                otherFolders.push(folder);
+        // 1A. Search track folder for metadata-named files
+        const trackFolderMatch = this.searchInFolder(baseFolder, CONFIG.DISC_PATTERNS, metadata);
+        if (trackFolderMatch) {
+            const img = this.loadCached(trackFolderMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
+            if (img) {
+                AssetManager.autoSelectMask(trackFolderMatch);
+                return { img, path: trackFolderMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC };
             }
-        });
+        }
         
-        for (let folder of priorityFolders) {
-            const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
+        // 1B. Search all subfolders of track folder for ANY disc art
+        const trackSubfolders = FileManager.enumSubfolders(baseFolder);
+        for (let subfolder of trackSubfolders) {
+            if (subfolder === baseFolder) continue; // Skip the root (already searched)
+            
+            const found = this.searchInFolderAnyFile(subfolder, CONFIG.DISC_PATTERNS);
             if (found) {
                 const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
                 if (img) {
@@ -820,50 +872,67 @@ const ImageLoader = {
             }
         }
         
-        for (let folder of otherFolders) {
-            const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
-            if (found) {
-                const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
-                if (img) {
-                    AssetManager.autoSelectMask(found);
-                    return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
-                }
-            }
-        }
-        
+        // ===== PHASE 2: Search in custom folders =====
         const customFolders = CustomFolders.getAll();
+        
         for (let customFolder of customFolders) {
-            const allCustomFolders = FileManager.enumSubfolders(customFolder);
-            
-            const customPriorityFolders = [];
-            const customOtherFolders = [];
-            
-            allCustomFolders.forEach(folder => {
-                if (FileManager.matchesFolderName(folder, searchNames)) {
-                    customPriorityFolders.push(folder);
-                } else {
-                    customOtherFolders.push(folder);
-                }
-            });
-            
-            for (let folder of customPriorityFolders) {
-                const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
-                if (found) {
-                    const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+            // 2A. Check if custom folder itself matches metadata names
+            if (FileManager.matchesFolderName(customFolder, searchNames)) {
+                // Search in the matching custom folder
+                const customMatch = this.searchInFolder(customFolder, CONFIG.DISC_PATTERNS, metadata);
+                if (customMatch) {
+                    const img = this.loadCached(customMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
                     if (img) {
-                        AssetManager.autoSelectMask(found);
-                        return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                        AssetManager.autoSelectMask(customMatch);
+                        return { img, path: customMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                    }
+                }
+                
+                // Search in subfolders of matching custom folder
+                const customSubfolders = FileManager.enumSubfolders(customFolder);
+                for (let subfolder of customSubfolders) {
+                    if (subfolder === customFolder) continue;
+                    
+                    const found = this.searchInFolderAnyFile(subfolder, CONFIG.DISC_PATTERNS);
+                    if (found) {
+                        const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+                        if (img) {
+                            AssetManager.autoSelectMask(found);
+                            return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                        }
                     }
                 }
             }
             
-            for (let folder of customOtherFolders) {
-                const found = this.searchInFolder(folder, CONFIG.DISC_PATTERNS, metadata);
-                if (found) {
-                    const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
-                    if (img) {
-                        AssetManager.autoSelectMask(found);
-                        return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+            // 2B. Look for matching subfolders within custom folder
+            const immediateSubfolders = FileManager.getSubfolders(customFolder);
+            
+            for (let subfolder of immediateSubfolders) {
+                // Only search if subfolder name matches metadata
+                if (FileManager.matchesFolderName(subfolder, searchNames)) {
+                    // Search in the matching subfolder
+                    const subfolderMatch = this.searchInFolder(subfolder, CONFIG.DISC_PATTERNS, metadata);
+                    if (subfolderMatch) {
+                        const img = this.loadCached(subfolderMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
+                        if (img) {
+                            AssetManager.autoSelectMask(subfolderMatch);
+                            return { img, path: subfolderMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                        }
+                    }
+                    
+                    // Search deeper in matching subfolder tree
+                    const deepSubfolders = FileManager.enumSubfolders(subfolder);
+                    for (let deepFolder of deepSubfolders) {
+                        if (deepFolder === subfolder) continue;
+                        
+                        const found = this.searchInFolderAnyFile(deepFolder, CONFIG.DISC_PATTERNS);
+                        if (found) {
+                            const img = this.loadCached(found, CONFIG.IMAGE_TYPE.REAL_DISC);
+                            if (img) {
+                                AssetManager.autoSelectMask(found);
+                                return { img, path: found, type: CONFIG.IMAGE_TYPE.REAL_DISC };
+                            }
+                        }
                     }
                 }
             }
@@ -874,54 +943,60 @@ const ImageLoader = {
     
     searchForCover(metadb, baseFolder) {
         const metadata = this.getMetadataNames(metadb);
-        const searchNames = [metadata.artist, metadata.album];
+        const searchNames = [
+            metadata.artist, 
+            metadata.album, 
+            metadata.folder,
+            metadata.artistTitle
+        ].filter(name => name);
         
-        const allFolders = FileManager.enumSubfolders(baseFolder);
+        // Search track folder
+        const trackMatch = this.searchInFolder(baseFolder, CONFIG.COVER_PATTERNS, metadata);
+        if (trackMatch) return trackMatch;
         
-        const priorityFolders = [];
-        const otherFolders = [];
-        
-        allFolders.forEach(folder => {
-            if (FileManager.matchesFolderName(folder, searchNames)) {
-                priorityFolders.push(folder);
-            } else {
-                otherFolders.push(folder);
-            }
-        });
-        
-        for (let folder of priorityFolders) {
-            const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
+        // Search track subfolders
+        const trackSubfolders = FileManager.enumSubfolders(baseFolder);
+        for (let subfolder of trackSubfolders) {
+            if (subfolder === baseFolder) continue;
+            
+            const found = this.searchInFolderAnyFile(subfolder, CONFIG.COVER_PATTERNS);
             if (found) return found;
         }
         
-        for (let folder of otherFolders) {
-            const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
-            if (found) return found;
-        }
-        
+        // Search custom folders
         const customFolders = CustomFolders.getAll();
+        
         for (let customFolder of customFolders) {
-            const allCustomFolders = FileManager.enumSubfolders(customFolder);
-            
-            const customPriorityFolders = [];
-            const customOtherFolders = [];
-            
-            allCustomFolders.forEach(folder => {
-                if (FileManager.matchesFolderName(folder, searchNames)) {
-                    customPriorityFolders.push(folder);
-                } else {
-                    customOtherFolders.push(folder);
+            // Check if custom folder itself matches
+            if (FileManager.matchesFolderName(customFolder, searchNames)) {
+                const customMatch = this.searchInFolder(customFolder, CONFIG.COVER_PATTERNS, metadata);
+                if (customMatch) return customMatch;
+                
+                const customSubfolders = FileManager.enumSubfolders(customFolder);
+                for (let subfolder of customSubfolders) {
+                    if (subfolder === customFolder) continue;
+                    
+                    const found = this.searchInFolderAnyFile(subfolder, CONFIG.COVER_PATTERNS);
+                    if (found) return found;
                 }
-            });
-            
-            for (let folder of customPriorityFolders) {
-                const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
-                if (found) return found;
             }
             
-            for (let folder of customOtherFolders) {
-                const found = this.searchInFolder(folder, CONFIG.COVER_PATTERNS, metadata);
-                if (found) return found;
+            // Look for matching subfolders
+            const immediateSubfolders = FileManager.getSubfolders(customFolder);
+            
+            for (let subfolder of immediateSubfolders) {
+                if (FileManager.matchesFolderName(subfolder, searchNames)) {
+                    const subfolderMatch = this.searchInFolder(subfolder, CONFIG.COVER_PATTERNS, metadata);
+                    if (subfolderMatch) return subfolderMatch;
+                    
+                    const deepSubfolders = FileManager.enumSubfolders(subfolder);
+                    for (let deepFolder of deepSubfolders) {
+                        if (deepFolder === subfolder) continue;
+                        
+                        const found = this.searchInFolderAnyFile(deepFolder, CONFIG.COVER_PATTERNS);
+                        if (found) return found;
+                    }
+                }
             }
         }
         
@@ -1038,7 +1113,8 @@ const ImageLoader = {
             const scaled = ImageProcessor.scaleToSquare(
                 raw, 
                 State.settings.maxImageSize, 
-                State.settings.interpolationMode
+                State.settings.interpolationMode,
+                CONFIG.IMAGE_TYPE.DEFAULT_DISC
             );
             
             if (scaled) {
@@ -1111,7 +1187,7 @@ const Renderer = {
     }
 };
 
-// ====================== MENU MANAGER ======================
+// ================= MENU MANAGER =================
 const MenuManager = {
     show(x, y) {
         const menu = window.CreatePopupMenu();
@@ -1127,6 +1203,10 @@ const MenuManager = {
         menu.CheckMenuItem(3, s.keepAspectRatio);
         
         this.addImageSettingsMenu(menu);
+        
+        menu.AppendMenuSeparator();
+        menu.AppendMenuItem(0, 900, "Clear Image Cache");
+        
         this.addCustomFoldersMenu(menu);
         
         const idx = menu.TrackPopupMenu(x, y);
@@ -1304,6 +1384,15 @@ const MenuManager = {
             
             case 70:
                 CustomFolders.clear();
+                if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                changed = true;
+                break;
+            
+            case 900:
+                // Clear image cache
+                ImageLoader.cache.clear();
+                AssetManager.maskCache.clear();
+                AssetManager.rimCache.clear();
                 if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
                 changed = true;
                 break;
