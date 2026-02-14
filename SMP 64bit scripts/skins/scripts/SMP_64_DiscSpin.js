@@ -7,7 +7,7 @@ window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 // ====================== UI DETECTION ======================
 const UI = {
     isDUI() {
-        return window.InstanceType === 1 || typeof window.InstanceType === 'undefined';
+        return window.InstanceType === 0 || typeof window.InstanceType === 'undefined';
     },
     
     isCUI() {
@@ -1491,4 +1491,5 @@ function init() {
     } else {
         window.SetTimeout(waitForReady, 50);
     }
+
 })();
