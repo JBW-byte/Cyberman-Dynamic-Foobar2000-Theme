@@ -1,3 +1,5 @@
+Install SMP [64bit](https://github.com/marc2k3/spider-monkey-panel-x64/releases) and add that to a panel, right click configure panel, use the file option to select the script.<br><br>
+
 skins folder should be in FooBar2000/Profile folder for all the correct file paths.
 <br><br>
 
