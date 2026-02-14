@@ -4,30 +4,6 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 
-// ====================== UI DETECTION ======================
-const UI = {
-    isDUI() {
-        return window.InstanceType === 0 || typeof window.InstanceType === 'undefined';
-    },
-    
-    isCUI() {
-        return window.InstanceType === 1;
-    },
-
-    getBackgroundColor() {
-        try {
-            if (this.isDUI()) {
-                return window.GetColourDUI(0);
-            } else {
-                return UI.getBackgroundColor(1);
-            }
-        } catch (e) {
-            // Fallback to black
-            return 0xFF000000;
-        }
-    }
-};
-
 // ====================== CONFIGURATION ======================
 const CONFIG = Object.freeze({
     TIMER_INTERVAL: 50,
@@ -1493,3 +1469,4 @@ function init() {
     }
 
 })();
+
