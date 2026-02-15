@@ -214,7 +214,7 @@ Extract to the `profile/` folder.
 
 ## License
 
-This theme is shared for personal use. Individual components remain licensed under their respective authors.
+This theme is shared for Personal use Only. Individual components remain licensed under their respective authors.
 
 ---
 
