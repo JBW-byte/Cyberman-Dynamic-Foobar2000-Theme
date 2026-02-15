@@ -10,6 +10,29 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
 
+
+var paintCache = {
+    get bgColor() {
+        if (window.IsDefaultUI) {
+            return window.GetColourDUI(1);
+        } else {
+            try {
+                return window.GetColourCUI(3);
+            } catch (e) {
+                return window.GetColourDUI(1); // Final fallback
+            }
+        }
+    }
+};
+
+function on_colours_changed() {
+    window.Repaint();
+}
+
+function on_font_changed() {
+    window.Repaint();
+}
+
 // ====================== CONFIGURATION ======================
 const CONFIG = Object.freeze({
     TIMER_INTERVAL: 50,
@@ -676,6 +699,7 @@ const State = {
         pc.windowWidth = w;
         pc.windowHeight = h;
         pc.keepAspectRatio = s.keepAspectRatio;
+		
         
         if (this.img) {
             pc.imgWidth = this.img.Width;
@@ -1422,6 +1446,9 @@ const MenuManager = {
 
 // ====================== CALLBACKS ======================
 function on_paint(gr) {
+	
+	gr.FillSolidRect(0, 0, window.Width, window.Height, paintCache.bgColor);
+
     Renderer.paint(gr);
 }
 
