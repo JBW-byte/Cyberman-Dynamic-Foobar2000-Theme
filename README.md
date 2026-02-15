@@ -42,7 +42,7 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 
 * Disc artwork files must be named one of the following:
 
-  * `media`, `disc`, `vinyl`, `cd`, `CD`, `Media`, `Disc`,
+  * `media`, `disc`, `vinyl`, `cd`, `CD`, `Media`, `Disc`, `Vinyl`,
 * Supported formats: `.jpg`, `.png` `.jpeg` `.webp` `.bmp`
 * Artwork **Multiple locations supported, any sub folder in a named folder** some edge cases might not work depending on naming.
 * Disc masking is applied automatically to generate disc visuals from album art
