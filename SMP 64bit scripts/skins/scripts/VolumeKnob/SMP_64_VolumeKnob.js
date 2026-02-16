@@ -1,7 +1,10 @@
 'use strict'; 
-	  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-	 // === SMP 64bit Volume Knob V2.0 (Optimized) ===\\
-	// =========== Spider Monkey Panel 64bit ==========\\
+		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
+		 // ========= SMP 64bit Volume Knob V2.0 =========\\
+		// =========== Simple Function + Themes ===========\\
+
+ // ===================*** Foobar2000 64bit ***================== \\
+// ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 
 window.DefineScript('SMP 64bit Volume Knob', { author: 'L.E.D.' });
 
