@@ -1,5 +1,5 @@
 	         // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-	        // ======= SMP 64bit Disc Spin V3 Script ======= \\
+	        // === SMP 64bit Disc Spin V3 OPTIMIZED ==== \\
 	       // ======= Spins Disc + Artwork + Cover  ========= \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -8,7 +8,28 @@
  // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
 // ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
 
-window.DefineScript('SMP 64bit Disc Spin', { author: 'L.E.D.' });
+window.DefineScript('SMP 64bit Disc Spin Optimized', { author: 'L.E.D.' });
+
+'use strict'; 
+
+// ====================== HELPER INCLUDES ======================
+include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
+
+// ====================== PROPERTIES (Using helpers _p) ======================
+const props = {
+    spinningEnabled: new _p('RP.SpinningEnabled', true),
+    spinSpeed: new _p('RP.SpinSpeed', 2.0),
+    useAlbumArtOnly: new _p('RP.UseAlbumArtOnly', false),
+    keepAspectRatio: new _p('RP.KeepAspectRatio', true),
+    interpolationMode: new _p('RP.InterpolationMode', 1),
+    maxImageSize: new _p('RP.MaxImageSize', 250),
+    savedPath: new _p('RP.SavedPath', ''),
+    savedIsDisc: new _p('RP.SavedIsDisc', false),
+    maskType: new _p('RP.MaskType', 0),
+    userOverrideMask: new _p('RP.UserOverrideMask', false)
+};
 
 
 var paintCache = {
@@ -105,6 +126,10 @@ const CONFIG = Object.freeze({
     }
 });
 
+// Apply validation to properties
+props.spinSpeed.value = Math.max(CONFIG.MIN_SPIN_SPEED, Math.min(CONFIG.MAX_SPIN_SPEED, props.spinSpeed.value));
+props.maxImageSize.value = Math.max(CONFIG.MIN_DISC_SIZE, Math.min(CONFIG.MAX_DISC_SIZE, props.maxImageSize.value));
+
 // ====================== UTILITIES ======================
 const Utils = {
     clamp(value, min, max) {
@@ -122,8 +147,7 @@ const Utils = {
     },
     
     sanitizeFilename(str) {
-        if (!str) return "";
-        return str.replace(/[\\/:*?"<>|]/g, '').trim();
+        return str ? _fbSanitise(str) : "";  // Using helper!
     },
     
     normalizeString(str) {
@@ -214,7 +238,7 @@ const FileManager = {
             return this.cache.get(path);
         }
         
-        const exists = utils.FileTest(path, "e");
+        const exists = _isFile(path) || _isFolder(path);  // Using helpers!
         this.cache.set(path, exists);
         
         if (this.cache.size > CONFIG.MAX_FILE_CACHE) {
@@ -226,12 +250,7 @@ const FileManager = {
     },
     
     isDirectory(path) {
-        if (!path) return false;
-        try {
-            return utils.FileTest(path, "d");
-        } catch (e) {
-            return false;
-        }
+        return path ? _isFolder(path) : false;  // Using helper!
     },
     
     getSubfolders(folder) {
@@ -337,15 +356,8 @@ const CustomFolders = {
     folders: [],
     
     load() {
-        try {
-            const saved = window.GetProperty("RP.CustomFolders", "");
-            if (saved) {
-                this.folders = JSON.parse(saved);
-            }
-        } catch (e) {
-            console.log("Error loading custom folders:", e);
-            this.folders = [];
-        }
+        const saved = window.GetProperty("RP.CustomFolders", "");
+        this.folders = saved ? _jsonParse(saved, []) : [];  // Using helper!
     },
     
     save() {
@@ -399,8 +411,8 @@ const AssetManager = {
     userOverrideMask: false,
     
     init() {
-        this.currentMaskType = window.GetProperty("RP.MaskType", 0);
-        this.userOverrideMask = window.GetProperty("RP.UserOverrideMask", false);
+        this.currentMaskType = props.maskType.value;  // Using props!
+        this.userOverrideMask = props.userOverrideMask.enabled;  // Using props!
         this.loadMask();
         this.loadRim();
     },
@@ -440,8 +452,8 @@ const AssetManager = {
         this.currentMaskType = index;
         this.userOverrideMask = isUserOverride;
         
-        window.SetProperty("RP.MaskType", index);
-        window.SetProperty("RP.UserOverrideMask", isUserOverride);
+        props.maskType.value = index;  // Auto-saves!
+        props.userOverrideMask.enabled = isUserOverride;  // Auto-saves!
         
         this.loadMask();
         return true;
@@ -624,17 +636,6 @@ const State = {
     spinTimer: null,
     loadTimer: null,
     
-    settings: {
-        spinningEnabled: true,
-        spinSpeed: 2.0,
-        useAlbumArtOnly: false,
-        keepAspectRatio: true,
-        interpolationMode: 1,
-        maxImageSize: 250,
-        savedPath: "",
-        savedIsDisc: false
-    },
-    
     paintCache: {
         windowWidth: 0,
         windowHeight: 0,
@@ -649,23 +650,6 @@ const State = {
         imgHeight: 0,
         keepAspectRatio: true,
         valid: false
-    },
-    
-    loadSettings() {
-        const s = this.settings;
-        s.spinningEnabled = window.GetProperty("RP.SpinningEnabled", true);
-        s.spinSpeed = Utils.clamp(window.GetProperty("RP.SpinSpeed", 2.0), CONFIG.MIN_SPIN_SPEED, CONFIG.MAX_SPIN_SPEED);
-        s.useAlbumArtOnly = window.GetProperty("RP.UseAlbumArtOnly", false);
-        s.keepAspectRatio = window.GetProperty("RP.KeepAspectRatio", true);
-        s.interpolationMode = window.GetProperty("RP.InterpolationMode", 1);
-        s.maxImageSize = Utils.clamp(window.GetProperty("RP.MaxImageSize", 250), CONFIG.MIN_DISC_SIZE, CONFIG.MAX_DISC_SIZE);
-        s.savedPath = window.GetProperty("RP.SavedPath", "");
-        s.savedIsDisc = window.GetProperty("RP.SavedIsDisc", false);
-    },
-    
-    saveSetting(key, value) {
-        this.settings[key] = value;
-        window.SetProperty("RP." + key.charAt(0).toUpperCase() + key.slice(1), value);
     },
     
     setImage(newImg, discState, imgType) {
@@ -685,20 +669,19 @@ const State = {
         const w = window.Width;
         const h = window.Height;
         const pc = this.paintCache;
-        const s = this.settings;
         
         if (pc.valid && 
             pc.windowWidth === w && 
             pc.windowHeight === h &&
             pc.imgWidth === (this.img ? this.img.Width : 0) &&
             pc.imgHeight === (this.img ? this.img.Height : 0) &&
-            pc.keepAspectRatio === s.keepAspectRatio) {
+            pc.keepAspectRatio === props.keepAspectRatio.enabled) {  // Using props!
             return;
         }
         
         pc.windowWidth = w;
         pc.windowHeight = h;
-        pc.keepAspectRatio = s.keepAspectRatio;
+        pc.keepAspectRatio = props.keepAspectRatio.enabled;  // Using props!
 		
         
         if (this.img) {
@@ -713,7 +696,7 @@ const State = {
             } else {
                 let sw = w, sh = h, sx = 0, sy = 0;
                 
-                if (s.keepAspectRatio) {
+                if (props.keepAspectRatio.enabled) {  // Using props!
                     const ratio = Math.min(w / this.img.Width, h / this.img.Height);
                     sw = this.img.Width * ratio;
                     sh = this.img.Height * ratio;
@@ -748,14 +731,14 @@ const State = {
     updateTimer() {
         const shouldRun = this.img && 
                          this.isDiscImage && 
-                         this.settings.spinningEnabled && 
+                         props.spinningEnabled.enabled &&  // Using props!
                          fb.IsPlaying && 
                          !fb.IsPaused && 
-                         !this.settings.useAlbumArtOnly;
+                         !props.useAlbumArtOnly.enabled;  // Using props!
         
         if (shouldRun && !this.spinTimer) {
             this.spinTimer = window.SetInterval(() => {
-                this.angle = (this.angle + this.settings.spinSpeed) % CONFIG.ANGLE_MODULO;
+                this.angle = (this.angle + props.spinSpeed.value) % CONFIG.ANGLE_MODULO;  // Using props!
                 window.Repaint();
             }, CONFIG.TIMER_INTERVAL);
         } else if (!shouldRun && this.spinTimer) {
@@ -774,8 +757,7 @@ const ImageLoader = {
     tf_title: fb.TitleFormat("%title%"),
     
     loadCached(path, imageType) {
-        const s = State.settings;
-        const key = `${path}|${s.maxImageSize}|${imageType}|${AssetManager.currentMaskType}`;
+        const key = `${path}|${props.maxImageSize.value}|${imageType}|${AssetManager.currentMaskType}`;  // Using props!
         
         let cached = this.cache.get(key);
         if (cached) return cached;
@@ -788,9 +770,9 @@ const ImageLoader = {
             
             const processed = ImageProcessor.processForDisc(
                 raw, 
-                s.maxImageSize, 
+                props.maxImageSize.value,  // Using props!
                 imageType, 
-                s.interpolationMode
+                props.interpolationMode.value  // Using props!
             );
             
             if (processed) {
@@ -827,14 +809,10 @@ const ImageLoader = {
     },
     
     searchInFolder(folder, patterns, metadata) {
-        const metadataNames = [
-            metadata.album, 
-            metadata.title, 
-            metadata.artist,
-            metadata.folder,
-            metadata.artistTitle,
-            metadata.artistAlbum
-        ].filter(name => name);
+        const metadataNames = _.compact([  // Using lodash!
+            metadata.album, metadata.title, metadata.artist,
+            metadata.folder, metadata.artistTitle, metadata.artistAlbum
+        ]);
         
         const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames);
         return FileManager.findImageInPaths(paths);
@@ -847,14 +825,10 @@ const ImageLoader = {
     
     searchForDisc(metadb, baseFolder) {
         const metadata = this.getMetadataNames(metadb);
-        const searchNames = [
-            metadata.artist, 
-            metadata.album, 
-            metadata.title, 
-            metadata.folder,
-            metadata.artistTitle,
-            metadata.artistAlbum
-        ].filter(name => name);
+        const searchNames = _.compact([  // Using lodash!
+            metadata.artist, metadata.album, metadata.title, 
+            metadata.folder, metadata.artistTitle, metadata.artistAlbum
+        ]);
         
         // ===== PHASE 1: Search in current track's folder tree =====
         
@@ -956,12 +930,9 @@ const ImageLoader = {
     
     searchForCover(metadb, baseFolder) {
         const metadata = this.getMetadataNames(metadb);
-        const searchNames = [
-            metadata.artist, 
-            metadata.album, 
-            metadata.folder,
-            metadata.artistAlbum
-        ].filter(name => name);
+        const searchNames = _.compact([  // Using lodash!
+            metadata.artist, metadata.album, metadata.folder, metadata.artistAlbum
+        ]);
         
         // ===== PHASE 1: Search in current track's folder tree =====
         
@@ -1040,12 +1011,12 @@ const ImageLoader = {
             const folderPath = this.tf_path.EvalWithMetadb(metadb);
             
             // First try to find disc art (unless album art only mode)
-            if (!State.settings.useAlbumArtOnly) {
+            if (!props.useAlbumArtOnly.enabled) {
                 const result = this.searchForDisc(metadb, folderPath);
                 if (result) {
                     State.setImage(result.img, true, result.type);
-                    State.saveSetting('savedPath', result.path);
-                    State.saveSetting('savedIsDisc', true);
+                    props.savedPath.value = result.path;
+                    props.savedIsDisc.enabled = true;
                     State.updateTimer();
                     return;
                 }
@@ -1057,17 +1028,17 @@ const ImageLoader = {
                 try {
                     let raw = gdi.Image(coverPath);
                     if (raw) {
-                        if (State.settings.useAlbumArtOnly) {
+                        if (props.useAlbumArtOnly.enabled) {
                             // Static album art display
                             const scaled = ImageProcessor.scaleProportional(
                                 raw,
                                 CONFIG.MAX_STATIC_SIZE,
-                                State.settings.interpolationMode
+                                props.interpolationMode.value
                             );
                             if (scaled) {
                                 State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART);
-                                State.saveSetting('savedPath', coverPath);
-                                State.saveSetting('savedIsDisc', false);
+                                props.savedPath.value = coverPath;
+                                props.savedIsDisc.enabled = false;
                                 State.updateTimer();
                                 return;
                             }
@@ -1075,14 +1046,14 @@ const ImageLoader = {
                             // Convert album art to disc format
                             const processed = ImageProcessor.processForDisc(
                                 raw, 
-                                State.settings.maxImageSize, 
+                                props.maxImageSize.value, 
                                 CONFIG.IMAGE_TYPE.ALBUM_ART, 
-                                State.settings.interpolationMode
+                                props.interpolationMode.value
                             );
                             if (processed) {
                                 State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART);
-                                State.saveSetting('savedPath', coverPath);
-                                State.saveSetting('savedIsDisc', true);
+                                props.savedPath.value = coverPath;
+                                props.savedIsDisc.enabled = true;
                                 State.updateTimer();
                                 return;
                             }
@@ -1110,30 +1081,29 @@ const ImageLoader = {
             return;
         }
         
-        const s = State.settings;
         
         try {
             if (image) {
-                if (s.useAlbumArtOnly) {
+                if (props.useAlbumArtOnly.enabled) {
                     const scaled = ImageProcessor.scaleProportional(
                         image, 
                         CONFIG.MAX_STATIC_SIZE, 
-                        s.interpolationMode
+                        props.interpolationMode.value
                     );
                     if (scaled) {
                         State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART);
-                        if (image_path) State.saveSetting('savedPath', image_path);
+                        if (image_path) props.savedPath.value = image_path;
                     }
                 } else {
                     const processed = ImageProcessor.processForDisc(
                         image, 
-                        s.maxImageSize, 
+                        props.maxImageSize.value, 
                         CONFIG.IMAGE_TYPE.ALBUM_ART, 
-                        s.interpolationMode
+                        props.interpolationMode.value
                     );
                     if (processed) {
                         State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART);
-                        if (image_path) State.saveSetting('savedPath', image_path);
+                        if (image_path) props.savedPath.value = image_path;
                     }
                 }
             } else {
@@ -1155,15 +1125,15 @@ const ImageLoader = {
             
             const scaled = ImageProcessor.scaleToSquare(
                 raw, 
-                State.settings.maxImageSize, 
-                State.settings.interpolationMode,
+                props.maxImageSize.value,  // Using props!
+                props.interpolationMode.value,  // Using props!
                 CONFIG.IMAGE_TYPE.DEFAULT_DISC
             );
             
             if (scaled) {
                 State.setImage(scaled, true, CONFIG.IMAGE_TYPE.DEFAULT_DISC);
-                State.saveSetting('savedPath', CONFIG.PATHS.DEFAULT_DISC);
-                State.saveSetting('savedIsDisc', true);
+                props.savedPath.value = CONFIG.PATHS.DEFAULT_DISC;  // Using props!
+                props.savedIsDisc.enabled = true;  // Using props!
             }
         } catch (e) {
             console.log("Default disc load error:", e);
@@ -1184,7 +1154,7 @@ const Renderer = {
         
         if (!State.img) return;
         
-        gr.SetInterpolationMode(State.settings.interpolationMode);
+        gr.SetInterpolationMode(props.interpolationMode.value);  // Using props!
         
         if (!State.isDiscImage) {
             this.paintStatic(gr, pc);
@@ -1233,16 +1203,15 @@ const Renderer = {
 const MenuManager = {
     show(x, y) {
         const menu = window.CreatePopupMenu();
-        const s = State.settings;
         
         menu.AppendMenuItem(0, 1, "Album Art Only (Static)");
-        menu.CheckMenuItem(1, s.useAlbumArtOnly);
+        menu.CheckMenuItem(1, props.useAlbumArtOnly.enabled);
         
         menu.AppendMenuItem(0, 2, "Spinning Enabled");
-        menu.CheckMenuItem(2, s.spinningEnabled);
+        menu.CheckMenuItem(2, props.spinningEnabled.enabled);
         
         menu.AppendMenuItem(0, 3, "Keep Aspect Ratio");
-        menu.CheckMenuItem(3, s.keepAspectRatio);
+        menu.CheckMenuItem(3, props.keepAspectRatio.enabled);
         
         this.addImageSettingsMenu(menu);
         
@@ -1270,13 +1239,12 @@ const MenuManager = {
     
     addSpeedMenu(parent) {
         const speedMenu = window.CreatePopupMenu();
-        const s = State.settings;
         
-        CONFIG.SPEED_PRESETS.forEach((preset, i) => {
+        _.forEach(CONFIG.SPEED_PRESETS, (preset, i) => {
             speedMenu.AppendMenuItem(0, 10 + i, preset.name);
         });
         
-        const speedIdx = s.spinSpeed <= 1.0 ? 10 : (s.spinSpeed >= 3.0 ? 12 : 11);
+        const speedIdx = props.spinSpeed.value <= 1.0 ? 10 : (props.spinSpeed.value >= 3.0 ? 12 : 11);
         speedMenu.CheckMenuRadioItem(10, 12, speedIdx);
         
         speedMenu.AppendTo(parent, 0, "Rotation Speed");
@@ -1284,11 +1252,10 @@ const MenuManager = {
     
     addScalingMenu(parent) {
         const scalingMenu = window.CreatePopupMenu();
-        const s = State.settings;
         
-        CONFIG.INTERPOLATION_MODES.forEach((mode, i) => {
+        _.forEach(CONFIG.INTERPOLATION_MODES, (mode, i) => {
             scalingMenu.AppendMenuItem(0, 20 + i, mode.name);
-            if (s.interpolationMode === mode.value) {
+            if (props.interpolationMode.value === mode.value) {
                 scalingMenu.CheckMenuItem(20 + i, true);
             }
         });
@@ -1298,11 +1265,10 @@ const MenuManager = {
     
     addSizeMenu(parent) {
         const sizeMenu = window.CreatePopupMenu();
-        const s = State.settings;
         
-        CONFIG.DISC_SIZE_PRESETS.forEach((preset, i) => {
+        _.forEach(CONFIG.DISC_SIZE_PRESETS, (preset, i) => {
             sizeMenu.AppendMenuItem(0, 30 + i, preset.name);
-            if (s.maxImageSize === preset.value) {
+            if (props.maxImageSize.value === preset.value) {
                 sizeMenu.CheckMenuItem(30 + i, true);
             }
         });
@@ -1313,7 +1279,7 @@ const MenuManager = {
     addMaskMenu(parent) {
         const maskMenu = window.CreatePopupMenu();
         
-        CONFIG.MASK_TYPES.forEach((mask, i) => {
+        _.forEach(CONFIG.MASK_TYPES, (mask, i) => {
             maskMenu.AppendMenuItem(0, 40 + i, mask.name);
             if (AssetManager.currentMaskType === i) {
                 maskMenu.CheckMenuItem(40 + i, true);
@@ -1346,98 +1312,89 @@ const MenuManager = {
     
     handleSelection(idx) {
         let changed = false;
-        const s = State.settings;
         
-        switch (idx) {
-            case 1:
-                State.saveSetting('useAlbumArtOnly', !s.useAlbumArtOnly);
-                if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                changed = true;
-                break;
-            
-            case 2:
-                State.saveSetting('spinningEnabled', !s.spinningEnabled);
-                State.updateTimer();
-                changed = true;
-                break;
-            
-            case 3:
-                State.saveSetting('keepAspectRatio', !s.keepAspectRatio);
-                State.paintCache.valid = false;
-                changed = true;
-                break;
-            
-            case 10: case 11: case 12:
-                const newSpeed = CONFIG.SPEED_PRESETS[idx - 10].value;
-                if (s.spinSpeed !== newSpeed) {
-                    State.saveSetting('spinSpeed', newSpeed);
-                    changed = true;
-                }
-                break;
-            
-            case 20: case 21: case 22: case 23: case 24:
-                const newMode = CONFIG.INTERPOLATION_MODES[idx - 20].value;
-                if (s.interpolationMode !== newMode) {
-                    State.saveSetting('interpolationMode', newMode);
-                    ImageLoader.cache.clear();
-                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                    changed = true;
-                }
-                break;
-            
-            case 30: case 31: case 32: case 33: case 34:
-                const newSize = CONFIG.DISC_SIZE_PRESETS[idx - 30].value;
-                if (s.maxImageSize !== newSize) {
-                    State.saveSetting('maxImageSize', newSize);
-                    ImageLoader.cache.clear();
-                    AssetManager.maskCache.clear();
-                    AssetManager.rimCache.clear();
-                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                    changed = true;
-                }
-                break;
-            
-            case 40: case 41: case 42:
-                if (AssetManager.setMaskType(idx - 40, true)) {
-                    ImageLoader.cache.clear();
-                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                    changed = true;
-                }
-                break;
-            
-            case 50:
-                try {
-                    const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
-                    if (folder && CustomFolders.add(folder)) {
-                        if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                        changed = true;
-                    }
-                } catch (e) {
-                    console.log("Error adding custom folder:", e);
-                }
-                break;
-            
-            case 60: case 61: case 62: case 63: case 64:
-                if (CustomFolders.remove(idx - 60)) {
-                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                    changed = true;
-                }
-                break;
-            
-            case 70:
-                CustomFolders.clear();
-                if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                changed = true;
-                break;
-            
-            case 900:
-                // Clear image cache
+        // Toggle handlers
+        const toggles = {
+            1: { prop: props.useAlbumArtOnly, reload: true },
+            2: { prop: props.spinningEnabled, timer: true },
+            3: { prop: props.keepAspectRatio, cache: true }
+        };
+        
+        if (toggles[idx]) {
+            toggles[idx].prop.toggle();  // Built-in toggle!
+            if (toggles[idx].reload && State.currentMetadb) {
+                ImageLoader.loadForMetadb(State.currentMetadb, true);
+            }
+            if (toggles[idx].timer) State.updateTimer();
+            if (toggles[idx].cache) State.paintCache.valid = false;
+            changed = true;
+        }
+        
+        // Speed presets (10-12)
+        const speedPreset = _.find(CONFIG.SPEED_PRESETS, (p, i) => (i + 10) === idx);
+        if (speedPreset) {
+            props.spinSpeed.value = speedPreset.value;
+            changed = true;
+        }
+        
+        // Interpolation modes (20-24)
+        const interpMode = _.find(CONFIG.INTERPOLATION_MODES, (m, i) => (i + 20) === idx);
+        if (interpMode) {
+            props.interpolationMode.value = interpMode.value;
+            ImageLoader.cache.clear();
+            if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+            changed = true;
+        }
+        
+        // Size presets (30-34)
+        const sizePreset = _.find(CONFIG.DISC_SIZE_PRESETS, (p, i) => (i + 30) === idx);
+        if (sizePreset) {
+            props.maxImageSize.value = sizePreset.value;
+            ImageLoader.cache.clear();
+            AssetManager.maskCache.clear();
+            AssetManager.rimCache.clear();
+            if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+            changed = true;
+        }
+        
+        // Mask types (40-42)
+        if (idx >= 40 && idx <= 42) {
+            if (AssetManager.setMaskType(idx - 40, true)) {
                 ImageLoader.cache.clear();
-                AssetManager.maskCache.clear();
-                AssetManager.rimCache.clear();
                 if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
                 changed = true;
-                break;
+            }
+        }
+        
+        // Custom folder operations
+        if (idx === 50) {
+            try {
+                const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
+                if (folder && CustomFolders.add(folder)) {
+                    if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                    changed = true;
+                }
+            } catch (e) {
+                console.log("Error adding custom folder:", e);
+            }
+        } else if (idx >= 60 && idx <= 64) {
+            if (CustomFolders.remove(idx - 60)) {
+                if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+                changed = true;
+            }
+        } else if (idx === 70) {
+            CustomFolders.clear();
+            if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+            changed = true;
+        }
+        
+        // Clear cache (900)
+        if (idx === 900) {
+            ImageLoader.cache.clear();
+            AssetManager.maskCache.clear();
+            AssetManager.rimCache.clear();
+            if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+            changed = true;
         }
         
         if (changed) window.Repaint();
@@ -1502,7 +1459,7 @@ function on_script_unload() {
 
 // ====================== INITIALIZATION ======================
 function init() {
-    State.loadSettings();
+    // Props are already loaded!
     AssetManager.init();
     CustomFolders.load();
     
@@ -1510,16 +1467,16 @@ function init() {
     
     if (nowPlaying) {
         ImageLoader.loadForMetadb(nowPlaying, true);
-    } else if (State.settings.savedPath && FileManager.exists(State.settings.savedPath)) {
+    } else if (props.savedPath.value && FileManager.exists(props.savedPath.value)) {  // Using props!
         try {
-            const imageType = Utils.getImageType(State.settings.savedPath);
+            const imageType = Utils.getImageType(props.savedPath.value);  // Using props!
             
             if (imageType === CONFIG.IMAGE_TYPE.DEFAULT_DISC) {
                 ImageLoader.loadDefaultDisc();
             } else {
-                const img = ImageLoader.loadCached(State.settings.savedPath, imageType);
+                const img = ImageLoader.loadCached(props.savedPath.value, imageType);  // Using props!
                 if (img) {
-                    State.setImage(img, State.settings.savedIsDisc, imageType);
+                    State.setImage(img, props.savedIsDisc.enabled, imageType);  // Using props!
                 }
             }
         } catch (e) {
