@@ -1,6 +1,6 @@
 'use strict'; 
 	         // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-	        // === SMP 64bit Disc Spin V3 OPTIMIZED ==== \\
+	        // ===== SMP 64bit Disc Spin V3 OPTIMIZED ====== \\
 	       // ======= Spins Disc + Artwork + Cover  ========= \\
 
     // ===================*** Foobar2000 64bit ***================== \\
