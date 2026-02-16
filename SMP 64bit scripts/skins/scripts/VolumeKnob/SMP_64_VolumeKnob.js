@@ -8,629 +8,580 @@
 
 window.DefineScript('SMP 64bit Volume Knob', { author: 'L.E.D.' });
 
-var paintCache = {
-    get bgColor() {
-        if (window.IsDefaultUI) {
-            return window.GetColourDUI(1);
+// Manual RGB fallback
+const RGB = (r, g, b) => (0xff000000 | (r << 16) | (g << 8) | (b));
+
+include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
+
+// ====================== BUTTON PAINT OVERRIDE ======================
+// Override _button paint to use stretch mode for zero spacing between buttons
+_button.prototype.paint = function(gr) {
+	if (this.img) {
+		_drawImage(gr, this.img, this.x, this.y, this.w, this.h, image.stretch);
+	}
+}
+
+// ====================== CONSTANTS ======================
+const MENU_ID = {
+    ALIGN_V_TOP: 10,
+    ALIGN_V_MIDDLE: 11,
+    ALIGN_V_BOTTOM: 12,
+    SIZE_SMALL: 20,
+    SIZE_MEDIUM: 21,
+    SIZE_LARGE: 22,
+    SIZE_XL: 23,
+    SIZE_CUSTOM: 24,
+    MARGIN_NONE: 30,
+    MARGIN_SMALL: 31,
+    MARGIN_MEDIUM: 32,
+    MARGIN_LARGE: 33,
+    MODE_FIXED: 40,
+    MODE_FILL: 41,
+    COLOR_TOGGLE: 50,
+    COLOR_NORMAL: 51,
+    COLOR_HOVER: 52,
+    COLOR_DOWN: 53,
+    ALIGN_H_LEFT: 60,
+    ALIGN_H_CENTER: 61,
+    ALIGN_H_RIGHT: 62,
+    RESET: 99
+};
+
+const SIZE_PRESETS = {
+    SMALL: 32,
+    MEDIUM: 64,
+    LARGE: 128,
+    XL: 256
+};
+
+const MARGIN_PRESETS = {
+    NONE: 0,
+    SMALL: 5,
+    MEDIUM: 10,
+    LARGE: 20
+};
+
+const ALIGN = {
+    TOP: 0,
+    MIDDLE: 1,
+    BOTTOM: 2,
+    LEFT: 0,
+    CENTER: 1,
+    RIGHT: 2
+};
+
+// ====================== PROPERTY MANAGEMENT ======================
+const PropertyManager = {
+    defaults: {
+        btnSize: 64,
+        margin: 10,
+        alignV: 1,
+        alignH: 1,
+        fillPanel: false,
+        useTint: false,
+        colorNormal: RGB(255, 255, 255),
+        colorHover: RGB(150, 150, 150),
+        colorDown: RGB(100, 100, 100)
+    },
+    
+    validators: {
+        btnSize: (val) => {
+            const size = parseInt(val);
+            return (size >= 16 && size <= 512) ? size : 64;
+        },
+        margin: (val) => {
+            const m = parseInt(val);
+            return (m >= 0 && m <= 100) ? m : 10;
+        },
+        align: (val) => {
+            return (val >= 0 && val <= 2) ? val : 1;
+        }
+    },
+    
+    load() {
+        this.btnSize = this.validators.btnSize(window.GetProperty('Buttons: Size', this.defaults.btnSize));
+        this.margin = this.validators.margin(window.GetProperty('Buttons: Margin', this.defaults.margin));
+        this.alignV = this.validators.align(window.GetProperty('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', this.defaults.alignV));
+        this.alignH = this.validators.align(window.GetProperty('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', this.defaults.alignH));
+        this.fillPanel = window.GetProperty('Buttons: Fill Panel', this.defaults.fillPanel);
+        this.useTint = window.GetProperty('Colors: Use Tint', this.defaults.useTint);
+        this.colorNormal = window.GetProperty('Colors: Normal', this.defaults.colorNormal);
+        this.colorHover = window.GetProperty('Colors: Hover', this.defaults.colorHover);
+        this.colorDown = window.GetProperty('Colors: Down', this.defaults.colorDown);
+    },
+    
+    save(key, value) {
+        window.SetProperty(key, value);
+        this.load(); // Reload to ensure consistency
+    },
+    
+    reset() {
+        window.SetProperty('Buttons: Size', null);
+        window.SetProperty('Buttons: Margin', null);
+        window.SetProperty('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', null);
+        window.SetProperty('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', null);
+        window.SetProperty('Buttons: Fill Panel', null);
+        window.SetProperty('Colors: Use Tint', null);
+        window.SetProperty('Colors: Normal', null);
+        window.SetProperty('Colors: Hover', null);
+        window.SetProperty('Colors: Down', null);
+        this.load();
+    }
+};
+
+// ====================== BUTTON MANAGER ======================
+const ButtonManager = {
+    buttons: {},
+    cachedLayout: null,
+    lastPlayState: null,
+    updatePending: false,
+    
+    init() {
+        this.panel = new _panel(true);
+        this.buttonsHelper = new _buttons();
+        this.lastPlayState = null;
+    },
+    
+    dispose() {
+        if (this.buttons && typeof this.buttons === 'object') {
+            Object.values(this.buttons).forEach(btn => {
+                if (btn && typeof btn.dispose === 'function') {
+                    btn.dispose();
+                }
+            });
+        }
+        this.buttons = {};
+        this.cachedLayout = null;
+    },
+    
+    calculateLayout() {
+        const margin = _scale(PropertyManager.margin);
+        let layout = { margin };
+        
+        if (PropertyManager.fillPanel) {
+            // Fill Width mode - buttons stretch horizontally
+            layout.buttonWidth = (this.panel.w - (margin * 2)) / 4; // No padding between buttons
+            layout.buttonHeight = _scale(PropertyManager.btnSize);
+            layout.x = margin;
+            
+            // Vertical alignment
+            if (PropertyManager.alignV === ALIGN.TOP) {
+                layout.y = margin;
+            } else if (PropertyManager.alignV === ALIGN.MIDDLE) {
+                layout.y = Math.floor((this.panel.h - layout.buttonHeight) / 2);
+            } else {
+                layout.y = this.panel.h - layout.buttonHeight - margin;
+            }
         } else {
-            try {
-                return window.GetColourCUI(3);
-            } catch (e) {
-                return window.GetColourDUI(1); // Final fallback
+            // Fixed aspect mode - square buttons
+            const size = _scale(PropertyManager.btnSize);
+            layout.buttonWidth = layout.buttonHeight = size;
+            const totalWidth = size * 4; // No padding between buttons
+            const totalHeight = size;
+            
+            // Vertical alignment
+            if (PropertyManager.alignV === ALIGN.TOP) {
+                layout.y = margin;
+            } else if (PropertyManager.alignV === ALIGN.MIDDLE) {
+                layout.y = Math.floor((this.panel.h - totalHeight) / 2);
+            } else {
+                layout.y = this.panel.h - totalHeight - margin;
+            }
+            
+            // Horizontal alignment
+            if (PropertyManager.alignH === ALIGN.LEFT) {
+                layout.x = margin;
+            } else if (PropertyManager.alignH === ALIGN.CENTER) {
+                layout.x = Math.floor((this.panel.w - totalWidth) / 2);
+            } else {
+                layout.x = this.panel.w - totalWidth - margin;
             }
         }
-    }
-};
-
-function on_colours_changed() {
-    window.Repaint();
-}
-
-function on_font_changed() {
-    window.Repaint();
-}
-
-
-// =====================================================
-// CONFIGURATION
-// =====================================================
-const CONFIG = Object.freeze({
-    DRAG_SCALE: 0.5,
-    WHEEL_STEP: 2,
-    SNAP_ENABLED: true,
-    SNAP_TOLERANCE_DB: 0.5,
-    PADDING: 20,
-    
-    // Animation
-    DRAG_FOLLOW_SPEED: 1.0,
-    RELEASE_EASING: 0.18,
-    ANGLE_EPSILON: 0.01,
-    ANIMATION_FPS: 60,
-    ANIMATION_INTERVAL: Math.floor(1000 / 60),
-    
-    // Geometry
-    ANGLE_MIN: 120,
-    ANGLE_MAX: 420,
-    TICK_COUNT: 21,
-    ROTATION_OFFSET: -270,
-    
-    // Sizing ratios
-    INNER_RATIO: 0.92,
-    TICK_LENGTH_RATIO: 0.04,
-    MARKER_START_RATIO: 0.225,
-    MARKER_END_RATIO: 0.45,
-    MARKER_SEGMENTS: 10,
-    MARKER_WIDTH_RATIO: 0.015,
-    
-    // Cursors
-    CURSOR_ARROW: 32512,
-    CURSOR_HAND: 32649,
-    
-    // Volume curve breakpoints
-    VOL_BREAKPOINT_1: 25,
-    VOL_BREAKPOINT_2: 50,
-    DB_BREAKPOINT_1: -20,
-    DB_BREAKPOINT_2: -8.5
-});
-
-// Calculated constants
-const SWEEP_TOTAL = CONFIG.ANGLE_MAX - CONFIG.ANGLE_MIN;
-const SWEEP_HALF = SWEEP_TOTAL / 2;
-const DEG2RAD = Math.PI / 180;
-
-// =====================================================
-// COLOR HELPERS
-// =====================================================
-function RGB(r, g, b) { 
-    return 0xFF000000 | (r << 16) | (g << 8) | b; 
-}
-
-function RGBA(r, g, b, a) { 
-    return (a << 24) | (r << 16) | (g << 8) | b; 
-}
-
-// =====================================================
-// THEMES
-// =====================================================
-const THEMES = [
-    { name: "Classic Gray", knob: RGB(80, 80, 80), inner: RGB(50, 50, 50), tick: RGB(160, 160, 160), marker: RGB(255, 180, 180) },
-    { name: "Warm Amber", knob: RGB(90, 70, 50), inner: RGB(60, 45, 30), tick: RGB(200, 160, 100), marker: RGB(255, 200, 120) },
-    { name: "Cool Blue", knob: RGB(60, 70, 90), inner: RGB(40, 50, 70), tick: RGB(140, 170, 220), marker: RGB(160, 200, 255) },
-    { name: "Mint Green", knob: RGB(60, 90, 80), inner: RGB(40, 65, 55), tick: RGB(140, 200, 180), marker: RGB(160, 255, 220) },
-    { name: "Purple Haze", knob: RGB(85, 70, 95), inner: RGB(55, 45, 65), tick: RGB(190, 160, 220), marker: RGB(220, 180, 255) },
-    { name: "Fire Red", knob: RGB(90, 55, 55), inner: RGB(60, 35, 35), tick: RGB(220, 150, 150), marker: RGB(255, 170, 170) },
-    { name: "Mono Dark", knob: RGB(50, 50, 50), inner: RGB(30, 30, 30), tick: RGB(120, 120, 120), marker: RGB(200, 200, 200) },
-    { name: "Ocean Teal", knob: RGB(40, 80, 85), inner: RGB(25, 55, 60), tick: RGB(120, 190, 200), marker: RGB(140, 230, 240) },
-    { name: "Gold Brass", knob: RGB(95, 85, 50), inner: RGB(70, 60, 35), tick: RGB(230, 210, 150), marker: RGB(255, 235, 180) },
-    { name: "Neon Pink", knob: RGB(90, 50, 70), inner: RGB(65, 35, 50), tick: RGB(230, 150, 200), marker: RGB(255, 170, 220) }
-];
-
-// =====================================================
-// STATE MANAGEMENT
-// =====================================================
-const State = {
-    // Resources
-    knobImg: null,
-    
-    // Input state
-    dragging: false,
-    lastY: 0,
-    
-    // Volume state
-    uiVolume: 50,
-    currentAngle: 0,
-    targetAngle: 0,
-    dragTargetAngle: 0,
-    
-    // Animation
-    animationTimer: null,
-    needsRepaint: false,
-    
-    // Settings
-    currentTheme: 0,
-    
-    // Geometry cache
-    geometryCache: {
-        valid: false,
-        width: 0,
-        height: 0,
-        cx: 0,
-        cy: 0,
-        size: 0,
-        x: 0,
-        y: 0,
-        radius: 0,
-        innerSize: 0,
-        tickLength: 0
-    },
-    
-    loadSettings() {
-        this.currentTheme = window.GetProperty("VolumeKnob.Theme", 0);
         
-        // Validate theme
-        if (this.currentTheme < 0 || this.currentTheme >= THEMES.length) {
-            this.currentTheme = 0;
-        }
+        return layout;
     },
     
-    saveSetting(key, value) {
-        window.SetProperty("VolumeKnob." + key, value);
+    createImageObject(path) {
+        return {
+            normal: path,
+            clr: PropertyManager.useTint ? 
+                [PropertyManager.colorNormal, PropertyManager.colorHover, PropertyManager.colorDown] : null
+        };
     },
     
-    updateGeometryCache(w, h) {
-        const cache = this.geometryCache;
+    getPlayState() {
+        return fb.IsPlaying && !fb.IsPaused;
+    },
+    
+    updatePlayButtonOnly() {
+        const isPlaying = this.getPlayState();
         
-        if (cache.valid && cache.width === w && cache.height === h) {
-            return;
+        if (this.lastPlayState === isPlaying) {
+            return false; // No change needed
         }
         
-        cache.width = w;
-        cache.height = h;
-        cache.cx = w / 2;
-        cache.cy = h / 2;
-        cache.size = Math.min(w, h) - CONFIG.PADDING * 2;
-        cache.x = cache.cx - cache.size / 2;
-        cache.y = cache.cy - cache.size / 2;
-        cache.radius = cache.size * 0.5;
-        cache.innerSize = cache.size * CONFIG.INNER_RATIO;
-        cache.tickLength = cache.size * CONFIG.TICK_LENGTH_RATIO;
-        cache.valid = true;
-    },
-    
-    invalidateGeometry() {
-        this.geometryCache.valid = false;
-    },
-    
-    cleanup() {
-        this.stopAnimation();
-        Utils.disposeImage(this.knobImg);
-        this.knobImg = null;
-    },
-    
-    stopAnimation() {
-        if (this.animationTimer) {
-            clearInterval(this.animationTimer);
-            this.animationTimer = null;
-        }
-    },
-    
-    startAnimation() {
-        if (this.animationTimer) return;
+        this.lastPlayState = isPlaying;
         
-        this.animationTimer = setInterval(() => {
-            if (this.needsRepaint) {
-                window.Repaint();
-                this.needsRepaint = false;
-            }
-        }, CONFIG.ANIMATION_INTERVAL);
-    }
-};
-
-// =====================================================
-// UTILITIES
-// =====================================================
-const Utils = {
-    disposeImage(img) {
-        if (img && typeof img.Dispose === 'function') {
-            try {
-                img.Dispose();
-            } catch (e) {
-                console.log("Error disposing image:", e);
-            }
+        if (this.buttons.play && typeof this.buttons.play.update === 'function') {
+            // If button has update method, use it
+            this.buttons.play.update(
+                this.createImageObject(isPlaying ? 'profile\\buttons\\pause.png' : 'profile\\buttons\\play.png'),
+                isPlaying ? 'Pause' : 'Play'
+            );
+        } else {
+            // Otherwise recreate all buttons
+            this.createAllButtons();
         }
-        return null;
+        
+        return true;
     },
     
-    clamp(value, min, max) {
-        return Math.max(min, Math.min(max, value));
+    createAllButtons() {
+        this.dispose();
+        
+        const layout = this.calculateLayout();
+        const { x, y, buttonWidth: w, buttonHeight: h } = layout;
+        
+        const isPlaying = this.getPlayState();
+        this.lastPlayState = isPlaying;
+        
+        // Create buttons (no padding between them)
+        this.buttons.stop = new _button(
+            x, y, w, h, 
+            this.createImageObject('profile\\buttons\\stop.png'), 
+            () => fb.Stop(), 
+            'Stop'
+        );
+        
+        this.buttons.play = new _button(
+            x + w, y, w, h,
+            this.createImageObject(isPlaying ? 'profile\\buttons\\pause.png' : 'profile\\buttons\\play.png'),
+            () => fb.PlayOrPause(),
+            isPlaying ? 'Pause' : 'Play'
+        );
+        
+        this.buttons.previous = new _button(
+            x + (w * 2), y, w, h,
+            this.createImageObject('profile\\buttons\\previous.png'),
+            () => fb.Prev(),
+            'Previous'
+        );
+        
+        this.buttons.next = new _button(
+            x + (w * 3), y, w, h,
+            this.createImageObject('profile\\buttons\\next.png'),
+            () => fb.Next(),
+            'Next'
+        );
+        
+        this.cachedLayout = layout;
     },
     
-    roundTo(value, decimals) {
-        const multiplier = Math.pow(10, decimals);
-        return Math.round(value * multiplier) / multiplier;
-    }
-};
-
-// =====================================================
-// VOLUME CONVERSION
-// =====================================================
-const VolumeConverter = {
-    // UI Volume (0-100) → Foobar Volume (dB)
-    uiToDb(v) {
-        if (v <= CONFIG.VOL_BREAKPOINT_1) {
-            return -100 + (v / CONFIG.VOL_BREAKPOINT_1) * 80;
-        }
-        if (v <= CONFIG.VOL_BREAKPOINT_2) {
-            return CONFIG.DB_BREAKPOINT_1 + 
-                   ((v - CONFIG.VOL_BREAKPOINT_1) / CONFIG.VOL_BREAKPOINT_1) * 
-                   (CONFIG.DB_BREAKPOINT_2 - CONFIG.DB_BREAKPOINT_1);
-        }
-        return CONFIG.DB_BREAKPOINT_2 + 
-               ((v - CONFIG.VOL_BREAKPOINT_2) / CONFIG.VOL_BREAKPOINT_2) * 
-               Math.abs(CONFIG.DB_BREAKPOINT_2);
-    },
-    
-    // Foobar Volume (dB) → UI Volume (0-100)
-    dbToUi(db) {
-        if (db <= CONFIG.DB_BREAKPOINT_1) {
-            return (db + 100) / 80 * CONFIG.VOL_BREAKPOINT_1;
-        }
-        if (db <= CONFIG.DB_BREAKPOINT_2) {
-            return CONFIG.VOL_BREAKPOINT_1 + 
-                   (db - CONFIG.DB_BREAKPOINT_1) / 
-                   (CONFIG.DB_BREAKPOINT_2 - CONFIG.DB_BREAKPOINT_1) * 
-                   CONFIG.VOL_BREAKPOINT_1;
-        }
-        return CONFIG.VOL_BREAKPOINT_2 + 
-               (db - CONFIG.DB_BREAKPOINT_2) / 
-               Math.abs(CONFIG.DB_BREAKPOINT_2) * 
-               CONFIG.VOL_BREAKPOINT_2;
-    },
-    
-    // UI Volume (0-100) → Angle (degrees)
-    uiToAngle(v) {
-        return v <= CONFIG.VOL_BREAKPOINT_2
-            ? CONFIG.ANGLE_MIN + (v / CONFIG.VOL_BREAKPOINT_2) * SWEEP_HALF
-            : CONFIG.ANGLE_MIN + SWEEP_HALF + 
-              ((v - CONFIG.VOL_BREAKPOINT_2) / CONFIG.VOL_BREAKPOINT_2) * SWEEP_HALF;
-    },
-    
-    // Apply snap to 0 dB and -10 dB
-    applySnap(db) {
-        if (!CONFIG.SNAP_ENABLED || State.dragging) return db;
-        if (Math.abs(db) <= CONFIG.SNAP_TOLERANCE_DB) return 0;
-        if (Math.abs(db + 10) <= CONFIG.SNAP_TOLERANCE_DB) return -10;
-        return db;
-    }
-};
-
-// =====================================================
-// SYNC WITH FOOBAR
-// =====================================================
-const VolumeSync = {
-    syncFromFoobar() {
-        try {
-            const fbVol = Utils.clamp(fb.Volume, -100, 0);
-            State.uiVolume = VolumeConverter.dbToUi(fbVol);
-            State.targetAngle = State.dragTargetAngle = VolumeConverter.uiToAngle(State.uiVolume);
-            State.currentAngle = State.targetAngle; // Snap immediately on init
+    requestUpdate(immediate = false) {
+        if (immediate) {
+            this.createAllButtons();
             window.Repaint();
-        } catch (e) {
-            console.log("Error syncing from foobar:", e);
-        }
-    },
-    
-    setFoobarVolume(uiVol) {
-        try {
-            const newDb = VolumeConverter.applySnap(VolumeConverter.uiToDb(uiVol));
-            if (Math.abs(newDb - fb.Volume) >= 0.1) {
-                fb.Volume = newDb;
-            }
-        } catch (e) {
-            console.log("Error setting foobar volume:", e);
-        }
-    }
-};
-
-// =====================================================
-// RENDERING
-// =====================================================
-const Renderer = {
-    draw(gr) {
-        const w = window.Width;
-        const h = window.Height;
-        
-        if (!w || !h) return;
-        
-        State.updateGeometryCache(w, h);
-        const cache = State.geometryCache;
-        const theme = THEMES[State.currentTheme];
-        
-        try {
-            // Draw outer knob circle
-            gr.FillEllipse(cache.x, cache.y, cache.size, cache.size, theme.knob);
-            
-            // Draw knob texture if available
-            if (State.knobImg) {
-                gr.DrawImage(
-                    State.knobImg, 
-                    cache.x, cache.y, cache.size, cache.size, 
-                    0, 0, State.knobImg.Width, State.knobImg.Height
-                );
-            }
-            
-            // Draw inner circle
-            const innerX = cache.cx - cache.innerSize / 2;
-            const innerY = cache.cy - cache.innerSize / 2;
-            gr.FillEllipse(innerX, innerY, cache.innerSize, cache.innerSize, theme.inner);
-            
-            // Draw tick marks
-            this.drawTicks(gr, cache, theme);
-            
-            // Update and draw marker with animation
-            this.updateAnimation();
-            this.drawMarker(gr, cache, theme);
-            
-        } catch (e) {
-            console.log("Paint error:", e);
-        }
-    },
-    
-    drawTicks(gr, cache, theme) {
-        for (let i = 0; i < CONFIG.TICK_COUNT; i++) {
-            const angle = (CONFIG.ANGLE_MIN + i / (CONFIG.TICK_COUNT - 1) * SWEEP_TOTAL + CONFIG.ROTATION_OFFSET) * DEG2RAD;
-            const sa = Math.sin(angle);
-            const ca = Math.cos(angle);
-            
-            gr.DrawLine(
-                cache.cx + sa * (cache.radius - cache.tickLength),
-                cache.cy - ca * (cache.radius - cache.tickLength),
-                cache.cx + sa * cache.radius,
-                cache.cy - ca * cache.radius,
-                2,
-                theme.tick
-            );
-        }
-    },
-    
-    updateAnimation() {
-        const prevAngle = State.currentAngle;
-        
-        if (State.dragging) {
-            State.currentAngle += (State.dragTargetAngle - State.currentAngle) * CONFIG.DRAG_FOLLOW_SPEED;
-        } else {
-            State.currentAngle += (State.targetAngle - State.currentAngle) * CONFIG.RELEASE_EASING;
-        }
-        
-        if (Math.abs(State.currentAngle - State.targetAngle) < CONFIG.ANGLE_EPSILON) {
-            State.currentAngle = State.targetAngle;
-        }
-        
-        // Schedule repaint if still animating
-        if (Math.abs(State.currentAngle - prevAngle) > CONFIG.ANGLE_EPSILON) {
-            State.needsRepaint = true;
-        }
-    },
-    
-    drawMarker(gr, cache, theme) {
-        const rad = (State.currentAngle + CONFIG.ROTATION_OFFSET) * DEG2RAD;
-        const sr = Math.sin(rad);
-        const cr = Math.cos(rad);
-        
-        // Check if muted (with safe fallback)
-        let alpha = 255;
-        try {
-            if (fb.IsMuted && fb.IsMuted()) {
-                alpha = 90;
-            }
-        } catch (e) {
-            // fb.IsMuted might not exist in all versions
-        }
-        
-        const markerColor = theme.marker;
-        const r = (markerColor >> 16) & 0xFF;
-        const g = (markerColor >> 8) & 0xFF;
-        const b = markerColor & 0xFF;
-        
-        const markerWidth = Math.max(1, cache.size * CONFIG.MARKER_WIDTH_RATIO);
-        
-        for (let s = 0; s < CONFIG.MARKER_SEGMENTS; s++) {
-            const t0 = CONFIG.MARKER_START_RATIO + s / CONFIG.MARKER_SEGMENTS * 
-                      (CONFIG.MARKER_END_RATIO - CONFIG.MARKER_START_RATIO);
-            const t1 = CONFIG.MARKER_START_RATIO + (s + 1) / CONFIG.MARKER_SEGMENTS * 
-                      (CONFIG.MARKER_END_RATIO - CONFIG.MARKER_START_RATIO);
-            
-            gr.DrawLine(
-                cache.cx + sr * cache.size * t0,
-                cache.cy - cr * cache.size * t0,
-                cache.cx + sr * cache.size * t1,
-                cache.cy - cr * cache.size * t1,
-                markerWidth,
-                RGBA(r, g, b, alpha)
-            );
-        }
-    }
-};
-
-// =====================================================
-// INPUT HANDLERS
-// =====================================================
-const InputHandler = {
-    hitTest(x, y) {
-        const cache = State.geometryCache;
-        if (!cache.valid) return false;
-        
-        const dx = x - cache.cx;
-        const dy = y - cache.cy;
-        return dx * dx + dy * dy <= cache.radius * cache.radius;
-    },
-    
-    handleDragStart(x, y) {
-        if (!this.hitTest(x, y)) return false;
-        
-        State.dragging = true;
-        State.lastY = y;
-        window.SetCursor(CONFIG.CURSOR_HAND);
-        return true;
-    },
-    
-    handleDragEnd() {
-        if (!State.dragging) return false;
-        
-        State.dragging = false;
-        State.targetAngle = State.dragTargetAngle;
-        window.SetCursor(CONFIG.CURSOR_ARROW);
-        State.needsRepaint = true;
-        return true;
-    },
-    
-    handleDragMove(x, y) {
-        if (!State.dragging) return false;
-        
-        let newVolume = State.uiVolume + (State.lastY - y) * CONFIG.DRAG_SCALE;
-        newVolume = Utils.clamp(newVolume, 0, 100);
-        newVolume = Utils.roundTo(newVolume, 1);
-        
-        if (Math.abs(newVolume - State.uiVolume) >= 0.1) {
-            State.uiVolume = newVolume;
-            State.dragTargetAngle = State.targetAngle = VolumeConverter.uiToAngle(State.uiVolume);
-            VolumeSync.setFoobarVolume(State.uiVolume);
-            State.needsRepaint = true;
-        }
-        
-        State.lastY = y;
-        return true;
-    },
-    
-    handleWheel(step) {
-        let newVolume = State.uiVolume + step * CONFIG.WHEEL_STEP;
-        newVolume = Utils.clamp(newVolume, 0, 100);
-        newVolume = Utils.roundTo(newVolume, 1);
-        
-        if (Math.abs(newVolume - State.uiVolume) >= 0.1) {
-            State.uiVolume = newVolume;
-            State.dragTargetAngle = State.targetAngle = VolumeConverter.uiToAngle(State.uiVolume);
-            VolumeSync.setFoobarVolume(State.uiVolume);
-            State.needsRepaint = true;
-        }
-        
-        return true;
-    },
-    
-    handleDoubleClick(x, y) {
-        if (!this.hitTest(x, y)) return false;
-        
-        try {
-            fb.RunMainMenuCommand("Playback/Volume/Mute");
-            
-            // Force sync after mute/unmute to ensure UI reflects actual volume
-            // Small delay to let foobar process the command
+        } else if (!this.updatePending) {
+            this.updatePending = true;
             setTimeout(() => {
-                if (!State.dragging) {
-                    VolumeSync.syncFromFoobar();
-                }
-            }, 50);
-            
-        } catch (e) {
-            console.log("Error toggling mute:", e);
-        }
-        
-        return true;
-    }
-};
-
-// =====================================================
-// MENU MANAGER
-// =====================================================
-const MenuManager = {
-    show(x, y) {
-        const menu = window.CreatePopupMenu();
-        
-        try {
-            for (let i = 0; i < THEMES.length; i++) {
-                menu.AppendMenuItem(0, i + 1, THEMES[i].name);
-                if (i === State.currentTheme) {
-                    menu.CheckMenuItem(i + 1, true);
-                }
-            }
-            
-            const id = menu.TrackPopupMenu(x, y);
-            
-            if (id > 0) {
-                State.currentTheme = id - 1;
-                State.saveSetting("Theme", State.currentTheme);
+                this.updatePending = false;
+                this.createAllButtons();
                 window.Repaint();
-            }
-        } catch (e) {
-            console.log("Menu error:", e);
+            }, 16); // Debounce at ~60fps
         }
+    },
+    
+    paint(gr) {
+        this.panel.paint(gr);
+        this.buttonsHelper.paint(gr);
+    },
+    
+    move(x, y) {
+        this.buttonsHelper.move(x, y);
+    },
+    
+    leave() {
+        this.buttonsHelper.leave();
+    },
+    
+    lbtn_up(x, y, mask) {
+        this.buttonsHelper.lbtn_up(x, y, mask);
+    }
+};
+
+// ====================== MENU MANAGER ======================
+const MenuManager = {
+    create(x, y) {
+        const m = window.CreatePopupMenu();
+        const v = window.CreatePopupMenu();
+        const h = window.CreatePopupMenu();
+        const s = window.CreatePopupMenu();
+        const mg = window.CreatePopupMenu();
+        const col = window.CreatePopupMenu();
         
+        // Mode selection
+        m.AppendMenuItem(MF_STRING, MENU_ID.MODE_FIXED, 'Fixed (Square Buttons)');
+        m.AppendMenuItem(MF_STRING, MENU_ID.MODE_FILL, 'Fill Width (Stretch)');
+        m.CheckMenuRadioItem(MENU_ID.MODE_FIXED, MENU_ID.MODE_FILL, 
+            PropertyManager.fillPanel ? MENU_ID.MODE_FILL : MENU_ID.MODE_FIXED);
+        m.AppendMenuSeparator();
+
+        // Horizontal alignment (disabled when fillPanel)
+        h.AppendMenuItem(MF_STRING, MENU_ID.ALIGN_H_LEFT, 'Left');
+        h.AppendMenuItem(MF_STRING, MENU_ID.ALIGN_H_CENTER, 'Centre');
+        h.AppendMenuItem(MF_STRING, MENU_ID.ALIGN_H_RIGHT, 'Right');
+        h.CheckMenuRadioItem(MENU_ID.ALIGN_H_LEFT, MENU_ID.ALIGN_H_RIGHT, 
+            MENU_ID.ALIGN_H_LEFT + PropertyManager.alignH);
+        h.AppendTo(m, PropertyManager.fillPanel ? MF_GRAYED : MF_STRING, 'Horizontal Alignment');
+
+        // Vertical alignment
+        v.AppendMenuItem(MF_STRING, MENU_ID.ALIGN_V_TOP, 'Top');
+        v.AppendMenuItem(MF_STRING, MENU_ID.ALIGN_V_MIDDLE, 'Middle');
+        v.AppendMenuItem(MF_STRING, MENU_ID.ALIGN_V_BOTTOM, 'Bottom');
+        v.CheckMenuRadioItem(MENU_ID.ALIGN_V_TOP, MENU_ID.ALIGN_V_BOTTOM, 
+            MENU_ID.ALIGN_V_TOP + PropertyManager.alignV);
+        v.AppendTo(m, MF_STRING, 'Vertical Alignment');
+        
+        m.AppendMenuSeparator();
+
+        // Button size
+        s.AppendMenuItem(MF_STRING, MENU_ID.SIZE_SMALL, `Small (${SIZE_PRESETS.SMALL}px)`);
+        s.AppendMenuItem(MF_STRING, MENU_ID.SIZE_MEDIUM, `Medium (${SIZE_PRESETS.MEDIUM}px)`);
+        s.AppendMenuItem(MF_STRING, MENU_ID.SIZE_LARGE, `Large (${SIZE_PRESETS.LARGE}px)`);
+        s.AppendMenuItem(MF_STRING, MENU_ID.SIZE_XL, `Extra Large (${SIZE_PRESETS.XL}px)`);
+        s.AppendMenuSeparator();
+        s.AppendMenuItem(MF_STRING, MENU_ID.SIZE_CUSTOM, 'Set Custom Size...');
+        s.AppendTo(m, MF_STRING, 'Button Size');
+
+        // Margin (padding around button group)
+        mg.AppendMenuItem(MF_STRING, MENU_ID.MARGIN_NONE, `None (${MARGIN_PRESETS.NONE}px)`);
+        mg.AppendMenuItem(MF_STRING, MENU_ID.MARGIN_SMALL, `Small (${MARGIN_PRESETS.SMALL}px)`);
+        mg.AppendMenuItem(MF_STRING, MENU_ID.MARGIN_MEDIUM, `Medium (${MARGIN_PRESETS.MEDIUM}px)`);
+        mg.AppendMenuItem(MF_STRING, MENU_ID.MARGIN_LARGE, `Large (${MARGIN_PRESETS.LARGE}px)`);
+        mg.AppendTo(m, MF_STRING, 'Margin');
+
+        // Colors & Tint
+        col.AppendMenuItem(MF_STRING, MENU_ID.COLOR_TOGGLE, 'Enable Custom Tint');
+        col.CheckMenuItem(MENU_ID.COLOR_TOGGLE, PropertyManager.useTint);
+        col.AppendMenuSeparator();
+        col.AppendMenuItem(PropertyManager.useTint ? MF_STRING : MF_GRAYED, MENU_ID.COLOR_NORMAL, 'Set Normal Color...');
+        col.AppendMenuItem(PropertyManager.useTint ? MF_STRING : MF_GRAYED, MENU_ID.COLOR_HOVER, 'Set Hover Color...');
+        col.AppendMenuItem(PropertyManager.useTint ? MF_STRING : MF_GRAYED, MENU_ID.COLOR_DOWN, 'Set Click Color...');
+        col.AppendTo(m, MF_STRING, 'Colors & Tint');
+
+        m.AppendMenuSeparator();
+        m.AppendMenuItem(MF_STRING, MENU_ID.RESET, 'Reset All Settings');
+
+        return m.TrackPopupMenu(x, y);
+    },
+    
+    handle(idx, x, y) {
+        let changed = false;
+
+        switch (idx) {
+            // Vertical alignment
+            case MENU_ID.ALIGN_V_TOP:
+            case MENU_ID.ALIGN_V_MIDDLE:
+            case MENU_ID.ALIGN_V_BOTTOM:
+                PropertyManager.save('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', 
+                    idx - MENU_ID.ALIGN_V_TOP);
+                changed = true;
+                break;
+            
+            // Horizontal alignment
+            case MENU_ID.ALIGN_H_LEFT:
+            case MENU_ID.ALIGN_H_CENTER:
+            case MENU_ID.ALIGN_H_RIGHT:
+                if (!PropertyManager.fillPanel) {
+                    PropertyManager.save('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', 
+                        idx - MENU_ID.ALIGN_H_LEFT);
+                    changed = true;
+                }
+                break;
+            
+            // Button sizes
+            case MENU_ID.SIZE_SMALL:
+                PropertyManager.save('Buttons: Size', SIZE_PRESETS.SMALL);
+                changed = true;
+                break;
+            
+            case MENU_ID.SIZE_MEDIUM:
+                PropertyManager.save('Buttons: Size', SIZE_PRESETS.MEDIUM);
+                changed = true;
+                break;
+            
+            case MENU_ID.SIZE_LARGE:
+                PropertyManager.save('Buttons: Size', SIZE_PRESETS.LARGE);
+                changed = true;
+                break;
+            
+            case MENU_ID.SIZE_XL:
+                PropertyManager.save('Buttons: Size', SIZE_PRESETS.XL);
+                changed = true;
+                break;
+            
+            case MENU_ID.SIZE_CUSTOM:
+                const val = utils.InputBox(window.ID, 
+                    'Enter button size (16-512 pixels):', 
+                    'Custom Size', 
+                    PropertyManager.btnSize);
+                if (val) {
+                    const newSize = PropertyManager.validators.btnSize(val);
+                    if (newSize !== PropertyManager.btnSize) {
+                        PropertyManager.save('Buttons: Size', newSize);
+                        changed = true;
+                    }
+                }
+                break;
+            
+            // Margin
+            case MENU_ID.MARGIN_NONE:
+                PropertyManager.save('Buttons: Margin', MARGIN_PRESETS.NONE);
+                changed = true;
+                break;
+            
+            case MENU_ID.MARGIN_SMALL:
+                PropertyManager.save('Buttons: Margin', MARGIN_PRESETS.SMALL);
+                changed = true;
+                break;
+            
+            case MENU_ID.MARGIN_MEDIUM:
+                PropertyManager.save('Buttons: Margin', MARGIN_PRESETS.MEDIUM);
+                changed = true;
+                break;
+            
+            case MENU_ID.MARGIN_LARGE:
+                PropertyManager.save('Buttons: Margin', MARGIN_PRESETS.LARGE);
+                changed = true;
+                break;
+            
+            // Mode
+            case MENU_ID.MODE_FIXED:
+                PropertyManager.save('Buttons: Fill Panel', false);
+                changed = true;
+                break;
+            
+            case MENU_ID.MODE_FILL:
+                PropertyManager.save('Buttons: Fill Panel', true);
+                changed = true;
+                break;
+            
+            // Colors
+            case MENU_ID.COLOR_TOGGLE:
+                PropertyManager.save('Colors: Use Tint', !PropertyManager.useTint);
+                changed = true;
+                break;
+            
+            case MENU_ID.COLOR_NORMAL:
+                if (PropertyManager.useTint) {
+                    const newColor = utils.ColorPicker(window.ID, PropertyManager.colorNormal);
+                    if (newColor !== -1 && newColor !== PropertyManager.colorNormal) {
+                        PropertyManager.save('Colors: Normal', newColor);
+                        changed = true;
+                    }
+                }
+                break;
+            
+            case MENU_ID.COLOR_HOVER:
+                if (PropertyManager.useTint) {
+                    const newColor = utils.ColorPicker(window.ID, PropertyManager.colorHover);
+                    if (newColor !== -1 && newColor !== PropertyManager.colorHover) {
+                        PropertyManager.save('Colors: Hover', newColor);
+                        changed = true;
+                    }
+                }
+                break;
+            
+            case MENU_ID.COLOR_DOWN:
+                if (PropertyManager.useTint) {
+                    const newColor = utils.ColorPicker(window.ID, PropertyManager.colorDown);
+                    if (newColor !== -1 && newColor !== PropertyManager.colorDown) {
+                        PropertyManager.save('Colors: Down', newColor);
+                        changed = true;
+                    }
+                }
+                break;
+            
+            // Reset
+            case MENU_ID.RESET:
+                PropertyManager.reset();
+                changed = true;
+                break;
+            
+            default:
+                // Panel context menu
+                if (idx > 0) return ButtonManager.panel.rbtn_up(x, y);
+        }
+
+        if (changed) {
+            ButtonManager.requestUpdate(true);
+        }
+
         return true;
     }
 };
 
-// =====================================================
-// RESOURCE LOADER
-// =====================================================
-const ResourceLoader = {
-    loadKnobImage() {
-        try {
-            const scriptPath = window.ScriptInfo.Path;
-            const imagePath = scriptPath.replace(/[^\\]+$/, "") + "knob.png";
-            
-            if (utils.FileTest(imagePath, "e")) {
-                State.knobImg = gdi.Image(imagePath);
-            }
-        } catch (e) {
-            console.log("Failed to load knob.png:", e);
+// ====================== INITIALIZATION ======================
+PropertyManager.load();
+ButtonManager.init();
+ButtonManager.buttonsHelper.update = () => ButtonManager.createAllButtons();
+ButtonManager.createAllButtons();
+
+// ====================== CALLBACKS ======================
+function on_size() { 
+    ButtonManager.panel.size(); 
+    ButtonManager.requestUpdate(true);
+}
+
+function on_paint(gr) { 
+    ButtonManager.paint(gr);
+}
+
+function on_playback_stop() { 
+    if (ButtonManager.lastPlayState !== null) {
+        ButtonManager.lastPlayState = null;
+        if (ButtonManager.updatePlayButtonOnly()) {
+            window.Repaint();
         }
     }
-};
+}
 
-// =====================================================
-// INITIALIZATION
-// =====================================================
-function init() {
-    try {
-        State.loadSettings();
-        ResourceLoader.loadKnobImage();
-        VolumeSync.syncFromFoobar();
-        State.startAnimation();
-    } catch (e) {
-        console.log("Initialization error:", e);
+function on_playback_pause() { 
+    if (ButtonManager.updatePlayButtonOnly()) {
+        window.Repaint();
     }
 }
 
-// =====================================================
-// FOOBAR2000 CALLBACKS
-// =====================================================
-function on_paint(gr) {
-	
-	gr.FillSolidRect(0, 0, window.Width, window.Height, paintCache.bgColor);
-	
-    Renderer.draw(gr);
-}
-
-function on_size(w, h) {
-    State.invalidateGeometry();
-    window.Repaint();
-}
-
-function on_volume_change() {
-    if (!State.dragging) {
-        VolumeSync.syncFromFoobar();
+function on_playback_starting() { 
+    if (ButtonManager.updatePlayButtonOnly()) {
+        window.Repaint();
     }
 }
 
-function on_mouse_lbtn_down(x, y) {
-    return InputHandler.handleDragStart(x, y);
+function on_mouse_move(x, y) { 
+    ButtonManager.move(x, y);
 }
 
-function on_mouse_lbtn_up(x, y) {
-    return InputHandler.handleDragEnd();
+function on_mouse_leave() { 
+    ButtonManager.leave();
 }
 
-function on_mouse_move(x, y) {
-    return InputHandler.handleDragMove(x, y);
-}
-
-function on_mouse_wheel(step) {
-    return InputHandler.handleWheel(step);
-}
-
-function on_mouse_lbtn_dblclk(x, y) {
-    return InputHandler.handleDoubleClick(x, y);
+function on_mouse_lbtn_up(x, y, mask) { 
+    ButtonManager.lbtn_up(x, y, mask);
 }
 
 function on_mouse_rbtn_up(x, y) {
-    return MenuManager.show(x, y);
+    const idx = MenuManager.create(x, y);
+    return MenuManager.handle(idx, x, y);
+}
+
+function on_colours_changed() { 
+    ButtonManager.panel.colours_changed(); 
+    window.Repaint();
 }
 
 function on_script_unload() {
-    State.cleanup();
+    ButtonManager.dispose();
 }
-
-// =====================================================
-// START
-// =====================================================
-init();
