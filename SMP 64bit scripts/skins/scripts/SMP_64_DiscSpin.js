@@ -1,3 +1,4 @@
+'use strict'; 
 	         // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
 	        // === SMP 64bit Disc Spin V3 OPTIMIZED ==== \\
 	       // ======= Spins Disc + Artwork + Cover  ========= \\
@@ -9,8 +10,6 @@
 // ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
 
 window.DefineScript('SMP 64bit Disc Spin Optimized', { author: 'L.E.D.' });
-
-'use strict'; 
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
