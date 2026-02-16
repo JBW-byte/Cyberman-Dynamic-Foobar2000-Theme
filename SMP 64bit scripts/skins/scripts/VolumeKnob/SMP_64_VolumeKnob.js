@@ -1,6 +1,7 @@
-// ======== AUTHOR L.E.D. (AI-assisted) ==================
-// ====== SMP 64bit Volume Knob V2.0 (Optimized) =========
-// ====== Spider Monkey Panel 64bit =====================
+'use strict'; 
+	  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
+	 // === SMP 64bit Volume Knob V2.0 (Optimized) ===\\
+	// =========== Spider Monkey Panel 64bit ==========\\
 
 window.DefineScript('SMP 64bit Volume Knob', { author: 'L.E.D.' });
 
