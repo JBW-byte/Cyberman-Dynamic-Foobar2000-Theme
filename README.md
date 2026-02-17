@@ -69,7 +69,7 @@ This method uses a preconfigured **profile folder**.
 
    * `File → Preferences → Media Library → Add (+) Folder`
 
-### Optional: Automatic Artwork Fetching
+### Optional: Automatic Artwork Fetching, does not work yet.
 
 If your library has missing or incompatible artwork:
 
