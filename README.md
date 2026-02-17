@@ -73,9 +73,7 @@ This method uses a preconfigured **profile folder**.
 
 If your library has missing or incompatible artwork:
 
-* Install **foo_artwork**:
-
-  * [https://github.com/jame25/foo_artwork/releases](https://github.com/jame25/foo_artwork/releases)
+Album Artwork Downloader is probably the best bet for now, as the other options dont rly work.
 
 * A **Last.fm API key** is required for biography and album artwork fetching:
 
