@@ -8,6 +8,7 @@ Performance ok now on larger panels, added image quality settings for scaling mo
 * PanelArt: Simple Track display and album art background blur/darkness. several options in right click menu. Probably try and expand this more in future.<br><br>
 <img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/VolumeKnob.png">
 <img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/DiscSpin.png">
+<img align="right" width="400" height="100" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/foo%20setup.png">
 
  Coming Soon™ LCD TimerPro<br>
 <br>
