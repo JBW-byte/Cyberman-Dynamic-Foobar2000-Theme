@@ -1,35 +1,25 @@
-'use strict'; 
+'use strict';
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========= SMP 64bit Volume Knob V2.0 =========\\
+		 // ==== SMP 64bit Volume Knob V2.0 OPTIMIZED ====\\
 		// =========== Simple Function + Themes ===========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
 // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 
-window.DefineScript('SMP 64bit Volume Knob', { author: 'L.E.D.' });
+window.DefineScript('SMP 64bit Volume Knob Optimized', { author: 'L.E.D.' });
 
-var paintCache = {
-    get bgColor() {
-        if (window.IsDefaultUI) {
-            return window.GetColourDUI(1);
-        } else {
-            try {
-                return window.GetColourCUI(3);
-            } catch (e) {
-                return window.GetColourDUI(1); // Final fallback
-            }
-        }
-    }
+// ====================== HELPER INCLUDES ======================
+include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
+include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
+
+// ====================== PANEL INITIALIZATION ======================
+const panel = new _panel(false);  // Use theme background for DUI/CUI compatibility
+
+// ====================== PROPERTIES (Using helpers _p) ======================
+const props = {
+    currentTheme: new _p('VolumeKnob.Theme', 0)
 };
-
-function on_colours_changed() {
-    window.Repaint();
-}
-
-function on_font_changed() {
-    window.Repaint();
-}
-
 
 // =====================================================
 // CONFIGURATION
@@ -79,31 +69,23 @@ const SWEEP_HALF = SWEEP_TOTAL / 2;
 const DEG2RAD = Math.PI / 180;
 
 // =====================================================
-// COLOR HELPERS
-// =====================================================
-function RGB(r, g, b) { 
-    return 0xFF000000 | (r << 16) | (g << 8) | b; 
-}
-
-function RGBA(r, g, b, a) { 
-    return (a << 24) | (r << 16) | (g << 8) | b; 
-}
-
-// =====================================================
 // THEMES
 // =====================================================
 const THEMES = [
-    { name: "Classic Gray", knob: RGB(80, 80, 80), inner: RGB(50, 50, 50), tick: RGB(160, 160, 160), marker: RGB(255, 180, 180) },
-    { name: "Warm Amber", knob: RGB(90, 70, 50), inner: RGB(60, 45, 30), tick: RGB(200, 160, 100), marker: RGB(255, 200, 120) },
-    { name: "Cool Blue", knob: RGB(60, 70, 90), inner: RGB(40, 50, 70), tick: RGB(140, 170, 220), marker: RGB(160, 200, 255) },
-    { name: "Mint Green", knob: RGB(60, 90, 80), inner: RGB(40, 65, 55), tick: RGB(140, 200, 180), marker: RGB(160, 255, 220) },
-    { name: "Purple Haze", knob: RGB(85, 70, 95), inner: RGB(55, 45, 65), tick: RGB(190, 160, 220), marker: RGB(220, 180, 255) },
-    { name: "Fire Red", knob: RGB(90, 55, 55), inner: RGB(60, 35, 35), tick: RGB(220, 150, 150), marker: RGB(255, 170, 170) },
-    { name: "Mono Dark", knob: RGB(50, 50, 50), inner: RGB(30, 30, 30), tick: RGB(120, 120, 120), marker: RGB(200, 200, 200) },
-    { name: "Ocean Teal", knob: RGB(40, 80, 85), inner: RGB(25, 55, 60), tick: RGB(120, 190, 200), marker: RGB(140, 230, 240) },
-    { name: "Gold Brass", knob: RGB(95, 85, 50), inner: RGB(70, 60, 35), tick: RGB(230, 210, 150), marker: RGB(255, 235, 180) },
-    { name: "Neon Pink", knob: RGB(90, 50, 70), inner: RGB(65, 35, 50), tick: RGB(230, 150, 200), marker: RGB(255, 170, 220) }
+    { name: "Classic Gray", knob: _RGB(80, 80, 80), inner: _RGB(50, 50, 50), tick: _RGB(160, 160, 160), marker: _RGB(255, 180, 180) },
+    { name: "Warm Amber", knob: _RGB(90, 70, 50), inner: _RGB(60, 45, 30), tick: _RGB(200, 160, 100), marker: _RGB(255, 200, 120) },
+    { name: "Cool Blue", knob: _RGB(60, 70, 90), inner: _RGB(40, 50, 70), tick: _RGB(140, 170, 220), marker: _RGB(160, 200, 255) },
+    { name: "Mint Green", knob: _RGB(60, 90, 80), inner: _RGB(40, 65, 55), tick: _RGB(140, 200, 180), marker: _RGB(160, 255, 220) },
+    { name: "Purple Haze", knob: _RGB(85, 70, 95), inner: _RGB(55, 45, 65), tick: _RGB(190, 160, 220), marker: _RGB(220, 180, 255) },
+    { name: "Fire Red", knob: _RGB(90, 55, 55), inner: _RGB(60, 35, 35), tick: _RGB(220, 150, 150), marker: _RGB(255, 170, 170) },
+    { name: "Mono Dark", knob: _RGB(50, 50, 50), inner: _RGB(30, 30, 30), tick: _RGB(120, 120, 120), marker: _RGB(200, 200, 200) },
+    { name: "Ocean Teal", knob: _RGB(40, 80, 85), inner: _RGB(25, 55, 60), tick: _RGB(120, 190, 200), marker: _RGB(140, 230, 240) },
+    { name: "Gold Brass", knob: _RGB(95, 85, 50), inner: _RGB(70, 60, 35), tick: _RGB(230, 210, 150), marker: _RGB(255, 235, 180) },
+    { name: "Neon Pink", knob: _RGB(90, 50, 70), inner: _RGB(65, 35, 50), tick: _RGB(230, 150, 200), marker: _RGB(255, 170, 220) }
 ];
+
+const _clampedTheme = Math.max(0, Math.min(THEMES.length - 1, props.currentTheme.value));
+if (_clampedTheme !== props.currentTheme.value) props.currentTheme.value = _clampedTheme;
 
 // =====================================================
 // STATE MANAGEMENT
@@ -126,9 +108,6 @@ const State = {
     animationTimer: null,
     needsRepaint: false,
     
-    // Settings
-    currentTheme: 0,
-    
     // Geometry cache
     geometryCache: {
         valid: false,
@@ -142,19 +121,6 @@ const State = {
         radius: 0,
         innerSize: 0,
         tickLength: 0
-    },
-    
-    loadSettings() {
-        this.currentTheme = window.GetProperty("VolumeKnob.Theme", 0);
-        
-        // Validate theme
-        if (this.currentTheme < 0 || this.currentTheme >= THEMES.length) {
-            this.currentTheme = 0;
-        }
-    },
-    
-    saveSetting(key, value) {
-        window.SetProperty("VolumeKnob." + key, value);
     },
     
     updateGeometryCache(w, h) {
@@ -189,7 +155,7 @@ const State = {
     
     stopAnimation() {
         if (this.animationTimer) {
-            clearInterval(this.animationTimer);
+            window.ClearInterval(this.animationTimer);
             this.animationTimer = null;
         }
     },
@@ -197,7 +163,7 @@ const State = {
     startAnimation() {
         if (this.animationTimer) return;
         
-        this.animationTimer = setInterval(() => {
+        this.animationTimer = window.SetInterval(() => {
             if (this.needsRepaint) {
                 window.Repaint();
                 this.needsRepaint = false;
@@ -211,13 +177,7 @@ const State = {
 // =====================================================
 const Utils = {
     disposeImage(img) {
-        if (img && typeof img.Dispose === 'function') {
-            try {
-                img.Dispose();
-            } catch (e) {
-                console.log("Error disposing image:", e);
-            }
-        }
+        _dispose(img);  // Using helper!
         return null;
     },
     
@@ -324,7 +284,7 @@ const Renderer = {
         
         State.updateGeometryCache(w, h);
         const cache = State.geometryCache;
-        const theme = THEMES[State.currentTheme];
+        const theme = THEMES[props.currentTheme.value];  // Using props!
         
         try {
             // Draw outer knob circle
@@ -396,15 +356,13 @@ const Renderer = {
         const rad = (State.currentAngle + CONFIG.ROTATION_OFFSET) * DEG2RAD;
         const sr = Math.sin(rad);
         const cr = Math.cos(rad);
-        
-        // Check if muted (with safe fallback)
         let alpha = 255;
         try {
-            if (fb.IsMuted && fb.IsMuted()) {
+            if (fb.IsMuted) {
                 alpha = 90;
             }
         } catch (e) {
-            // fb.IsMuted might not exist in all versions
+            // fb.IsMuted may not exist in all foobar versions — safe fallback
         }
         
         const markerColor = theme.marker;
@@ -426,7 +384,7 @@ const Renderer = {
                 cache.cx + sr * cache.size * t1,
                 cache.cy - cr * cache.size * t1,
                 markerWidth,
-                RGBA(r, g, b, alpha)
+                _RGBA(r, g, b, alpha)  // Using helper!
             );
         }
     }
@@ -502,10 +460,8 @@ const InputHandler = {
         
         try {
             fb.RunMainMenuCommand("Playback/Volume/Mute");
-            
-            // Force sync after mute/unmute to ensure UI reflects actual volume
-            // Small delay to let foobar process the command
-            setTimeout(() => {
+
+            window.SetTimeout(() => {
                 if (!State.dragging) {
                     VolumeSync.syncFromFoobar();
                 }
@@ -527,18 +483,17 @@ const MenuManager = {
         const menu = window.CreatePopupMenu();
         
         try {
-            for (let i = 0; i < THEMES.length; i++) {
-                menu.AppendMenuItem(0, i + 1, THEMES[i].name);
-                if (i === State.currentTheme) {
+            _.forEach(THEMES, (theme, i) => {  // Using lodash!
+                menu.AppendMenuItem(0, i + 1, theme.name);
+                if (i === props.currentTheme.value) {  
                     menu.CheckMenuItem(i + 1, true);
                 }
-            }
+            });
             
             const id = menu.TrackPopupMenu(x, y);
             
             if (id > 0) {
-                State.currentTheme = id - 1;
-                State.saveSetting("Theme", State.currentTheme);
+                props.currentTheme.value = id - 1;  // Auto-saves!
                 window.Repaint();
             }
         } catch (e) {
@@ -572,7 +527,7 @@ const ResourceLoader = {
 // =====================================================
 function init() {
     try {
-        State.loadSettings();
+        // Props load automatically - no need for State.loadSettings()!
         ResourceLoader.loadKnobImage();
         VolumeSync.syncFromFoobar();
         State.startAnimation();
@@ -585,14 +540,22 @@ function init() {
 // FOOBAR2000 CALLBACKS
 // =====================================================
 function on_paint(gr) {
-	
-	gr.FillSolidRect(0, 0, window.Width, window.Height, paintCache.bgColor);
-	
+    panel.paint(gr);  // Handles background for DUI/CUI automatically!
     Renderer.draw(gr);
 }
 
-function on_size(w, h) {
+function on_size() {
+    panel.size();  // Update panel dimensions for background painting
     State.invalidateGeometry();
+    window.Repaint();
+}
+
+function on_colours_changed() {
+    panel.colours_changed();  // Update panel colors automatically!
+    window.Repaint();
+}
+
+function on_font_changed() {
     window.Repaint();
 }
 
@@ -628,6 +591,10 @@ function on_mouse_rbtn_up(x, y) {
 
 function on_script_unload() {
     State.cleanup();
+    _tt('');
+    if (_bmp) { _bmp.ReleaseGraphics(_gr); }
+    _gr  = null;
+    _bmp = null;
 }
 
 // =====================================================
