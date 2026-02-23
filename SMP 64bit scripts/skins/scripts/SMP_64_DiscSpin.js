@@ -36,7 +36,7 @@ const props = {
     
     // Overlay effects
     showReflection:     new _p('Disc.ShowReflection', true),
-    opReflection:       new _p('Disc.OpReflection', 40),
+    opReflection:       new _p('Disc.OpReflection', 30),
     showGlow:           new _p('Disc.ShowGlow', true),
     opGlow:             new _p('Disc.OpGlow', 40),
     showScanlines:      new _p('Disc.ShowScanlines', false),
@@ -57,7 +57,7 @@ const props = {
     backgroundEnabled:  new _p('Disc.BackgroundEnabled', true),
     blurRadius:         new _p('Disc.BlurRadius', 240),
     blurEnabled:        new _p('Disc.BlurEnabled', true),
-    darkenValue:        new _p('Disc.DarkenValue', 20),
+    darkenValue:        new _p('Disc.DarkenValue', 10),
     customBackgroundColor: new _p('Disc.CustomBackgroundColor', 0xFF191919),  // Very dark gray, full alpha
     bgUseUIColor:       new _p('Disc.BgUseUIColor', false)
 };
@@ -1122,9 +1122,10 @@ const ImageLoader = {
             const img = this.loadCached(trackFolderMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
             if (img) {
                 AssetManager.autoSelectMask(trackFolderMatch);
-                // Load original for background blur
-                const raw = gdi.Image(trackFolderMatch);
-                const original = raw ? raw.Clone(0, 0, raw.Width, raw.Height) : img;
+                // Load original for background blur then immediately dispose the loader
+                const _rawOrig = gdi.Image(trackFolderMatch);
+                const original = _rawOrig ? _rawOrig.Clone(0, 0, _rawOrig.Width, _rawOrig.Height) : img;
+                Utils.safeDispose(_rawOrig);
                 return { img, path: trackFolderMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
             }
         }
@@ -1180,14 +1181,17 @@ const ImageLoader = {
             
             const folderPath = this.tf_path.EvalWithMetadb(metadb);
             
-            // Search for full album cover for background (separate from disc art)
+            // Load cover art ONCE: clone for background blur, keep raw for Phase 2 processing.
+            // Three-load pattern replaced with a single load to avoid waste and memory leaks.
             let bgOriginal = null;
+            let coverRaw = null;
             const coverPath = this.searchForCover(metadb, folderPath);
             if (coverPath) {
                 try {
-                    let coverImg = gdi.Image(coverPath);
-                    if (coverImg) {
-                        bgOriginal = coverImg.Clone(0, 0, coverImg.Width, coverImg.Height);
+                    const _loaded = gdi.Image(coverPath);
+                    if (_loaded) {
+                        bgOriginal = _loaded.Clone(0, 0, _loaded.Width, _loaded.Height);
+                        coverRaw = _loaded;   // consumed by Phase 2 processor (or disposed below)
                     }
                 } catch (e) {}
             }
@@ -1196,6 +1200,7 @@ const ImageLoader = {
             if (!P.useAlbumArtOnly) {
                 const result = this.searchForDisc(metadb, folderPath);
                 if (result) {
+                    Utils.safeDispose(coverRaw);   // bgOriginal carries the background; raw not needed
                     State.setImage(result.img, true, result.type, bgOriginal || result.original);
                     props.savedPath.value = result.path;
                     props.savedIsDisc.enabled = true;
@@ -1204,52 +1209,44 @@ const ImageLoader = {
                 }
             }
             
-            // PHASE 2: Search custom folders for cover (if not already found)
-            if (!bgOriginal && coverPath) {
+            // PHASE 2: Use cover art as foreground (no disc found).
+            // coverRaw is the image for processing; bgOriginal is the full-res background copy.
+            // Processor functions (scaleProportional / processForDisc) call safeDispose on their
+            // input when they create a new image, so coverRaw ownership transfers to them.
+            if (coverRaw) {
                 try {
-                    let raw = gdi.Image(coverPath);
-                    if (raw) {
-                        bgOriginal = raw.Clone(0, 0, raw.Width, raw.Height);
-                    }
-                } catch (e) {}
-            }
-            if (coverPath) {
-                try {
-                    let raw = gdi.Image(coverPath);
-                    if (raw) {
-                        const original = bgOriginal || raw.Clone(0, 0, raw.Width, raw.Height);
-                        const targetSize = Utils.getPanelDiscSize();
-                        if (P.useAlbumArtOnly) {
-                            const scaled = ImageProcessor.scaleProportional(
-                                raw,
-                                CONFIG.MAX_STATIC_SIZE,
-                                P.interpolationMode
-                            );
-                            if (scaled) {
-                                State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
-                                props.savedPath.value = coverPath;
-                                props.savedIsDisc.enabled = false;
-                                State.updateTimer();
-                                return;
-                            }
-                        } else {
-                            const processed = ImageProcessor.processForDisc(
-                                raw, 
-                                targetSize, 
-                                CONFIG.IMAGE_TYPE.ALBUM_ART, 
-                                P.interpolationMode
-                            );
-                            if (processed) {
-                                State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
-                                props.savedPath.value = coverPath;
-                                props.savedIsDisc.enabled = true;
-                                State.updateTimer();
-                                return;
-                            }
+                    const targetSize = Utils.getPanelDiscSize();
+                    if (P.useAlbumArtOnly) {
+                        const scaled = ImageProcessor.scaleProportional(
+                            coverRaw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode
+                        );
+                        if (scaled) {
+                            State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, bgOriginal);
+                            props.savedPath.value = coverPath;
+                            props.savedIsDisc.enabled = false;
+                            State.updateTimer();
+                            return;
+                        }
+                    } else {
+                        const processed = ImageProcessor.processForDisc(
+                            coverRaw, targetSize, CONFIG.IMAGE_TYPE.ALBUM_ART, P.interpolationMode
+                        );
+                        if (processed) {
+                            State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART, bgOriginal);
+                            props.savedPath.value = coverPath;
+                            props.savedIsDisc.enabled = true;
+                            State.updateTimer();
+                            return;
                         }
                     }
+                    // Safety: processor returned raw unchanged (already square/small) but setImage
+                    // was not reached — shouldn't happen with non-null raw, but guard just in case.
+                    Utils.safeDispose(coverRaw);
+                    Utils.safeDispose(bgOriginal);
                 } catch (e) {
-                    console.log("Cover load error from custom folders:", e);
+                    console.log("Cover load error:", e);
+                    Utils.safeDispose(coverRaw);
+                    Utils.safeDispose(bgOriginal);
                 }
             }
             

@@ -519,7 +519,8 @@ const PanelArt = {
     
     images: {
         source: null,
-        blur: null
+        blur: null,
+        currentMetadb: null   // tracks which metadb the async art request was issued for
     },
     
     text: {
@@ -647,6 +648,15 @@ const FontManager = {
     
     rebuildFonts() {
         this.clearCache();
+        // Dispose the live active fonts before reassigning — clearCache only disposes the
+        // LRU cache entries; these three references live outside the cache and would leak.
+        const fl = PanelArt.fonts;
+        if (fl.title  && typeof fl.title.Dispose  === 'function') { try { fl.title.Dispose();  } catch (e) {} }
+        if (fl.artist && typeof fl.artist.Dispose === 'function') { try { fl.artist.Dispose(); } catch (e) {} }
+        if (fl.extra  && typeof fl.extra.Dispose  === 'function') { try { fl.extra.Dispose();  } catch (e) {} }
+        fl.title = null;
+        fl.artist = null;
+        fl.extra = null;
         const cfg = PanelArt.config;
         
         try {
@@ -1008,6 +1018,7 @@ const ImageManager = {
             // Always clear stale artwork immediately so previous track never bleeds through
             PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
             PanelArt.images.blur   = Utils.disposeImage(PanelArt.images.blur);
+            PanelArt.images.currentMetadb = null;  // invalidate any in-flight async art request
             
             // Use passed metadb first (avoids race condition), fall back to polling
             const track = metadb || fb.GetNowPlaying();
@@ -1034,6 +1045,7 @@ const ImageManager = {
             if (!art) {
                 // No local art found - fall back to foobar's async art lookup.
                 // on_get_album_art_done below handles the result.
+                PanelArt.images.currentMetadb = track;
                 utils.GetAlbumArtAsync(window.ID, track, 0);
                 return;
             }
@@ -1439,11 +1451,6 @@ const Renderer = {
         }
     },
     
-    drawReflection() { return {}; },
-    drawScanlines() { return {}; },
-    drawPhosphorMask() { return {}; },
-    drawGlow() { return {}; },
-    
     drawOverlay(gr, w, h, artInfo, textArea) {
         if (!OverlayCache.valid) {
             OverlayCache.build(w, h, artInfo, textArea);
@@ -1509,7 +1516,7 @@ const Renderer = {
     
     drawSlider(gr, value, max, yPos) {
         const dim = PanelArt.dimensions;
-        const barW = Math.min(SLIDER_MIN_WIDTH, dim.width * SLIDER_WIDTH_RATIO);
+        const barW = Math.max(SLIDER_MIN_WIDTH, Math.floor(dim.width * SLIDER_WIDTH_RATIO));
         const barH = SLIDER_HEIGHT;
         const bx = (dim.width - barW) / 2;
         const by = yPos;
@@ -2098,6 +2105,7 @@ function on_size() {
     PanelArt.dimensions.height = window.Height;
     OverlayCache.invalidate();
     ImageManager.scheduleBlurRebuild();
+    window.Repaint();
 }
 
 function on_colours_changed() {
@@ -2120,6 +2128,15 @@ function on_playback_new_track(metadb) {
 // image is null if no artwork was found.
 function on_get_album_art_done(metadb, art_id, image, image_path) {
     try {
+        // Guard: discard art that arrived late for a different (previous) track.
+        const expected = PanelArt.images.currentMetadb;
+        if (expected && metadb && !metadb.Compare(expected)) {
+            if (image && typeof image.Dispose === 'function') {
+                try { image.Dispose(); } catch (e) {}
+            }
+            return;
+        }
+        PanelArt.images.currentMetadb = null;   // clear; request fulfilled
         if (image) {
             PanelArt.images.source = image;
             OverlayCache.invalidate();
