@@ -1,11 +1,12 @@
 Install [SMP 64bit](https://github.com/marc2k3/spider-monkey-panel-x64/releases) component and add that to a panel, right click configure panel, use the file option to select the script.<br> For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable mode they go in C:\Users\your user name\AppData\Roaming\foobar2000-v2\skins\ <br><br>
 
-* Disc Spin: requires my mask's and art files for the CD etc. Mask's automaticly. Generates a Disc from album art if you have no disc art, falls back to default disc if non, Seperate Vinyl mask if your art is called vinyl(option to change default mask type in right click menu if its not called vinyl). custom file paths working fairly well, probably. Right click options, Quit extensive now for what it is. A lot of customization options added<br><br>
+* Disc Spin: requires my mask's and art files for the CD etc. Mask's automaticly. Generates a Disc from album art if you have no disc art, falls back to default disc if non, Seperate Vinyl mask if your art is called vinyl(option to change default mask type in right click menu if its not called vinyl). custom file paths working fairly well, probably. Right click options, Quit extensive now for what it is. A lot of customization options added, requires Album Art to look its best<br><br>
 Performance ok now on larger panels, added image quality settings for scaling mode and image resolution, nearest neighbour best for large panels.<br><br>
 
 * VolumeKnob: Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control. Could probably be adapted to any type of Knob.<br>
 
-* PanelArt: Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization options added.<br><br>
+* PanelArt: Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization options added. 
+Requires Album Art to look its best<br><br>
 <img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/VolumeKnob.png">
 <img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/DiscSpin.png">
 <img align="right" width="400" height="100" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/foo%20setup.png">
