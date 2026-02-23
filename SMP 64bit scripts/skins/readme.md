@@ -5,7 +5,7 @@ Performance ok now on larger panels, added image quality settings for scaling mo
 
 * VolumeKnob: Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control. Could probably be adapted to any type of Knob.<br>
 
-* PanelArt: Simple Track display and album art background blur/darkness. several options in right click menu. A lot of customization options added.<br><br>
+* PanelArt: Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization options added.<br><br>
 <img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/VolumeKnob.png">
 <img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/DiscSpin.png">
 <img align="right" width="400" height="100" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/foo%20setup.png">
