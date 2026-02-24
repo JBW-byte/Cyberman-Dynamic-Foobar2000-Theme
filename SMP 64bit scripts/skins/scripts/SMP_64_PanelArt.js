@@ -8,12 +8,11 @@
   // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
  // === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
 
-window.DefineScript("SMP 64bit PanelArt V2", { author: "L.E.D. (optimized)" });
+window.DefineScript("SMP 64bit PanelArt V2", { author: "L.E.D. (optimized)", options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
-include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
 
 function _fbSanitise(str) {
 	if (!str) return '';
@@ -162,7 +161,9 @@ function getDefaultState() {
         artistFontName: USER_DEFAULTS.ARTIST_FONT,
         artistFontSize: USER_DEFAULTS.ARTIST_SIZE,
         extraFontName: USER_DEFAULTS.EXTRA_FONT,
-        extraFontSize: USER_DEFAULTS.EXTRA_SIZE
+        extraFontSize: USER_DEFAULTS.EXTRA_SIZE,
+        
+        blinkOnChange: true
     };
 }
 
@@ -520,7 +521,8 @@ const PanelArt = {
     images: {
         source: null,
         blur: null,
-        currentMetadb: null   // tracks which metadb the async art request was issued for
+        currentMetadb: null,
+        currentPath: ''   // track current folder path to skip loading on same album
     },
     
     text: {
@@ -1013,24 +1015,44 @@ const ImageSearch = {
 
 // ================= IMAGE MANAGEMENT =================
 const ImageManager = {
+    loadTimer: null,
+    
     loadAlbumArt(metadb) {
+        // Debounce to avoid lag on track changes
+        if (this.loadTimer) window.ClearTimeout(this.loadTimer);
+        this.loadTimer = window.SetTimeout(() => {
+            this.loadTimer = null;
+            this.doLoadAlbumArt(metadb);
+        }, 50);
+    },
+    
+    doLoadAlbumArt(metadb) {
         try {
-            // Always clear stale artwork immediately so previous track never bleeds through
-            PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
-            PanelArt.images.blur   = Utils.disposeImage(PanelArt.images.blur);
-            PanelArt.images.currentMetadb = null;  // invalidate any in-flight async art request
-            
             // Use passed metadb first (avoids race condition), fall back to polling
             const track = metadb || fb.GetNowPlaying();
             
-            TextManager.update(track);
-            
             if (!track) {
+                TextManager.update(null);
                 window.Repaint();
                 return;
             }
             
             const folderPath = PanelArt.titleFormats.path.EvalWithMetadb(track);
+            
+            // Skip if same album - keep existing art and blur
+            if (PanelArt.images.source && PanelArt.images.currentPath === folderPath) {
+                TextManager.update(track);
+                return;
+            }
+            
+            // New album - clear stale artwork
+            PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
+            PanelArt.images.blur = Utils.disposeImage(PanelArt.images.blur);
+            PanelArt.images.currentMetadb = null;
+            PanelArt.images.currentPath = folderPath;
+            
+            TextManager.update(track);
+            
             const foundPath = ImageSearch.searchForCover(track, folderPath);
             
             let art = null;
@@ -1058,7 +1080,7 @@ const ImageManager = {
             console.log("Failed to load album art:", e);
         }
     },
-    
+
     buildBlur() {
         const img = PanelArt.images;
         const dim = PanelArt.dimensions;
@@ -1149,7 +1171,7 @@ const OverlayCache = {
             
             // ---- Scanlines (dark rows) ----
             if (cfg.showScanlines && cfg.opScanlines > 0) {
-                const col = _RGBA(0, 0, 0, cfg.opScanlines);
+                const col = PanelArt_SetAlpha(_RGB(0, 0, 0), cfg.opScanlines);
                 for (let y = 0; y < h; y += SCANLINE_SPACING) {
                     g.FillSolidRect(0, y, w, 1, col);
                 }
@@ -1410,7 +1432,7 @@ const Renderer = {
             const flags = DT_CENTER | DT_WORDBREAK;
             
             if (cfg.textShadowEnabled) {
-                const shadowColor = _RGBA(0, 0, 0, 136);
+                const shadowColor = PanelArt_SetAlpha(_RGB(0, 0, 0), 136);
                 const offset = TEXT_SHADOW_OFFSET;
                 
                 gr.GdiDrawText(titleText, titleFont, shadowColor, textX, ty + offset, textW, titleH, flags | DT_NOPREFIX);
@@ -1696,9 +1718,13 @@ const MenuManager = {
         
         this.addOverlayMenu(m);
         m.AppendMenuSeparator();
+        this.addOverlayMenu(m);
+        m.AppendMenuSeparator();
         this.addPanelArtMenu(m);
         
         m.AppendMenuSeparator();
+        m.AppendMenuItem(MF_STRING, 902, "Blink on Change");
+        if (PanelArt.config.blinkOnChange) m.CheckMenuItem(902, true);
         m.AppendMenuItem(MF_STRING, 900, "Reset to Defaults");
         m.AppendMenuItem(MF_STRING, 901, "Clear Image Cache");
         
@@ -2049,6 +2075,10 @@ const MenuManager = {
             TextHeightCache.clear();
             ImageManager.loadAlbumArt();
         }
+        else if (id === 902) {
+            PanelArt.config.blinkOnChange = !PanelArt.config.blinkOnChange;
+            window.Repaint();
+        }
         else if (id === 1000) {
             try {
                 const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
@@ -2074,6 +2104,12 @@ const MenuManager = {
 // ================= FOOBAR2000 CALLBACKS =================
 function on_paint(gr) {
     if (!PanelArt.dimensions.width || !PanelArt.dimensions.height) return;
+    
+    // Blink effect - show black screen briefly on track change
+    if (PanelArt.timers.blinkTimer) {
+        gr.FillSolidRect(0, 0, PanelArt.dimensions.width, PanelArt.dimensions.height, 0xFF000000);
+        return;
+    }
     
     try {
         const w = PanelArt.dimensions.width;
@@ -2122,6 +2158,15 @@ function on_font_changed() {
 }
 
 function on_playback_new_track(metadb) {
+    // Blink effect on track change
+    if (PanelArt.config.blinkOnChange) {
+        if (PanelArt.timers.blinkTimer) window.ClearTimeout(PanelArt.timers.blinkTimer);
+        PanelArt.timers.blinkTimer = window.SetTimeout(() => {
+            PanelArt.timers.blinkTimer = null;
+            window.Repaint();
+        }, 200);
+        window.Repaint();
+    }
     ImageManager.loadAlbumArt(metadb);
 }
 
@@ -2196,6 +2241,10 @@ function on_mouse_wheel(delta) {
     StateManager.save();
 }
 
+function on_mouse_lbtn_down(x, y) {
+    if (window.SetFocus) window.SetFocus();
+}
+
 function on_mouse_lbtn_up(x, y) {
     if (PanelArt.slider.active) {
         PanelArt.slider.active = false;
@@ -2227,9 +2276,6 @@ function on_script_unload() {
     FontManager.clearCache();
     TextHeightCache.clear();
     _tt('');
-    if (_bmp) { _bmp.ReleaseGraphics(_gr); }
-    _gr  = null;
-    _bmp = null;
 }
 
 // ================= INITIALIZATION =================
