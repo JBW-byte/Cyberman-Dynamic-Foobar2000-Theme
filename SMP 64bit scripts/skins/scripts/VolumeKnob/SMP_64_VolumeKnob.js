@@ -6,7 +6,7 @@
  // ===================*** Foobar2000 64bit ***================== \\
 // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 
-window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.' });
+window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== HELPER INCLUDES ======================
 // Lodash first (needed for helpers.js if it uses _)
@@ -14,8 +14,11 @@ include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
 
-// ====================== PANEL INITIALIZATION ======================
+// Panel for DUI/CUI background
 const panel = new _panel(false);
+
+// ====================== KEYBOARD INPUT ======================
+window.DlgCode = DLGC_WANTALLKEYS;
 
 // ====================== PROPERTIES ======================
 const props = { currentTheme: new _p('VolumeKnob.Theme', 0) };
@@ -45,9 +48,6 @@ const CONFIG = Object.freeze({
     MARKER_SEGMENTS: 10,
     MARKER_WIDTH_RATIO: 0.015,
 
-    CURSOR_ARROW: 32512,
-    CURSOR_HAND: 32649,
-
     VOL_BREAKPOINT_1: 25,
     VOL_BREAKPOINT_2: 50,
     DB_BREAKPOINT_1: -20,
@@ -63,6 +63,10 @@ const DEG2RAD = Math.PI / 180;
 const VOL_SLOPE_1 = 80 / CONFIG.VOL_BREAKPOINT_1;
 const VOL_SLOPE_2 = (CONFIG.DB_BREAKPOINT_2 - CONFIG.DB_BREAKPOINT_1) / CONFIG.VOL_BREAKPOINT_1;
 const VOL_SLOPE_3 = Math.abs(CONFIG.DB_BREAKPOINT_2) / (100 - CONFIG.VOL_BREAKPOINT_2);
+// BUG-VK3: uiToAngle was dividing the second half by VOL_BREAKPOINT_2 instead of the
+// actual second-half range (100 - VOL_BREAKPOINT_2). Both equal 50 today, making the
+// bug numerically invisible — but semantically wrong if breakpoint ever changes.
+const VOL_RANGE_2 = 100 - CONFIG.VOL_BREAKPOINT_2;
 
 // ====================== THEMES ======================
 const THEMES = [
@@ -78,6 +82,15 @@ const THEMES = [
     { name: "Neon Pink", knob: _RGB(90,50,70), inner: _RGB(65,35,50), tick: _RGB(230,150,200), marker: _RGB(255,170,220) }
 ];
 
+// BUG-VK4/VK2: cache marker RGB in each theme to avoid per-frame colour decomposition
+// and the signed right-shift ambiguity (>> on a colour with bit-31 set is sign-extended;
+// happens to work today because _RGB always produces 0xFF alpha, but >>> is explicit).
+THEMES.forEach(t => {
+    t._r = (t.marker >>> 16) & 0xFF;
+    t._g = (t.marker >>>  8) & 0xFF;
+    t._b =  t.marker         & 0xFF;
+});
+
 const _clampedTheme = Math.max(0, Math.min(THEMES.length - 1, props.currentTheme.value));
 if (_clampedTheme !== props.currentTheme.value) props.currentTheme.value = _clampedTheme;
 
@@ -91,6 +104,8 @@ const State = {
     dragTargetAngle: 0,
     animationTimer: null,
     needsRepaint: false,
+    isMuted: false,
+    hasIsMuted: false,
     geometryCache: {
         valid: false,
         width: 0,
@@ -149,16 +164,31 @@ const State = {
         this.geometryCache.markerSegments=null;
     },
 
-    stopAnimation(){ if(this.animationTimer){ window.ClearInterval(this.animationTimer); this.animationTimer=null; } },
+    stopAnimation() {
+        if (this.animationTimer) { window.ClearInterval(this.animationTimer); this.animationTimer = null; }
+    },
 
-    startAnimation(){
-        if(this.animationTimer) return;
-        this.animationTimer = window.SetInterval(()=>{
-            if(this.needsRepaint){
+    // BUG-VK3/VK6: self-terminating timer — stops when the knob is settled and there
+    // is nothing to paint.  requestRepaint() restarts it whenever an external event
+    // (drag, wheel, volume sync) needs a new frame, so no repaint is ever lost.
+    startAnimation() {
+        if (this.animationTimer) return;
+        this.animationTimer = window.SetInterval(() => {
+            const settled = Math.abs(this.currentAngle - this.targetAngle) < CONFIG.ANGLE_EPSILON;
+            if (this.needsRepaint || !settled) {
                 window.Repaint();
-                this.needsRepaint=false;
+                this.needsRepaint = false;
+            } else {
+                this.stopAnimation();  // idle — nothing to animate or repaint
             }
         }, CONFIG.ANIMATION_INTERVAL);
+    },
+
+    // BUG-VK6: replaces bare `State.needsRepaint = true` at call sites so the timer
+    // is always (re)started when a repaint is requested.
+    requestRepaint() {
+        this.needsRepaint = true;
+        this.startAnimation();
     }
 };
 
@@ -179,8 +209,15 @@ const VolumeConverter = {
         if(db<=CONFIG.DB_BREAKPOINT_1) return (db+100)/VOL_SLOPE_1;
         if(db<=CONFIG.DB_BREAKPOINT_2) return CONFIG.VOL_BREAKPOINT_1 + (db-CONFIG.DB_BREAKPOINT_1)/VOL_SLOPE_2;
         return CONFIG.VOL_BREAKPOINT_2 + (db-CONFIG.DB_BREAKPOINT_2)/VOL_SLOPE_3;
+		db = Utils.clamp(db, -100, 0);
     },
-    uiToAngle(v){ return v<=CONFIG.VOL_BREAKPOINT_2 ? CONFIG.ANGLE_MIN+(v/CONFIG.VOL_BREAKPOINT_2)*SWEEP_HALF : CONFIG.ANGLE_MIN+SWEEP_HALF+((v-CONFIG.VOL_BREAKPOINT_2)/CONFIG.VOL_BREAKPOINT_2)*SWEEP_HALF; },
+    // BUG-VK3 fixed: second-half uses VOL_RANGE_2 = (100 - VOL_BREAKPOINT_2) as divisor,
+    // not VOL_BREAKPOINT_2. Both equal 50 here, but the formula is now semantically correct.
+    uiToAngle(v) {
+        if (v <= CONFIG.VOL_BREAKPOINT_2)
+            return CONFIG.ANGLE_MIN + (v / CONFIG.VOL_BREAKPOINT_2) * SWEEP_HALF;
+        return CONFIG.ANGLE_MIN + SWEEP_HALF + ((v - CONFIG.VOL_BREAKPOINT_2) / VOL_RANGE_2) * SWEEP_HALF;
+    },
     applySnap(db){ if(!CONFIG.SNAP_ENABLED||State.dragging) return db; if(Math.abs(db)<=CONFIG.SNAP_TOLERANCE_DB) return 0; if(Math.abs(db+10)<=CONFIG.SNAP_TOLERANCE_DB) return -10; return db; }
 };
 
@@ -192,7 +229,7 @@ const VolumeSync = {
             State.uiVolume=VolumeConverter.dbToUi(fbVol);
             State.targetAngle=State.dragTargetAngle=VolumeConverter.uiToAngle(State.uiVolume);
             State.currentAngle=State.targetAngle;
-            window.Repaint();
+            State.requestRepaint();
         }catch(e){ console.log("Error syncing from foobar:",e); }
     },
     setFoobarVolume(uiVol){
@@ -237,9 +274,14 @@ const Renderer = {
             const rad=(State.currentAngle+CONFIG.ROTATION_OFFSET)*DEG2RAD;
             const sr=Math.sin(rad),cr=Math.cos(rad);
             let alpha=255;
-            try{ if(fb.IsMuted) alpha=90; }catch(e){}
-            const r=(theme.marker>>16)&0xFF,g=(theme.marker>>8)&0xFF,b=theme.marker&0xFF;
-            const wMarker=Math.max(1,cache.size*CONFIG.MARKER_WIDTH_RATIO);
+            if(State.hasIsMuted){
+                try{ if(fb.IsMuted) alpha=90; }catch(e){}
+            }
+            // BUG-VK2/VK4 fixed: use precomputed _r/_g/_b (see THEMES.forEach above).
+            // The old `theme.marker >> 16` used signed right-shift — correct by accident
+            // only because _RGB's 0xFF alpha makes the int32 negative (-1 >> 0 = 255).
+            const { _r: r, _g: g, _b: b } = theme;
+            const wMarker = Math.max(1, cache.size * CONFIG.MARKER_WIDTH_RATIO);
             for(let s=0;s<CONFIG.MARKER_SEGMENTS;s++){
                 const seg=cache.markerSegments[s];
                 gr.DrawLine(
@@ -259,22 +301,22 @@ const Renderer = {
         if(State.dragging) State.currentAngle+=(State.dragTargetAngle-State.currentAngle)*CONFIG.DRAG_FOLLOW_SPEED;
         else State.currentAngle+=(State.targetAngle-State.currentAngle)*CONFIG.RELEASE_EASING;
         if(Math.abs(State.currentAngle-State.targetAngle)<CONFIG.ANGLE_EPSILON) State.currentAngle=State.targetAngle;
-        if(Math.abs(State.currentAngle-prev)>CONFIG.ANGLE_EPSILON) State.needsRepaint=true;
+        if(Math.abs(State.currentAngle-prev)>CONFIG.ANGLE_EPSILON) State.requestRepaint();
     }
 };
 
 // ====================== INPUT HANDLERS ======================
 const InputHandler = {
     hitTest(x,y){ const c=State.geometryCache; return c.valid&&(x-c.cx)**2+(y-c.cy)**2<=c.radius**2; },
-    handleDragStart(x,y){ if(!this.hitTest(x,y)) return false; State.dragging=true; State.lastY=y; window.SetCursor(CONFIG.CURSOR_HAND); return true; },
-    handleDragEnd(){ if(!State.dragging) return false; State.dragging=false; State.targetAngle=State.dragTargetAngle; window.SetCursor(CONFIG.CURSOR_ARROW); State.needsRepaint=true; return true; },
+    handleDragStart(x,y){ if(!this.hitTest(x,y)) return false; State.dragging=true; State.lastY=y; return true; },
+    handleDragEnd(){ if(!State.dragging) return false; State.dragging=false; State.targetAngle=State.dragTargetAngle; State.requestRepaint(); return true; },
     handleDragMove(x,y){
         if(!State.dragging) return false;
         let v=State.uiVolume+(State.lastY-y)*CONFIG.DRAG_SCALE;
         v=Utils.clamp(Utils.roundTo(v,1),0,100);
         if(Math.abs(v-State.uiVolume)>=0.1){
             State.uiVolume=v; State.dragTargetAngle=State.targetAngle=VolumeConverter.uiToAngle(v);
-            VolumeSync.setFoobarVolume(v); State.needsRepaint=true;
+            VolumeSync.setFoobarVolume(v); State.requestRepaint();
         }
         State.lastY=y; return true;
     },
@@ -283,7 +325,7 @@ const InputHandler = {
         v=Utils.clamp(Utils.roundTo(v,1),0,100);
         if(Math.abs(v-State.uiVolume)>=0.1){
             State.uiVolume=v; State.dragTargetAngle=State.targetAngle=VolumeConverter.uiToAngle(v);
-            VolumeSync.setFoobarVolume(v); State.needsRepaint=true;
+            VolumeSync.setFoobarVolume(v); State.requestRepaint();
         }
         return true;
     },
@@ -301,26 +343,57 @@ const MenuManager = {
                 if(i===props.currentTheme.value) menu.CheckMenuItem(i+1,true);
             }
             const id=menu.TrackPopupMenu(x,y);
-            if(id>0){ props.currentTheme.value=id-1; window.Repaint(); }
+            if(id>0){ props.currentTheme.value=id-1; State.requestRepaint(); }
         }catch(e){ console.log("Menu error:",e); }
         return true;
     }
 };
 
 // ====================== INITIALIZATION ======================
-function init(){ try{ VolumeSync.syncFromFoobar(); State.startAnimation(); }catch(e){console.log("Initialization error:",e);} }
+function init(){ 
+    try{ 
+        State.hasIsMuted = (fb.IsMuted !== undefined);
+        VolumeSync.syncFromFoobar(); 
+        State.startAnimation(); 
+    }catch(e){console.log("Initialization error:",e);} 
+}
 init();
 
 // ====================== FOOBAR CALLBACKS ======================
-function on_paint(gr){ panel.paint(gr); Renderer.draw(gr); }
-function on_size(){ const w=window.Width,h=window.Height; if(State.geometryCache.width!==w||State.geometryCache.height!==h){ panel.size(); State.invalidateGeometry(); window.Repaint(); } }
-function on_colours_changed(){ panel.colours_changed(); window.Repaint(); }
-function on_font_changed(){ window.Repaint(); }
+function on_key_down(vkey) {
+    if (vkey === VK_UP) {
+        InputHandler.handleWheel(-1);
+        return true;
+    }
+    if (vkey === VK_DOWN) {
+        InputHandler.handleWheel(1);
+        return true;
+    }
+    return false;
+}
+
+function on_paint(gr){ 
+    if (panel && panel.paint) panel.paint(gr);
+    Renderer.draw(gr); 
+}
+function on_size(){ 
+    if (panel && panel.size) panel.size();
+    const w=window.Width,h=window.Height; 
+    if(State.geometryCache.width!==w||State.geometryCache.height!==h){ 
+        State.invalidateGeometry(); 
+        State.requestRepaint(); 
+    } 
+}
+function on_colours_changed(){ 
+    if (panel && panel.colours_changed) panel.colours_changed();
+    State.requestRepaint(); 
+}
+function on_font_changed(){ State.requestRepaint(); }
 function on_volume_change(){ if(!State.dragging) VolumeSync.syncFromFoobar(); }
-function on_mouse_lbtn_down(x,y){ return InputHandler.handleDragStart(x,y); }
-function on_mouse_lbtn_up(x,y){ return InputHandler.handleDragEnd(); }
+function on_mouse_lbtn_down(x,y){ if (window.SetFocus) window.SetFocus(); return InputHandler.handleDragStart(x,y); }
+function on_mouse_lbtn_up() { return InputHandler.handleDragEnd(); }  // x,y unused
 function on_mouse_move(x,y){ return InputHandler.handleDragMove(x,y); }
 function on_mouse_wheel(step){ return InputHandler.handleWheel(step); }
-function on_mouse_lbtn_dblclk(x,y){ return InputHandler.handleDoubleClick(x,y); }
+function on_mouse_lbtn_dblclk(x,y){ if (window.SetFocus) window.SetFocus(); return InputHandler.handleDoubleClick(x,y); }
 function on_mouse_rbtn_up(x,y){ return MenuManager.show(x,y); }
 function on_script_unload(){ State.cleanup(); }
