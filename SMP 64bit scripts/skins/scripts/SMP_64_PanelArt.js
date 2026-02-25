@@ -2353,7 +2353,7 @@ function on_paint(gr) {
             Renderer.drawBorder(gr);
             
             // Draw overlay effects
-            Renderer.drawEffectsOverBorder(gr, w, h);
+            Renderer.drawOverlay(gr, w, h, null, null);
             return;
         }
         
@@ -2505,7 +2505,7 @@ function on_paint(gr) {
             Renderer.drawBorder(gr);
             
             // Draw overlay effects
-            Renderer.drawEffectsOverBorder(gr, w, h);
+            Renderer.drawOverlay(gr, w, h, null, null);
             return;
         }
         
