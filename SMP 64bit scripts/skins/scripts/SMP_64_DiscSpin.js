@@ -1,7 +1,7 @@
 'use strict';
-			 // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		    // ===== SMP 64bit Disc Spin V3 OPTIMIZED ====== \\
-		   // ======= Spins Disc + Artwork + Cover  ========= \\
+			  // -============ AUTHOR L.E.D. ===========- \\
+			 // -======== SMP 64bit Disc Spin V3 ========- \\
+			// -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
    // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
@@ -62,9 +62,9 @@ const props = {
 };
 
 
-const paintCache = {  // M1: was var — object is never reassigned
+const paintCache = {
     get bgColor() {
-        if (window.InstanceType) {   // 1 = Default UI, 0 = Columns UI
+        if (window.InstanceType) {
             return window.GetColourDUI(1);
         } else {
             try {
@@ -92,7 +92,7 @@ const CONFIG = Object.freeze({
     MAX_MASK_CACHE:   10,
     MAX_RIM_CACHE:    10,
     MAX_FILE_CACHE:  200,
-    MAX_BG_CACHE:      1,   // F1: per-album blur LRU (5 × ~4 MB ≈ 20 MB headroom)
+    MAX_BG_CACHE:      1,
     
     MIN_DISC_SIZE: 50,
     MAX_DISC_SIZE: 1000,
@@ -262,7 +262,7 @@ const Utils = {
         const pathLower = path.toLowerCase();
         
         for (let pattern of CONFIG.DISC_PATTERNS) {
-            if (pathLower.includes(pattern)) {  // P1: patterns are already lowercase (see declaration comment)
+            if (pathLower.includes(pattern)) {
                 return CONFIG.IMAGE_TYPE.REAL_DISC;
             }
         }
@@ -304,15 +304,13 @@ const Utils = {
 };
 
 function DiscSpin_SetAlpha(col, a) {
-    return ((col & 0x00FFFFFF) | (a << 24)) >>> 0;  // B1: unsigned coerce
+    return ((col & 0x00FFFFFF) | (a << 24)) >>> 0;
 }
 
-// P2: Pre-hoisted colour constants — avoid _RGB() allocation on every paint
-// frame and inside every OverlayCache.build() call.
 const DS_BLACK = _RGB(0,   0,   0);
 const DS_WHITE = _RGB(255, 255, 255);
 
-// ====================== OPTIMIZED LRU CACHE ======================
+// ====================== LRU CACHE ======================
 class LRUCache {
     constructor(maxSize) {
         this.maxSize = maxSize;
@@ -362,7 +360,7 @@ const FileManager = {
         const exists = _isFile(path) || _isFolder(path);
         this.cache.set(path, exists);
         
-        if (this.cache.size > CONFIG.MAX_FILE_CACHE) {  // P3: was while — adds 1 entry per call; if suffices
+        if (this.cache.size > CONFIG.MAX_FILE_CACHE) {
             const firstKey = this.cache.keys().next().value;
             this.cache.delete(firstKey);
         }
@@ -838,8 +836,8 @@ const State = {
         imgWidth: 0,
         imgHeight: 0,
         keepAspectRatio: true,
-        padding:    0,   // B5: declared explicitly — read in validity guard before first write
-        borderSize: 0,   // B5
+        padding:    0,
+        borderSize: 0,
         valid: false
     },
     
@@ -904,7 +902,6 @@ const State = {
             const availH = h - (totalInset * 2);
             
             if (this.isDiscImage) {
-                // B6: floor all layout coords — sub-pixel values cause GDI+ bleed
                 const size   = Math.floor(Math.min(availW, availH) * CONFIG.DISC_SCALE_FACTOR);
                 pc.discSize  = size;
                 pc.discX     = Math.floor((w - size) / 2);
@@ -914,7 +911,6 @@ const State = {
                 
                 if (P.keepAspectRatio) {
                     const ratio = Math.min(availW / this.img.Width, availH / this.img.Height);
-                    // B6: floor to pixel grid
                     sw = Math.floor(this.img.Width  * ratio);
                     sh = Math.floor(this.img.Height * ratio);
                     sx = Math.floor((w - sw) / 2);
@@ -1052,13 +1048,11 @@ const ImageLoader = {
         for (const customFolder of CustomFolders.getAll()) {
             if (!FileManager.isDirectory(customFolder)) continue;
             
-            // Level 0: the custom folder itself
             if (FileManager.matchesFolderName(customFolder, uniqueSearchNames)) {
                 const result = this.searchFolderForImage(customFolder, patterns, isDiscSearch);
                 if (result) return result;
             }
             
-            // Level 1: immediate subfolders of the custom folder
             const level1 = FileManager.getSubfolders(customFolder);
             for (const sub1 of level1) {
                 if (FileManager.matchesFolderName(sub1, uniqueSearchNames)) {
@@ -1066,7 +1060,6 @@ const ImageLoader = {
                     if (result) return result;
                 }
                 
-                // Level 2: subfolders of level-1 subfolders
                 const level2 = FileManager.getSubfolders(sub1);
                 for (const sub2 of level2) {
                     if (FileManager.matchesFolderName(sub2, uniqueSearchNames)) {
@@ -1229,10 +1222,6 @@ const ImageLoader = {
                 }
             }
             
-            // PHASE 2: Use cover art as foreground (no disc found).
-            // coverRaw is the image for processing; bgOriginal is the full-res background copy.
-            // Processor functions (scaleProportional / processForDisc) call safeDispose on their
-            // input when they create a new image, so coverRaw ownership transfers to them.
             if (coverRaw) {
                 try {
                     const targetSize = Utils.getPanelDiscSize();
@@ -1259,8 +1248,7 @@ const ImageLoader = {
                             return;
                         }
                     }
-                    // Safety: processor returned raw unchanged (already square/small) but setImage
-                    // was not reached — shouldn't happen with non-null raw, but guard just in case.
+
                     Utils.safeDispose(coverRaw);
                     Utils.safeDispose(bgOriginal);
                 } catch (e) {
@@ -1416,40 +1404,23 @@ const DiscComposite = {
     }
 };
 
-// ====================== BACKGROUND CACHE (F1: per-album LRU) ======================
-// Design: keyed by "savedPath|blurRadius|w|h" so that StackBlur runs at most
-// ONCE per unique (album × blur-setting × panel-size) combination.
-//
-// How it fits into the rest of the script:
-//   • invalidate()   — called from State.setImage(), on_size(), menu handlers.
-//                      Clears _activeKey so ensure() rebuilds on next paint.
-//   • ensure(w, h)   — called from on_paint.  Fast-path when key matches; builds
-//                      only when key differs.  Replaces the old !valid pattern.
-//   • dispose()      — called from on_script_unload.  Disposes all cached bitmaps.
-//
-// Key includes w and h: the blurred bitmap is stretched to panel size, so a
-// resize generates a new key.  Old keys stay in the LRU until evicted.
+// ====================== BACKGROUND CACHE ======================
 const BackgroundCache = {
     _lru:       new LRUCache(CONFIG.MAX_BG_CACHE),
     _activeKey: '',     // key that produced .img; '' means "needs rebuild"
     img:        null,   // alias into _lru for the currently active blurred bitmap
 
     _makeKey(w, h) {
-        // props.savedPath.value is set before window.Repaint() in every load path,
-        // so it is always current when on_paint calls ensure().
+    
         return `${props.savedPath.value}|${P.blurRadius}|${w}|${h}`;
     },
 
-    // Reset the active key so the next ensure() call triggers a rebuild or cache-hit.
-    // Does NOT dispose any bitmaps — the LRU holds them for potential reuse.
     invalidate() {
         this._activeKey = '';
         this.img = null;
     },
 
-    // Hot-path entry point: builds only when the current key is stale.
-    // Called on every on_paint frame, so it must be as cheap as possible when
-    // the key already matches (the common case during disc spinning).
+
     ensure(w, h) {
         if (w <= 0 || h <= 0) return;
 
@@ -1470,7 +1441,6 @@ const BackgroundCache = {
         // Check LRU before doing any GDI work.
         const cached = this._lru.get(key);
         if (cached) {
-            // F1: Cache hit — zero StackBlur cost even after invalidate().
             this._activeKey = key;
             this.img = cached;
             return;
@@ -1543,7 +1513,7 @@ const OverlayCache = {
             
             // ---- Scanlines (dark rows) ----
             if (P.showScanlines && P.opScanlines > 0) {
-                const col = DiscSpin_SetAlpha(DS_BLACK, P.opScanlines);  // P2
+                const col = DiscSpin_SetAlpha(DS_BLACK, P.opScanlines);
                 for (let y = 0; y < h; y += spacing) {
                     g.FillSolidRect(0, y, w, 1, col);
                 }
@@ -1552,7 +1522,7 @@ const OverlayCache = {
             // ---- Glow (ellipses around art/image position) ----
             if (P.showGlow && P.opGlow > 0 && pc) {
                 const op    = P.opGlow;
-                const white = DS_WHITE;  // P2
+                const white = DS_WHITE;
                 const cx = State.isDiscImage ? pc.discX + pc.discSize / 2 : pc.staticX + pc.staticW / 2;
                 const cy = State.isDiscImage ? pc.discY + pc.discSize / 2 : pc.staticY + pc.staticH / 2;
                 const maxR = (State.isDiscImage ? pc.discSize : Math.max(pc.staticW, pc.staticH)) * 0.75;
@@ -1571,10 +1541,10 @@ const OverlayCache = {
             // ---- Reflection (smoothstep gradient from top) ----
             if (P.showReflection && P.opReflection > 0) {
                 const reflH = Math.floor(h * CONFIG.OVERLAY.REFLECTION_HEIGHT_RATIO);
-                const white = DS_WHITE;  // P2
+                const white = DS_WHITE;
                 let lastAlpha = -1;
                 let bandStart = 0;
-                for (let y = 0; y < reflH; y++) {   // B3: was <= (off-by-one, extra wasted iteration)
+                for (let y = 0; y < reflH; y++) {
                     const t = 1 - (y / reflH);
                     const s = t * t * (3 - 2 * t);
                     const alpha = Math.floor(P.opReflection * s * 0.65);
@@ -1594,8 +1564,8 @@ const OverlayCache = {
             // ---- Phosphor (horizontal tint rows) ----
             if (P.showPhosphor && P.opPhosphor > 0) {
                 const themeColor = PhosphorManager.getColor();
-                const r  = (themeColor >>> 16) & 255;  // B2: unsigned shift (custom ARGB has bit31 set)
-                const gc = (themeColor >>> 8)  & 255;   // B2
+                const r  = (themeColor >>> 16) & 255;
+                const gc = (themeColor >>> 8)  & 255;
                 const b  =  themeColor        & 255;
                 const col = DiscSpin_SetAlpha(
                     _RGB(
@@ -1908,20 +1878,20 @@ const SliderRenderer = {
         
         // Track (background)
         gr.FillSolidRect(bx, barY, barW, barH,
-            DiscSpin_SetAlpha(DS_WHITE, 55));  // P2
+            DiscSpin_SetAlpha(DS_WHITE, 55));
         
         // Fill (progress)
         const fillW = Math.floor(barW * (value / max));
         if (fillW > 0) {
             gr.FillSolidRect(bx, barY, fillW, barH,
-                DiscSpin_SetAlpha(DS_WHITE, 185));  // P2
+                DiscSpin_SetAlpha(DS_WHITE, 185));
         }
         
         // Value label centred above the bar
         const font  = this.getFont();
         const label = value.toString();
         const sz    = gr.MeasureString(label, font, 0, 0, w, window.Height);
-        gr.DrawString(label, font, DS_WHITE,  // P2
+        gr.DrawString(label, font, DS_WHITE,
             Math.floor((w - sz.Width) / 2),
             barY - Math.ceil(sz.Height) - 2,
             Math.ceil(sz.Width), Math.ceil(sz.Height));
@@ -1936,7 +1906,7 @@ const SliderRenderer = {
         const valSz  = gr.MeasureString('255', font, 0, 0, w, window.Height);
         const titleY = barY - Math.ceil(valSz.Height) - 4 - Math.ceil(sz.Height) - 4;
         gr.DrawString(text, font,
-            DiscSpin_SetAlpha(DS_WHITE, 180),  // P2
+            DiscSpin_SetAlpha(DS_WHITE, 180),
             Math.floor((w - sz.Width) / 2),
             titleY,
             Math.ceil(sz.Width), Math.ceil(sz.Height));
@@ -2423,7 +2393,7 @@ const MenuManager = {
         // Set Border Size (250)
         if (idx === 250) {
             const v = utils.InputBox(window.ID, 'Border Size', 'Enter size (0–50):', props.borderSize.value.toString(), false);
-            const n = parseInt(v, 10);  // B4: explicit radix
+            const n = parseInt(v, 10);
             if (!isNaN(n)) { 
                 props.borderSize.value = _.clamp(n, 0, 50); 
                 State.paintCache.valid = false;  // Recalculate disc/image position
@@ -2444,7 +2414,7 @@ const MenuManager = {
         // Set Padding (252)
         if (idx === 252) {
             const v = utils.InputBox(window.ID, 'Padding', 'Enter size (0–100):', props.padding.value.toString(), false);
-            const n = parseInt(v, 10);  // B4: explicit radix
+            const n = parseInt(v, 10);
             if (!isNaN(n)) { 
                 props.padding.value = _.clamp(n, 0, 100); 
                 State.paintCache.valid = false;  // Recalculate disc/image position
@@ -2485,7 +2455,7 @@ const MenuManager = {
             changed = true;
         }
         
-        // Blur Radius (271-281: 0-200 in steps of 20)
+        // Blur Radius
         if (_.inRange(idx, 271, 282)) {
             props.blurRadius.value = (idx - 271) * 20;
             BackgroundCache.invalidate();
@@ -2499,7 +2469,7 @@ const MenuManager = {
             changed = true;
         }
         
-        // Darken Background (290-295: 0-50 in steps of 10)
+        // Darken Background
         if (_.inRange(idx, 290, 296)) {
             props.darkenValue.value = (idx - 290) * 10;
             BackgroundCache.invalidate();
@@ -2541,7 +2511,6 @@ function on_paint(gr) {
             const bgSrc = State.bgImg;
             if (bgSrc && bgSrc.Width > 0 && bgSrc.Height > 0) {
                 if (P.blurEnabled) {
-                    // F1: ensure() is a no-op when key matches (common case during spinning)
                     BackgroundCache.ensure(w, h);
                     if (BackgroundCache.img) {
                         gr.DrawImage(BackgroundCache.img, 0, 0, w, h, 0, 0, BackgroundCache.img.Width, BackgroundCache.img.Height);
@@ -2555,8 +2524,8 @@ function on_paint(gr) {
         
         // Darken overlay.
         if (P.darkenValue > 0) {
-            const alpha = Math.floor(P.darkenValue * 2.55);  // 0–50 → 0–127
-            gr.FillSolidRect(0, 0, w, h, DiscSpin_SetAlpha(DS_BLACK, alpha));  // P2
+            const alpha = Math.floor(P.darkenValue * 2.55);
+            gr.FillSolidRect(0, 0, w, h, DiscSpin_SetAlpha(DS_BLACK, alpha));
         }
     }
     
@@ -2585,8 +2554,6 @@ function on_size() {
     DiscComposite.invalidate();
     AssetManager.maskCache.clear();
     AssetManager.rimCache.clear();
-    // P4: ImageLoader.cache.clear() removed — it disposed State.img (dangling ref)
-    //     and caused the disc to vanish on resize with no reload.
     FileManager.invalidateSubfolderCache();
     window.Repaint();
 }
@@ -2673,7 +2640,6 @@ function on_mouse_wheel(delta) {
 }
 
 function on_script_unload() {
-    // M3: dispose lazily-created font
     if (SliderRenderer._font) { try { SliderRenderer._font.Dispose(); } catch (e) {} SliderRenderer._font = null; }
     Slider.cleanup();
     State.cleanup();
