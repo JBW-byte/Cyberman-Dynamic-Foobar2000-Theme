@@ -1,7 +1,7 @@
 'use strict';
-    // ============== AUTHOR L.E.D. ============== \\
-   // == Polished Panel Artwork and Trackinfo v2 == \\
-  // ========== Blur Artwork + Trackinfo =========== \\
+           // ============== AUTHOR L.E.D. ============== \\
+          // == Polished Panel Artwork and Trackinfo v2 == \\
+         // ========== Blur Artwork + Trackinfo =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
