@@ -6,7 +6,7 @@
  // ===================*** Foobar2000 64bit ***================== \\
 // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 
-window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 // Lodash first (needed for helpers.js if it uses _)
@@ -63,9 +63,7 @@ const DEG2RAD = Math.PI / 180;
 const VOL_SLOPE_1 = 80 / CONFIG.VOL_BREAKPOINT_1;
 const VOL_SLOPE_2 = (CONFIG.DB_BREAKPOINT_2 - CONFIG.DB_BREAKPOINT_1) / CONFIG.VOL_BREAKPOINT_1;
 const VOL_SLOPE_3 = Math.abs(CONFIG.DB_BREAKPOINT_2) / (100 - CONFIG.VOL_BREAKPOINT_2);
-// BUG-VK3: uiToAngle was dividing the second half by VOL_BREAKPOINT_2 instead of the
-// actual second-half range (100 - VOL_BREAKPOINT_2). Both equal 50 today, making the
-// bug numerically invisible — but semantically wrong if breakpoint ever changes.
+// uiToAngle divides the second half by VOL_RANGE_2 = (100 - VOL_BREAKPOINT_2)
 const VOL_RANGE_2 = 100 - CONFIG.VOL_BREAKPOINT_2;
 
 // ====================== THEMES ======================
@@ -82,9 +80,6 @@ const THEMES = [
     { name: "Neon Pink", knob: _RGB(90,50,70), inner: _RGB(65,35,50), tick: _RGB(230,150,200), marker: _RGB(255,170,220) }
 ];
 
-// BUG-VK4/VK2: cache marker RGB in each theme to avoid per-frame colour decomposition
-// and the signed right-shift ambiguity (>> on a colour with bit-31 set is sign-extended;
-// happens to work today because _RGB always produces 0xFF alpha, but >>> is explicit).
 THEMES.forEach(t => {
     t._r = (t.marker >>> 16) & 0xFF;
     t._g = (t.marker >>>  8) & 0xFF;
@@ -104,7 +99,6 @@ const State = {
     dragTargetAngle: 0,
     animationTimer: null,
     needsRepaint: false,
-    isMuted: false,
     hasIsMuted: false,
     geometryCache: {
         valid: false,
@@ -168,9 +162,6 @@ const State = {
         if (this.animationTimer) { window.ClearInterval(this.animationTimer); this.animationTimer = null; }
     },
 
-    // BUG-VK3/VK6: self-terminating timer — stops when the knob is settled and there
-    // is nothing to paint.  requestRepaint() restarts it whenever an external event
-    // (drag, wheel, volume sync) needs a new frame, so no repaint is ever lost.
     startAnimation() {
         if (this.animationTimer) return;
         this.animationTimer = window.SetInterval(() => {
@@ -184,8 +175,6 @@ const State = {
         }, CONFIG.ANIMATION_INTERVAL);
     },
 
-    // BUG-VK6: replaces bare `State.needsRepaint = true` at call sites so the timer
-    // is always (re)started when a repaint is requested.
     requestRepaint() {
         this.needsRepaint = true;
         this.startAnimation();
@@ -206,13 +195,11 @@ const VolumeConverter = {
         return CONFIG.DB_BREAKPOINT_2 + (v-CONFIG.VOL_BREAKPOINT_2)*VOL_SLOPE_3;
     },
     dbToUi(db){
+        db = Utils.clamp(db, -100, 0);
         if(db<=CONFIG.DB_BREAKPOINT_1) return (db+100)/VOL_SLOPE_1;
         if(db<=CONFIG.DB_BREAKPOINT_2) return CONFIG.VOL_BREAKPOINT_1 + (db-CONFIG.DB_BREAKPOINT_1)/VOL_SLOPE_2;
         return CONFIG.VOL_BREAKPOINT_2 + (db-CONFIG.DB_BREAKPOINT_2)/VOL_SLOPE_3;
-		db = Utils.clamp(db, -100, 0);
     },
-    // BUG-VK3 fixed: second-half uses VOL_RANGE_2 = (100 - VOL_BREAKPOINT_2) as divisor,
-    // not VOL_BREAKPOINT_2. Both equal 50 here, but the formula is now semantically correct.
     uiToAngle(v) {
         if (v <= CONFIG.VOL_BREAKPOINT_2)
             return CONFIG.ANGLE_MIN + (v / CONFIG.VOL_BREAKPOINT_2) * SWEEP_HALF;
@@ -277,11 +264,9 @@ const Renderer = {
             if(State.hasIsMuted){
                 try{ if(fb.IsMuted) alpha=90; }catch(e){}
             }
-            // BUG-VK2/VK4 fixed: use precomputed _r/_g/_b (see THEMES.forEach above).
-            // The old `theme.marker >> 16` used signed right-shift — correct by accident
-            // only because _RGB's 0xFF alpha makes the int32 negative (-1 >> 0 = 255).
             const { _r: r, _g: g, _b: b } = theme;
             const wMarker = Math.max(1, cache.size * CONFIG.MARKER_WIDTH_RATIO);
+            const markerCol = _RGBA(r, g, b, alpha);
             for(let s=0;s<CONFIG.MARKER_SEGMENTS;s++){
                 const seg=cache.markerSegments[s];
                 gr.DrawLine(
@@ -290,7 +275,7 @@ const Renderer = {
                     cache.cx+sr*cache.size*seg.t1,
                     cache.cy-cr*cache.size*seg.t1,
                     wMarker,
-                    _RGBA(r,g,b,alpha)
+                    markerCol
                 );
             }
 
@@ -362,11 +347,11 @@ init();
 // ====================== FOOBAR CALLBACKS ======================
 function on_key_down(vkey) {
     if (vkey === VK_UP) {
-        InputHandler.handleWheel(-1);
+        InputHandler.handleWheel(1);
         return true;
     }
     if (vkey === VK_DOWN) {
-        InputHandler.handleWheel(1);
+        InputHandler.handleWheel(-1);
         return true;
     }
     return false;
