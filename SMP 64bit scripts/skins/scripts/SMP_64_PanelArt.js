@@ -1616,6 +1616,7 @@ const ImageManager = {
         // Skip if same album - keep existing art and blur
         if (PanelArt.images.source && PanelArt.images.currentPath === folderPath) {
             TextManager.update(track);
+            RepaintHelper.text(); // Repaint text area only
             return;
         }
         
@@ -1629,30 +1630,30 @@ const ImageManager = {
         Utils.clearScaledCache();
         
         TextManager.update(track);
-            
-            const foundPath = ImageSearch.searchForCover(track, folderPath);
-            
-            let art = null;
-            if (foundPath && FileManager.exists(foundPath)) {
-                try {
-                    art = gdi.Image(foundPath);
-                } catch (e) {
-                    console.log("Failed to load image from path:", foundPath, e);
-                }
+        
+        const foundPath = ImageSearch.searchForCover(track, folderPath);
+        
+        let art = null;
+        if (foundPath && FileManager.exists(foundPath)) {
+            try {
+                art = gdi.Image(foundPath);
+            } catch (e) {
+                console.log("Failed to load image from path:", foundPath, e);
             }
-            
-            if (!art) {
-                // No local art found - fall back to foobar's async art lookup.
-                // on_get_album_art_done below handles the result.
-                PanelArt.images.currentMetadb = track;
-                utils.GetAlbumArtAsync(window.ID, track, 0);
-                return;
-            }
-            
-            PanelArt.images.source = art;
-            OverlayCache.invalidate();
-            this.scheduleBlurRebuild();
-            window.Repaint();
+        }
+        
+        if (!art) {
+            // No local art found - fall back to foobar's async art lookup.
+            // on_get_album_art_done below handles the result.
+            PanelArt.images.currentMetadb = track;
+            utils.GetAlbumArtAsync(window.ID, track, 0);
+            return;
+        }
+        
+        PanelArt.images.source = art;
+        OverlayCache.invalidate();
+        this.scheduleBlurRebuild();
+        RepaintHelper.full();
     },
     
     buildBlur() {
@@ -2858,8 +2859,8 @@ function on_paint(gr) {
                     
                     const colors = GLITCH_BLOCK_COLORS;  // P1
                     const col = colors[Math.floor(Math.random() * colors.length)];
-                    const r = ((col >>> 16) & 0xFF) * 0.75;  // B1: halve brightness to match normal mode
-                    const g = ((col >>> 8)  & 0xFF) * 0.75;
+                    const r = ((col >>> 16) & 0xFF) * 0.90;  // B1: halve brightness to match normal mode
+                    const g = ((col >>> 8)  & 0xFF) * 0.90;
                     const b =  col & 0xFF;
                     
                     gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
@@ -3003,7 +3004,7 @@ function on_paint(gr) {
                     if (drawW > 0) {
                         const sliceColors = GLITCH_SLICE_COLORS;  // P1
                         const sliceCol = sliceColors[Math.floor(Math.random() * sliceColors.length)];
-                        gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 120));
+                        gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 220));
                     }
                 }
                 
@@ -3016,8 +3017,8 @@ function on_paint(gr) {
                     
                     const colors = GLITCH_BLOCK_COLORS;  // P1
                     const col = colors[Math.floor(Math.random() * colors.length)];
-                    const r = ((col >>> 16) & 0xFF) * 0.75;  // B1: halve brightness to match normal mode
-                    const g = ((col >>> 8)  & 0xFF) * 0.75;
+                    const r = ((col >>> 16) & 0xFF) * 0.90;  // B1: halve brightness to match normal mode
+                    const g = ((col >>> 8)  & 0xFF) * 0.90;
                     const b =  col & 0xFF;
                     
                     gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
