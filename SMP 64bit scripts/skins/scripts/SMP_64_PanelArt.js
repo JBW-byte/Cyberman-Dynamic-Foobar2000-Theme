@@ -802,9 +802,11 @@ const ArtController = {
     onPlaybackStop(reason) {
         if (reason !== 2) {
             ImageManager.cleanup();
+            // B_N3: guard text + cache clears — reason=2 means next track starts
+            // immediately; clearing causes "No track playing" flash and wasted re-scaling.
+            ArtCache.clearScaledCache();
+            TextManager.update(null);
         }
-        ArtCache.clearScaledCache();
-        TextManager.update(null);
         RepaintHelper.full();
     },
     
@@ -1020,6 +1022,7 @@ const ArtRenderer = {
 // All user changes flow through here for centralized handling
 const CommandBus = {
     _saveScheduled: false,
+    _saveTimer: null,      // B_N5: store handle so on_script_unload can cancel it
     _listeners: new Map(),
     
     on(event, callback) {
@@ -1076,11 +1079,12 @@ const CommandBus = {
     _scheduleSave() {
         if (this._saveScheduled) return;
         this._saveScheduled = true;
-        window.SetTimeout(() => {
+        // B_N5: store handle so on_script_unload can cancel before teardown
+        this._saveTimer = window.SetTimeout(() => {
+            this._saveTimer = null;
             try {
                 StateManager.save();
             } finally {
-               
                 this._saveScheduled = false;
             }
         }, 100);
@@ -1567,9 +1571,15 @@ const ImageSearch = {
 // ================= BLUR CACHE =================
 const BlurCache = {
     _cache: new Map(),    // insertion-ordered Map used as LRU (oldest first)
+    _srcIdCounter: 0,     // B_N4: monotonic id stamped onto each new source image
 
     _makeKey(w, h, radius) {
-        return `${PanelArt.images.currentPath}|${radius}|${w}|${h}`;
+        // B_N4: key on source._srcId (unique per image object, even embedded art)
+        // not currentPath, which is '' for all embedded-art tracks and caused
+        // all such tracks to share the same blur cache slot.
+        const srcId = (PanelArt.images.source && PanelArt.images.source._srcId !== undefined)
+            ? PanelArt.images.source._srcId : 'none';
+        return `${srcId}|${radius}|${w}|${h}`;
     },
 
     // Returns the blurred GDI+ bitmap, from cache or freshly built.
@@ -1679,6 +1689,8 @@ const ImageManager = {
                 
                 if (art) {
                     PanelArt.images.source = art;
+                    // B_N4c: stamp unique id so BlurCache._makeKey tracks this image
+                    if (art._srcId === undefined) art._srcId = BlurCache._srcIdCounter++;
                     PanelArt.images.currentPath = pathToLoad;
                     OverlayCache.invalidate();
                     ImageManager.scheduleBlurRebuild();
@@ -1878,10 +1890,11 @@ const Renderer = {
         const cfg = StateManager.get();
         
         try {
+            // B_N1: always paint solid fill first — guaranteed base layer even if
+            // blur is still building (150ms debounce) or failed (OOM/exception).
+            gr.FillSolidRect(0, 0, dim.width, dim.height, cfg.customBackgroundColor);
             if (cfg.blurEnabled && img.blur) {
                 gr.DrawImage(img.blur, 0, 0, dim.width, dim.height, 0, 0, img.blur.Width, img.blur.Height);
-            } else {
-                gr.FillSolidRect(0, 0, dim.width, dim.height, cfg.customBackgroundColor);
             }
             
             if (cfg.darkenValue > 0) {
@@ -2794,14 +2807,123 @@ const MenuManager = {
     }
 };
 
+// ================= GLITCH RENDER HELPER =================
+// P_N1: extracted from on_paint — was duplicated verbatim 3×
+// (image mode, slide mode, normal mode).  pad = imagePad or borderPad.
+function _paintGlitch(gr, w, h, intensity, pad) {
+    const gx = Math.max(pad, 0);
+    const gy = Math.max(pad, 0);
+    const gw = Math.max(w - pad * 2, 1);
+    const gh = Math.max(h - pad * 2, 1);
+
+    gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(5, 5, 15), 220));
+
+    const scanlineOffset = Math.floor(Math.random() * 3);
+    for (let y = gy + scanlineOffset; y < gy + gh; y += 3) {
+        const alpha = Math.floor(Math.random() * 40) + 30;
+        gr.FillSolidRect(gx, y, gw, 1, PanelArt_SetAlpha(_RGB(0, 0, 0), alpha));
+    }
+
+    const maxShift = Math.floor(gw * 0.1);
+    const shift = Math.floor(Math.random() * maxShift);
+    const shiftDir = Math.random() > 0.5 ? 1 : -1;
+
+    if (intensity > 0.3) {
+        const shiftColors = GLITCH_SHIFT_COLORS;
+        const col1 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
+        const col2 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
+
+        const shiftedX = gx + shift * shiftDir;
+        const remainingW = gw - shift;
+        if (shiftedX >= gx && remainingW > 0) {
+            gr.FillSolidRect(shiftedX, gy, remainingW, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));
+        }
+        gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(220, 225, 230), 3));
+        const shiftedX2 = gx + shift * -shiftDir;
+        const remainingW2 = gw - shift;
+        if (shiftedX2 >= gx && remainingW2 > 0) {
+            gr.FillSolidRect(shiftedX2, gy, remainingW2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));
+        }
+    }
+
+    const numSlices = Math.floor(intensity * 6) + 2;
+    for (let i = 0; i < numSlices; i++) {
+        const sliceY = gy + Math.floor(Math.random() * gh);
+        const sliceH = Math.floor(Math.random() * 15) + 2;
+        const maxShiftS = Math.floor(gw * 0.1);
+        const sliceShift = (Math.floor(Math.random() * maxShiftS * 2) - maxShiftS);
+        let sliceX = gx + sliceShift;
+        let drawW = gw;
+        if (sliceX < gx) { drawW -= (gx - sliceX); sliceX = gx; }
+        if (sliceX + drawW > gx + gw) { drawW = gx + gw - sliceX; }
+        if (drawW > 0) {
+            const sliceColors = GLITCH_SLICE_COLORS;
+            const sliceCol = sliceColors[Math.floor(Math.random() * sliceColors.length)];
+            gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 120));
+        }
+    }
+
+    const numBlocks = Math.floor(intensity * 30) + 1;
+    for (let i = 0; i < numBlocks; i++) {
+        const blockH = Math.floor(Math.random() * gh * 0.06) + 2;
+        const blockY = gy + Math.floor(Math.random() * (gh - blockH));
+        const blockW = Math.floor(Math.random() * gw * 0.1) + 3;
+        const blockX = gx + Math.floor(Math.random() * (gw - blockW));
+        const colors = GLITCH_BLOCK_COLORS;
+        const col = colors[Math.floor(Math.random() * colors.length)];
+        const r = ((col >>> 16) & 0xFF) * 0.90;
+        const g = ((col >>>  8) & 0xFF) * 0.90;
+        const b =  col & 0xFF;
+        gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
+    }
+
+    const numInterference = Math.floor(intensity * 10) + 3;
+    for (let i = 0; i < numInterference; i++) {
+        const intY = gy + Math.floor(Math.random() * gh);
+        const intH = Math.floor(Math.random() * 2) + 1;
+        const intAlpha = Math.floor(Math.random() * 50) + 40;
+        const tintColors = GLITCH_TINT_COLORS;
+        const tint = tintColors[Math.floor(Math.random() * tintColors.length)];
+        gr.FillSolidRect(gx, intY, gw, intH, PanelArt_SetAlpha(tint, intAlpha));
+    }
+
+    const numNoise = Math.floor(intensity * 400) + 200;
+    for (let i = 0; i < numNoise; i++) {
+        const nx = gx + Math.floor(Math.random() * gw);
+        const ny = gy + Math.floor(Math.random() * gh);
+        const ns = Math.floor(Math.random() * 2) + 1;
+        const gray = Math.floor(Math.random() * 150);
+        const noiseColors = [
+            _RGB(gray * 0.7, gray * 0.8, gray),
+            _RGB(gray * 0.5, gray, gray * 0.5),
+            _RGB(gray, gray, gray * 0.6),
+            _RGB(gray, gray * 0.5, gray * 0.5)
+        ];
+        gr.FillSolidRect(nx, ny, ns, ns, noiseColors[Math.floor(Math.random() * noiseColors.length)]);
+    }
+
+    if (intensity > 0.75) {
+        gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(200, 210, 230), 50));
+    }
+
+    if (intensity > 0.4) {
+        const trackX = gx + Math.floor(Math.random() * gw * 0.6);
+        const trackW = Math.floor(Math.random() * 10) + 3;
+        const clampedTrackW = Math.min(trackW, gx + gw - trackX);
+        const trackColors = GLITCH_TRACK_COLORS;
+        const trackCol = trackColors[Math.floor(Math.random() * trackColors.length)];
+        if (clampedTrackW > 0) {
+            gr.FillSolidRect(trackX, gy, clampedTrackW, gh, PanelArt_SetAlpha(trackCol, 150));
+        }
+    }
+}
+
 // ================= FOOBAR2000 CALLBACKS =================
 function on_paint(gr) {
     if (!PanelArt.dimensions.width || !PanelArt.dimensions.height) return;
     
-    const frameStart = Date.now();
-    
-    const timeBudget = () => Date.now() - frameStart > FRAME_BUDGET;
-    
+    // B_N2: removed dead `frameStart` / `timeBudget` — closure was allocated
+    // on every repaint but timeBudget() was never called.
     try {
         const w = PanelArt.dimensions.width;
         const h = PanelArt.dimensions.height;
@@ -2837,127 +2959,9 @@ function on_paint(gr) {
                 gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
             }
             
-            // Glitch effect over image
+            // P_N1: glitch extracted to _paintGlitch helper
             if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled) {
-                const intensity = PanelArt.glitchFrame;
-                
-                const gx = Math.max(imagePad, 0);
-                const gy = Math.max(imagePad, 0);
-                const gw = Math.max(w - imagePad * 2, 1);
-                const gh = Math.max(h - imagePad * 2, 1);
-                
-                gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(5, 5, 15), 220));
-                
-                const scanlineOffset = Math.floor(Math.random() * 3);
-                for (let y = gy + scanlineOffset; y < gy + gh; y += 3) {
-                    const alpha = Math.floor(Math.random() * 40) + 30;
-                    gr.FillSolidRect(gx, y, gw, 1, PanelArt_SetAlpha(_RGB(0, 0, 0), alpha));
-                }
-                
-                const maxShift = Math.floor(gw * 0.1);
-                const shift = Math.floor(Math.random() * maxShift);
-                const shiftDir = Math.random() > 0.5 ? 1 : -1;
-                
-                if (intensity > 0.3) {
-                    const shiftColors = GLITCH_SHIFT_COLORS;  // P1
-                    const col1 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-                    const col2 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-                    
-                    const shiftedX = gx + shift * shiftDir;
-                    const remainingW = gw - shift;
-                    if (shiftedX >= gx && remainingW > 0) {
-                        gr.FillSolidRect(shiftedX, gy, remainingW, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));
-                    }
-                    gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(220, 225, 230), 3));
-                    const shiftedX2 = gx + shift * -shiftDir;
-                    const remainingW2 = gw - shift;
-                    if (shiftedX2 >= gx && remainingW2 > 0) {
-                        gr.FillSolidRect(shiftedX2, gy, remainingW2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));
-                    }
-                }
-                
-                const numSlices = Math.floor(intensity * 6) + 2;
-                for (let i = 0; i < numSlices; i++) {
-                    const sliceY = gy + Math.floor(Math.random() * gh);
-                    const sliceH = Math.floor(Math.random() * 15) + 2;
-                    
-                    const maxShiftS = Math.floor(gw * 0.1);
-                    const sliceShift = (Math.floor(Math.random() * maxShiftS * 2) - maxShiftS);
-                    
-                    let sliceX = gx + sliceShift;
-                    let drawW = gw;
-                    
-                    if (sliceX < gx) {
-                        drawW -= (gx - sliceX);
-                        sliceX = gx;
-                    }
-                    if (sliceX + drawW > gx + gw) {
-                        drawW = gx + gw - sliceX;
-                    }
-                    
-                    if (drawW > 0) {
-                        const sliceColors = GLITCH_SLICE_COLORS;  // P1
-                        const sliceCol = sliceColors[Math.floor(Math.random() * sliceColors.length)];
-                        gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 120));
-                    }
-                }
-                
-                const numBlocks = Math.floor(intensity * 30) + 1;
-                for (let i = 0; i < numBlocks; i++) {
-                    const blockH = Math.floor(Math.random() * gh * 0.06) + 2;
-                    const blockY = gy + Math.floor(Math.random() * (gh - blockH));
-                    const blockW = Math.floor(Math.random() * gw * 0.1) + 3;
-                    const blockX = gx + Math.floor(Math.random() * (gw - blockW));
-                    
-                    const colors = GLITCH_BLOCK_COLORS;  // P1
-                    const col = colors[Math.floor(Math.random() * colors.length)];
-                    const r = ((col >>> 16) & 0xFF) * 0.90;  // B1: halve brightness to match normal mode
-                    const g = ((col >>> 8)  & 0xFF) * 0.90;
-                    const b =  col & 0xFF;
-                    
-                    gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
-                }
-                
-                const numInterference = Math.floor(intensity * 10) + 3;
-                for (let i = 0; i < numInterference; i++) {
-                    const intY = gy + Math.floor(Math.random() * gh);
-                    const intH = Math.floor(Math.random() * 2) + 1;
-                    const intAlpha = Math.floor(Math.random() * 50) + 40;
-                    const tintColors = GLITCH_TINT_COLORS;  // P1
-                    const tint = tintColors[Math.floor(Math.random() * tintColors.length)];
-                    gr.FillSolidRect(gx, intY, gw, intH, PanelArt_SetAlpha(tint, intAlpha));
-                }
-                
-                const numNoise = Math.floor(intensity * 400) + 200;
-                for (let i = 0; i < numNoise; i++) {
-                    const nx = gx + Math.floor(Math.random() * gw);
-                    const ny = gy + Math.floor(Math.random() * gh);
-                    const ns = Math.floor(Math.random() * 2) + 1;
-                    const gray = Math.floor(Math.random() * 150);
-                    const noiseColors = [
-                        _RGB(gray * 0.7, gray * 0.8, gray),
-                        _RGB(gray * 0.5, gray, gray * 0.5),
-                        _RGB(gray, gray, gray * 0.6),
-                        _RGB(gray, gray * 0.5, gray * 0.5)
-                    ];
-                    const noiseCol = noiseColors[Math.floor(Math.random() * noiseColors.length)];
-                    gr.FillSolidRect(nx, ny, ns, ns, noiseCol);
-                }
-                
-                if (intensity > 0.75) {
-                    gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(200, 210, 230), 50));
-                }
-                
-                if (intensity > 0.4) {
-                    const trackX = gx + Math.floor(Math.random() * gw * 0.6);
-                    const trackW = Math.floor(Math.random() * 10) + 3;
-                    const clampedTrackW = Math.min(trackW, gx + gw - trackX);
-                    const trackColors = GLITCH_TRACK_COLORS;  // P1
-                    const trackCol = trackColors[Math.floor(Math.random() * trackColors.length)];
-                    if (clampedTrackW > 0) {
-                        gr.FillSolidRect(trackX, gy, clampedTrackW, gh, PanelArt_SetAlpha(trackCol, 150));
-                    }
-                }
+                _paintGlitch(gr, w, h, PanelArt.glitchFrame, imagePad);
             }
             
             // Draw border
@@ -2997,127 +3001,9 @@ function on_paint(gr) {
                 gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
             }
             
-            // Glitch effect over image
+            // P_N1: glitch extracted to _paintGlitch helper
             if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled) {
-                const intensity = PanelArt.glitchFrame;
-                
-                const gx = Math.max(imagePad, 0);
-                const gy = Math.max(imagePad, 0);
-                const gw = Math.max(w - imagePad * 2, 1);
-                const gh = Math.max(h - imagePad * 2, 1);
-                
-                gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(5, 5, 15), 220));
-                
-                const scanlineOffset = Math.floor(Math.random() * 3);
-                for (let y = gy + scanlineOffset; y < gy + gh; y += 3) {
-                    const alpha = Math.floor(Math.random() * 40) + 30;
-                    gr.FillSolidRect(gx, y, gw, 1, PanelArt_SetAlpha(_RGB(0, 0, 0), alpha));
-                }
-                
-                const maxShift = Math.floor(gw * 0.1);
-                const shift = Math.floor(Math.random() * maxShift);
-                const shiftDir = Math.random() > 0.5 ? 1 : -1;
-                
-                if (intensity > 0.3) {
-                    const shiftColors = GLITCH_SHIFT_COLORS;  // P1
-                    const col1 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-                    const col2 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-                    
-                    const shiftedX = gx + shift * shiftDir;
-                    const remainingW = gw - shift;
-                    if (shiftedX >= gx && remainingW > 0) {
-                        gr.FillSolidRect(shiftedX, gy, remainingW, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));
-                    }
-                    gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(220, 225, 230), 3));
-                    const shiftedX2 = gx + shift * -shiftDir;
-                    const remainingW2 = gw - shift;
-                    if (shiftedX2 >= gx && remainingW2 > 0) {
-                        gr.FillSolidRect(shiftedX2, gy, remainingW2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));
-                    }
-                }
-                
-                const numSlices = Math.floor(intensity * 6) + 2;
-                for (let i = 0; i < numSlices; i++) {
-                    const sliceY = gy + Math.floor(Math.random() * gh);
-                    const sliceH = Math.floor(Math.random() * 15) + 2;
-                    
-                    const maxShiftS = Math.floor(gw * 0.1);
-                    const sliceShift = (Math.floor(Math.random() * maxShiftS * 2) - maxShiftS);
-                    
-                    let sliceX = gx + sliceShift;
-                    let drawW = gw;
-                    
-                    if (sliceX < gx) {
-                        drawW -= (gx - sliceX);
-                        sliceX = gx;
-                    }
-                    if (sliceX + drawW > gx + gw) {
-                        drawW = gx + gw - sliceX;
-                    }
-                    
-                    if (drawW > 0) {
-                        const sliceColors = GLITCH_SLICE_COLORS;  // P1
-                        const sliceCol = sliceColors[Math.floor(Math.random() * sliceColors.length)];
-                        gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 120));  // P1: unified to 120 (matches image/normal mode)
-                    }
-                }
-                
-                const numBlocks = Math.floor(intensity * 30) + 1;
-                for (let i = 0; i < numBlocks; i++) {
-                    const blockH = Math.floor(Math.random() * gh * 0.06) + 2;
-                    const blockY = gy + Math.floor(Math.random() * (gh - blockH));
-                    const blockW = Math.floor(Math.random() * gw * 0.1) + 3;
-                    const blockX = gx + Math.floor(Math.random() * (gw - blockW));
-                    
-                    const colors = GLITCH_BLOCK_COLORS;  // P1
-                    const col = colors[Math.floor(Math.random() * colors.length)];
-                    const r = ((col >>> 16) & 0xFF) * 0.90;  // B1: halve brightness to match normal mode
-                    const g = ((col >>> 8)  & 0xFF) * 0.90;
-                    const b =  col & 0xFF;
-                    
-                    gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
-                }
-                
-                const numInterference = Math.floor(intensity * 10) + 3;
-                for (let i = 0; i < numInterference; i++) {
-                    const intY = gy + Math.floor(Math.random() * gh);
-                    const intH = Math.floor(Math.random() * 2) + 1;
-                    const intAlpha = Math.floor(Math.random() * 50) + 40;
-                    const tintColors = GLITCH_TINT_COLORS;  // P1
-                    const tint = tintColors[Math.floor(Math.random() * tintColors.length)];
-                    gr.FillSolidRect(gx, intY, gw, intH, PanelArt_SetAlpha(tint, intAlpha));
-                }
-                
-                const numNoise = Math.floor(intensity * 400) + 200;
-                for (let i = 0; i < numNoise; i++) {
-                    const nx = gx + Math.floor(Math.random() * gw);
-                    const ny = gy + Math.floor(Math.random() * gh);
-                    const ns = Math.floor(Math.random() * 2) + 1;
-                    const gray = Math.floor(Math.random() * 150);
-                    const noiseColors = [
-                        _RGB(gray * 0.7, gray * 0.8, gray),
-                        _RGB(gray * 0.5, gray, gray * 0.5),
-                        _RGB(gray, gray, gray * 0.6),
-                        _RGB(gray, gray * 0.5, gray * 0.5)
-                    ];
-                    const noiseCol = noiseColors[Math.floor(Math.random() * noiseColors.length)];
-                    gr.FillSolidRect(nx, ny, ns, ns, noiseCol);
-                }
-                
-                if (intensity > 0.75) {
-                    gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(200, 210, 230), 50));
-                }
-                
-                if (intensity > 0.4) {
-                    const trackX = gx + Math.floor(Math.random() * gw * 0.6);
-                    const trackW = Math.floor(Math.random() * 10) + 3;
-                    const clampedTrackW = Math.min(trackW, gx + gw - trackX);
-                    const trackColors = GLITCH_TRACK_COLORS;  // P1
-                    const trackCol = trackColors[Math.floor(Math.random() * trackColors.length)];
-                    if (clampedTrackW > 0) {
-                        gr.FillSolidRect(trackX, gy, clampedTrackW, gh, PanelArt_SetAlpha(trackCol, 150));
-                    }
-                }
+                _paintGlitch(gr, w, h, PanelArt.glitchFrame, imagePad);
             }
             
             // Draw border
@@ -3135,138 +3021,9 @@ function on_paint(gr) {
         const textArea = Renderer.getTextArea(artInfo);
         Renderer.drawText(gr, textArea);
         
-        // Glitch effect on track change - render over album art and text
+        // P_N1: glitch extracted to _paintGlitch helper
         if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled) {
-            const intensity = PanelArt.glitchFrame;
-            
-            const borderPad = (cfg.borderSize || 0);
-            
-            const gx = Math.max(borderPad, 0);
-            const gy = Math.max(borderPad, 0);
-            const gw = Math.max(w - borderPad * 2, 1);
-            const gh = Math.max(h - borderPad * 2, 1);
-            
-            // Semi-transparent overlay
-            gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(5, 5, 15), 220));  // B1
-            
-            // Twitching scanlines (irregular)
-            const scanlineOffset = Math.floor(Math.random() * 3);
-            for (let y = gy + scanlineOffset; y < gy + gh; y += 3) {
-                const alpha = Math.floor(Math.random() * 40) + 30;
-                gr.FillSolidRect(gx, y, gw, 1, PanelArt_SetAlpha(_RGB(0, 0, 0), alpha));  // B1
-            }
-            
-            // RGB channel shift / color separation - light blue, off-white, green, yellow
-            const maxShift = Math.floor(gw * 0.1);
-            const shift = Math.floor(Math.random() * maxShift);
-            const shiftDir = Math.random() > 0.5 ? 1 : -1;
-            
-            if (intensity > 0.3) {
-                const shiftColors = GLITCH_SHIFT_COLORS;  // P1
-                const col1 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-                const col2 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-                
-                const shiftedX = gx + shift * shiftDir;
-                const remainingW = gw - shift;
-                if (shiftedX >= gx && remainingW > 0) {
-                    gr.FillSolidRect(shiftedX, gy, remainingW, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));  // B1
-                }
-                gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(220, 225, 230), 3));  // B1
-                const shiftedX2 = gx + shift * -shiftDir;
-                const remainingW2 = gw - shift;
-                if (shiftedX2 >= gx && remainingW2 > 0) {
-                    gr.FillSolidRect(shiftedX2, gy, remainingW2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));  // B1
-                }
-            }
-            
-            // Geometric distortions - horizontal slices
-            const numSlices = Math.floor(intensity * 6) + 2;
-            for (let i = 0; i < numSlices; i++) {
-                const sliceY = gy + Math.floor(Math.random() * gh);
-                const sliceH = Math.floor(Math.random() * 15) + 2;
-                
-                const maxShiftS = Math.floor(gw * 0.1);
-                const sliceShift = (Math.floor(Math.random() * maxShiftS * 2) - maxShiftS);
-                
-                let sliceX = gx + sliceShift;
-                let drawW = gw;
-                
-                if (sliceX < gx) {
-                    drawW -= (gx - sliceX);
-                    sliceX = gx;
-                }
-                if (sliceX + drawW > gx + gw) {
-                    drawW = gx + gw - sliceX;
-                }
-                
-                if (drawW > 0) {
-                    const sliceColors = GLITCH_SLICE_COLORS;  // P1
-                    const sliceCol = sliceColors[Math.floor(Math.random() * sliceColors.length)];
-                    gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 120));  // B1
-                }
-            }
-            
-            // Block displacement glitches - light blue, off-white, green, yellow
-            const numBlocks = Math.floor(intensity * 30) + 1;
-            for (let i = 0; i < numBlocks; i++) {
-                const blockH = Math.floor(Math.random() * gh * 0.06) + 2;
-                const blockY = gy + Math.floor(Math.random() * (gh - blockH));
-                const blockW = Math.floor(Math.random() * gw * 0.1) + 3;
-                const blockX = gx + Math.floor(Math.random() * (gw - blockW));
-                
-                const colors = GLITCH_BLOCK_COLORS;  // P1
-                const col = colors[Math.floor(Math.random() * colors.length)];
-                const r = ((col >>> 16) & 0xFF) * 0.5;  // B5: >>> unsigned
-                const g = ((col >>> 8)  & 0xFF) * 0.5;  // B5: >>> unsigned
-                const b = (col & 0xFF) * 0.5;
-                
-                gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
-            }
-            
-            // Digital signal interference lines - light blue, off-white, green, yellow
-            const numInterference = Math.floor(intensity * 10) + 3;
-            for (let i = 0; i < numInterference; i++) {
-                const intY = gy + Math.floor(Math.random() * gh);
-                const intH = Math.floor(Math.random() * 2) + 1;
-                const intAlpha = Math.floor(Math.random() * 50) + 40;
-                const tintColors = GLITCH_TINT_COLORS;  // P1
-                const tint = tintColors[Math.floor(Math.random() * tintColors.length)];
-                gr.FillSolidRect(gx, intY, gw, intH, PanelArt_SetAlpha(tint, intAlpha));  // B1
-            }
-            
-            // Static noise - light blue, green, yellow tinted
-            const numNoise = Math.floor(intensity * 400) + 200;
-            for (let i = 0; i < numNoise; i++) {
-                const nx = gx + Math.floor(Math.random() * gw);
-                const ny = gy + Math.floor(Math.random() * gh);
-                const ns = Math.floor(Math.random() * 2) + 1;
-                const gray = Math.floor(Math.random() * 150);
-                const noiseColors = [
-                    _RGB(gray * 0.7, gray * 0.8, gray),
-                    _RGB(gray * 0.5, gray, gray * 0.5),
-                    _RGB(gray, gray, gray * 0.6),
-                    _RGB(gray, gray * 0.5, gray * 0.5)
-                ];
-                const noiseCol = noiseColors[Math.floor(Math.random() * noiseColors.length)];
-                gr.FillSolidRect(nx, ny, ns, ns, noiseCol);
-            }
-            
-            // Occasional bright flash - off-white
-            if (intensity > 0.75) {
-                gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(200, 210, 230), 50));  // B1
-            }
-            
-            // VHS tracking error (vertical bar) - light blue, green, yellow
-            if (intensity > 0.4) {
-                const trackX = gx + Math.floor(Math.random() * gw * 0.6);
-                const trackW = Math.floor(Math.random() * 10) + 3;
-                const clampedTrackW = Math.min(trackW, gx + gw - trackX);
-                const trackColors = GLITCH_TRACK_COLORS;  // P1
-                const trackCol = trackColors[Math.floor(Math.random() * trackColors.length)];
-                if (clampedTrackW > 0) {
-                    gr.FillSolidRect(trackX, gy, clampedTrackW, gh, PanelArt_SetAlpha(trackCol, 150));  // B1
-                }
-            }
+            _paintGlitch(gr, w, h, PanelArt.glitchFrame, cfg.borderSize || 0);
         }
         
         // Draw border
@@ -3445,6 +3202,9 @@ function on_get_album_art_done(metadb, art_id, image, image_path) {
         
         if (image) {
             PanelArt.images.source = image;
+            // B_N4d: stamp unique id — image_path is null for embedded art so
+            // currentPath would be '' for all such tracks, colliding in the blur cache.
+            if (image._srcId === undefined) image._srcId = BlurCache._srcIdCounter++;
             PanelArt.images.currentPath = image_path || '';
             OverlayCache.invalidate();
         } else {
@@ -3719,6 +3479,13 @@ function on_script_unload() {
         Renderer._sliderFont = null;
     }
     
+    // B_N5: cancel pending _scheduleSave timer BEFORE StateManager.save() below;
+    // without this, both the direct save and the 100ms deferred save would fire.
+    if (CommandBus._saveTimer) {
+        window.ClearTimeout(CommandBus._saveTimer);
+        CommandBus._saveTimer = null;
+        CommandBus._saveScheduled = false;
+    }
     StateManager.save();
     BlurCache.dispose();
     ImageManager.cleanup();

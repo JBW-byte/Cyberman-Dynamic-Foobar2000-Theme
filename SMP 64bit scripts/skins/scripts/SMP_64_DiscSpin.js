@@ -68,12 +68,9 @@ function _getUIColour() {
     if (window.InstanceType) return window.GetColourDUI(1);
     try { return window.GetColourCUI(3); } catch (e) { return window.GetColourDUI(1); }
 }
-const paintCache = {
-    bgColor: _getUIColour()   // P1: cached; refreshed in on_colours_changed only
-};
 
 function on_colours_changed() {
-    paintCache.bgColor = _getUIColour();   // P1: refresh on theme change
+    State.paintCache.bgColor = _getUIColour();   // P1: refresh on theme change
     window.Repaint();
 }
 
@@ -83,7 +80,7 @@ function on_font_changed() {
 
 // ====================== CONFIGURATION ======================
 const CONFIG = Object.freeze({
-    TIMER_INTERVAL: 42,
+    TIMER_INTERVAL: 50,
     MAX_STATIC_SIZE: 1000,
     MAX_CACHE_ENTRIES: 50,
     MAX_MASK_CACHE:   10,
@@ -96,7 +93,7 @@ const CONFIG = Object.freeze({
     MIN_SPIN_SPEED: 0.1,
     MAX_SPIN_SPEED: 10,
     
-    SMOOTHING_MODE: 1,
+    SMOOTHING_MODE: 4,
     DISC_SCALE_FACTOR: 1.00,
     ANGLE_MODULO: 360,
     LOAD_DEBOUNCE_MS: 33,
@@ -188,6 +185,9 @@ if (_clampedSpeed !== props.spinSpeed.value) props.spinSpeed.value = _clampedSpe
 const _clampedSize = Math.max(CONFIG.MIN_DISC_SIZE,
     Math.min(CONFIG.MAX_DISC_SIZE, props.maxImageSize.value));
 if (_clampedSize !== props.maxImageSize.value) props.maxImageSize.value = _clampedSize;
+
+// ====================== RUNTIME STATE ======================
+let readyTimer = null;
 
 // ====================== SLIDER CONSTANTS ======================
 const SLIDER_MIN_WIDTH   = 220;   // Minimum bar width in px
@@ -875,6 +875,7 @@ const State = {
     loadTimer: null,
     
     paintCache: {
+        bgColor: _getUIColour(),
         windowWidth: 0,
         windowHeight: 0,
         discSize: 0,
@@ -913,6 +914,9 @@ const State = {
         this.imageType = imgType;
         this.paintCache.valid = false;
         BackgroundCache.invalidate();  // Background might use image for blur
+        // P_N1: invalidate overlay synchronously so the FIRST on_paint after
+        // setImage draws a fresh overlay at the new disc position, not the old one.
+        // setImage() is only called from debounced paths so no storm risk here.
         OverlayCache.invalidate();
         
         // Pre-composite disc + rim for faster rendering during spin
@@ -1533,7 +1537,9 @@ const BackgroundCache = {
         this._activeKey = '';
         this.img = null;
     },
-
+    
+    // M_N1: validSize() removed — redundant; ensure() already has an O(1)
+    // _activeKey fast path that handles all the same cases correctly.
 
     ensure(w, h) {
         if (w <= 0 || h <= 0) return;
@@ -1587,6 +1593,35 @@ const BackgroundCache = {
         this._activeKey = '';
     }
 };
+
+// ====================== OVERLAY INVALIDATOR ======================
+// Batches overlay invalidation to prevent repaint storms
+const OverlayInvalidator = (() => {
+    let pending = false;
+    let _timer  = null;   // B_N1: store handle so on_script_unload can cancel it
+    
+    return {
+        request() {
+            if (pending) return;
+            pending = true;
+            
+            _timer = window.SetTimeout(() => {
+                _timer   = null;
+                pending  = false;
+                OverlayCache.invalidate();
+                window.Repaint();
+            }, 16);
+        },
+        // B_N1: called from on_script_unload to prevent post-teardown callback
+        cancel() {
+            if (_timer !== null) {
+                window.ClearTimeout(_timer);
+                _timer  = null;
+                pending = false;
+            }
+        }
+    };
+})();
 
 // ====================== OVERLAY CACHE ======================
 const OverlayCache = {
@@ -1808,7 +1843,7 @@ const PhosphorManager = {
                 props.customPhosphorColor.value = picked;
                 props.phosphorTheme.value = DISC_CUSTOM_THEME_INDEX;
                 this.invalidateCache();
-                OverlayCache.invalidate();
+                OverlayInvalidator.request();
                 RepaintHelper.full();
             }
         } catch (e) {
@@ -1933,7 +1968,7 @@ const PresetManager = {
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
             BackgroundCache.invalidate();
-            OverlayCache.invalidate();
+            OverlayInvalidator.request();
             DiscComposite.invalidate();
             State.paintCache.valid = false;
             State.updateTimer();
@@ -2329,7 +2364,7 @@ const MenuManager = {
         if (interpMode) {
             props.interpolationMode.value = interpMode.value;
             ImageLoader.cache.clear();
-            OverlayCache.invalidate();
+            OverlayInvalidator.request();
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             changed = true;
         }
@@ -2341,7 +2376,7 @@ const MenuManager = {
             ImageLoader.cache.clear();
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
-            OverlayCache.invalidate();
+            OverlayInvalidator.request();
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             changed = true;
         }
@@ -2350,7 +2385,7 @@ const MenuManager = {
         if (idx >= 40 && idx <= 42) {
             if (AssetManager.setMaskType(idx - 40, true)) {
                 ImageLoader.cache.clear();
-                OverlayCache.invalidate();
+                OverlayInvalidator.request();
                 if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
                 changed = true;
             }
@@ -2409,40 +2444,40 @@ const MenuManager = {
                 } catch (e) {}
                 props.overlayAllOff.enabled = false;
             }
-            OverlayCache.invalidate();
+            OverlayInvalidator.request();
             changed = true;
         }
         
         // Reflection toggle (200) / opacity slider (201)
-        if (idx === 200) { props.showReflection.toggle(); OverlayCache.invalidate(); changed = true; }
+        if (idx === 200) { props.showReflection.toggle(); OverlayInvalidator.request(); changed = true; }
         if (idx === 201) {
             Slider.activate("Reflection");
             return;  // slider handles its own repaint via on_mouse_wheel / on_mouse_lbtn_up
         }
         
         // Glow toggle (210) / opacity slider (211)
-        if (idx === 210) { props.showGlow.toggle(); OverlayCache.invalidate(); changed = true; }
+        if (idx === 210) { props.showGlow.toggle(); OverlayInvalidator.request(); changed = true; }
         if (idx === 211) {
             Slider.activate("Glow");
             return;
         }
         
         // Scanlines toggle (220) / opacity slider (221)
-        if (idx === 220) { props.showScanlines.toggle(); OverlayCache.invalidate(); changed = true; }
+        if (idx === 220) { props.showScanlines.toggle(); OverlayInvalidator.request(); changed = true; }
         if (idx === 221) {
             Slider.activate("Scanlines");
             return;
         }
         
         // Phosphor toggle (230) / opacity slider (231) / themes (600-610)
-        if (idx === 230) { props.showPhosphor.toggle(); OverlayCache.invalidate(); changed = true; }
+        if (idx === 230) { props.showPhosphor.toggle(); OverlayInvalidator.request(); changed = true; }
         if (idx === 231) {
             Slider.activate("Phosphor");
             return;
         }
         if (_.inRange(idx, 600, 610)) {
             props.phosphorTheme.value = idx - 600;
-            OverlayCache.invalidate();
+            OverlayInvalidator.request();
             changed = true;
         }
         if (idx === 610) {
@@ -2494,7 +2529,7 @@ const MenuManager = {
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
             BackgroundCache.invalidate();
-            OverlayCache.invalidate();
+            OverlayInvalidator.request();
             DiscComposite.invalidate();
             State.paintCache.valid = false;
             State.updateTimer();
@@ -2609,7 +2644,7 @@ const MenuManager = {
 function on_paint(gr) {
     const w = window.Width;
     const h = window.Height;
-    const bgColor = paintCache.bgColor;
+    const bgColor = State.paintCache.bgColor;
     
     // Layer 1: Background
 
@@ -2617,22 +2652,22 @@ function on_paint(gr) {
         // Use UI Color: let the SMP/Windows theme colour show as the background.
         gr.FillSolidRect(0, 0, w, h, bgColor);
     } else {
-        // Fill with the custom solid colour.
+        // B_N2: always draw the solid fill first as a guaranteed base layer.
+        // Skipping it when hasBgImage=true caused a blank panel when
+        // BackgroundCache.ensure() failed (OOM / exception) and img stayed null.
         gr.FillSolidRect(0, 0, w, h, P.customBackgroundColor);
         
         // Draw background image (blurred if enabled, otherwise stretch to cover)
-        if (P.backgroundEnabled) {
-            const bgSrc = State.bgImg;
-            if (bgSrc && bgSrc.Width > 0 && bgSrc.Height > 0) {
-                if (P.blurEnabled) {
-                    BackgroundCache.ensure(w, h);
-                    if (BackgroundCache.img) {
-                        gr.DrawImage(BackgroundCache.img, 0, 0, w, h, 0, 0, BackgroundCache.img.Width, BackgroundCache.img.Height);
-                    }
-                } else {
-                    // Draw unblurred background stretched to cover panel (COVER mode, not contain)
-                    gr.DrawImage(bgSrc, 0, 0, w, h, 0, 0, bgSrc.Width, bgSrc.Height);
+        const hasBgImage = P.backgroundEnabled && State.bgImg && State.bgImg.Width > 0 && State.bgImg.Height > 0;
+        if (hasBgImage) {
+            if (P.blurEnabled) {
+                BackgroundCache.ensure(w, h);
+                if (BackgroundCache.img) {
+                    gr.DrawImage(BackgroundCache.img, 0, 0, w, h, 0, 0, BackgroundCache.img.Width, BackgroundCache.img.Height);
                 }
+            } else {
+                // Draw unblurred background stretched to cover panel (COVER mode, not contain)
+                gr.DrawImage(State.bgImg, 0, 0, w, h, 0, 0, State.bgImg.Width, State.bgImg.Height);
             }
         }
         
@@ -2664,7 +2699,7 @@ function on_paint(gr) {
 function on_size() {
     State.paintCache.valid = false;
     BackgroundCache.invalidate();
-    OverlayCache.invalidate();
+    OverlayInvalidator.request();
     DiscComposite.invalidate();
     AssetManager.maskCache.clear();
     AssetManager.rimCache.clear();
@@ -2713,6 +2748,9 @@ const ArtDispatcher = {
         
         switch (reason) {
             case 'track':
+                if (metadb && State.currentMetadb && State.currentMetadb.Compare(metadb)) {
+                    return; // Skip if same track already loaded
+                }
                 if (metadb) {
                     ImageLoader.loadForMetadb(metadb, true);
                 }
@@ -2819,7 +2857,7 @@ function on_mouse_wheel(delta) {
     if (Slider.timers.overlayRebuild) window.ClearTimeout(Slider.timers.overlayRebuild);
     Slider.timers.overlayRebuild = window.SetTimeout(() => {
         Slider.timers.overlayRebuild = null;
-        OverlayCache.invalidate();
+        OverlayInvalidator.request();
         RepaintHelper.full();
     }, 100);
 }
@@ -2836,6 +2874,12 @@ function on_script_unload() {
         window.ClearTimeout(State.loadTimer);
         State.loadTimer = null;
     }
+    if (readyTimer) {
+        window.ClearTimeout(readyTimer);
+        readyTimer = null;
+    }
+    // B_N1: cancel OverlayInvalidator's debounce timer before teardown
+    OverlayInvalidator.cancel();
     if (SliderRenderer._font) { try { SliderRenderer._font.Dispose(); } catch (e) {} SliderRenderer._font = null; }
     Slider.cleanup();
     State.cleanup();
@@ -2895,6 +2939,6 @@ function init() {
     if (window.Width > 0 && window.Height > 0) {
         init();
     } else {
-        window.SetTimeout(waitForReady, 50);
+        readyTimer = window.SetTimeout(waitForReady, 50);
     }
 })();
