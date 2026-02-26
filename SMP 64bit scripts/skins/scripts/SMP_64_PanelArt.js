@@ -150,6 +150,16 @@ const PHOSPHOR_THEMES = [
 
 const CUSTOM_THEME_INDEX = PHOSPHOR_THEMES.length;
 
+// ================= EVENT CONSTANTS =================
+const Events = {
+    ART_CHANGED: 'art.changed',
+    ART_LOADED: 'art.loaded',
+    TEXT_CHANGED: 'text.changed',
+    CONFIG_CHANGED: 'config.changed',
+    PLAYLIST_SWITCH: 'playlist.switch',
+    PLAYBACK_STOP: 'playback.stop'
+};
+
 // ================= DEFAULT STATE =================
 function getDefaultState() {
     return {
@@ -551,11 +561,15 @@ const CustomFolders = {
 // ================= ART STATE (StateManager binding) =================
 const ArtState = {
     _runtime: {
+        loadToken: 0,        // Incremented on each new load request
+        pendingArtToken: 0,  // Token when async art request was made
+        
         images: {
             source: null,
             blur: null,
             currentMetadb: null,
-            currentPath: ''
+            currentPath: '',
+            folderPath: ''
         },
         
         text: {
@@ -601,7 +615,6 @@ const ArtState = {
         
         imageMode: false,
         imageImage: null,
-        currentImage: null,
         glitchFrame: 0,
         glitchEnabled: null,
         imageFolder: null,
@@ -619,6 +632,10 @@ const ArtState = {
     get slider() { return this._runtime.slider; },
     get timers() { return this._runtime.timers; },
     get titleFormats() { return this._runtime.titleFormats; },
+    get loadToken() { return this._runtime.loadToken; },
+    set loadToken(v) { this._runtime.loadToken = v; },
+    get pendingArtToken() { return this._runtime.pendingArtToken; },
+    set pendingArtToken(v) { this._runtime.pendingArtToken = v; },
     
     get imageMode() { return this._runtime.imageMode; },
     set imageMode(v) { this._runtime.imageMode = v; },
@@ -661,6 +678,10 @@ const PanelArt = {
     set glitchEnabled(v) { ArtState.glitchEnabled = v; },
     get imageFolder() { return ArtState.imageFolder; },
     set imageFolder(v) { ArtState.imageFolder = v; },
+    get loadToken() { return ArtState.loadToken; },
+    set loadToken(v) { ArtState.loadToken = v; },
+    get pendingArtToken() { return ArtState.pendingArtToken; },
+    set pendingArtToken(v) { ArtState.pendingArtToken = v; },
     get slideMode() { return ArtState.slideMode; },
     set slideMode(v) { ArtState.slideMode = v; },
     get slideImages() { return ArtState.slideImages; },
@@ -784,7 +805,7 @@ const ArtController = {
         }
         ArtCache.clearScaledCache();
         TextManager.update(null);
-        window.Repaint();
+        RepaintHelper.full();
     },
     
     // Handle panel resize
@@ -794,7 +815,7 @@ const ArtController = {
         OverlayCache.invalidate();
         ArtCache.clearScaledCache();
         ImageManager.scheduleBlurRebuild();
-        window.Repaint();
+        RepaintHelper.full();
     },
     
     // Handle mouse wheel for sliders
@@ -819,7 +840,7 @@ const ArtController = {
             ArtState.timers.overlayRebuild = window.SetTimeout(() => {
                 ArtState.timers.overlayRebuild = null;
                 OverlayCache.invalidate();
-                window.Repaint();
+                RepaintHelper.full();
             }, 100);
         }
         
@@ -835,7 +856,7 @@ const ArtController = {
             ArtState.slider.active = false;
             ArtState.slider.target = null;
             ArtState.slider.paddingActive = false;
-            window.Repaint();
+            RepaintHelper.full();
             return true;
         }
         return false;
@@ -978,8 +999,8 @@ const ArtRenderer = {
         if (intensity > 0.3) {
             const shiftColors = GLITCH_SHIFT_COLORS;  // P1
             const col1 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-            const col2 = shiftColors[Math.floor(Math.random() * shiftColors.length)];
-            
+            // B5: col2 removed — was picked but never drawn (ArtRenderer.paintGlitch
+            // is a simplified version; the second mirrored shift only runs in on_paint)
             const shiftedX = gx + shift * shiftDir;
             const remainingW = gw - shift;
             if (shiftedX >= gx && remainingW > 0) {
@@ -1076,7 +1097,7 @@ const ReactiveRenderer = {
         const { region } = event;
         
         if (region === Regions.FULL || region === undefined) {
-            window.Repaint();
+            RepaintHelper.full();
             return;
         }
         
@@ -1085,20 +1106,20 @@ const ReactiveRenderer = {
         const border = cfg.borderSize || 0;
         
         if (region & Regions.BACKGROUND) {
-            window.RepaintRect(0, 0, dim.width, dim.height);
+            RepaintHelper.region(0, 0, dim.width, dim.height);
         }
         if (region & Regions.ALBUM_ART) {
-            window.RepaintRect(border, border, Math.floor(dim.width * 0.5), dim.height - border * 2);
+            RepaintHelper.region(border, border, Math.floor(dim.width * 0.5), dim.height - border * 2);
         }
         if (region & Regions.TEXT) {
             const artWidth = Math.floor(dim.width * 0.5);
-            window.RepaintRect(artWidth, border, dim.width - artWidth - border, dim.height - border * 2);
+            RepaintHelper.region(artWidth, border, dim.width - artWidth - border, dim.height - border * 2);  // B3: use helper's zero-size guard
         }
         if (region & Regions.OVERLAY) {
-            window.RepaintRect(0, 0, dim.width, dim.height);
+            RepaintHelper.region(0, 0, dim.width, dim.height);  // B3: consistent use of RepaintHelper
         }
         if (region & Regions.SLIDERS) {
-            window.RepaintRect(0, dim.height - 50, dim.width, 50);
+            RepaintHelper.region(0, dim.height - 50, dim.width, 50);  // B3: consistent use of RepaintHelper
         }
     }
 };
@@ -1607,16 +1628,19 @@ const ImageManager = {
         
         const track = metadb;
         
+        // Increment token - any stale async responses will be discarded
+        PanelArt.loadToken++;
+        
         if (!track) {
             TextManager.update(null);
-            window.Repaint();
+            RepaintHelper.full();
             return;
         }
         
         const folderPath = PanelArt.titleFormats.path.EvalWithMetadb(track);
         
         // Skip if same album - keep existing art and blur
-        if (PanelArt.images.source && PanelArt.images.currentPath === folderPath) {
+        if (PanelArt.images.source && PanelArt.images.folderPath === folderPath) {
             TextManager.update(track);
             RepaintHelper.text(); // Repaint text area only
             return;
@@ -1626,7 +1650,8 @@ const ImageManager = {
         PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
         PanelArt.images.blur = null;
         PanelArt.images.currentMetadb = null;
-        PanelArt.images.currentPath = folderPath;
+        PanelArt.images.currentPath = '';
+        PanelArt.images.folderPath = folderPath;
         
         // Clear scaled image cache on new album
         Utils.clearScaledCache();
@@ -1635,27 +1660,44 @@ const ImageManager = {
         
         const foundPath = ImageSearch.searchForCover(track, folderPath);
         
-        let art = null;
+        // Use queue to prevent disk bursts
         if (foundPath && FileManager.exists(foundPath)) {
-            try {
-                art = gdi.Image(foundPath);
-            } catch (e) {
-                console.log("Failed to load image from path:", foundPath, e);
-            }
-        }
-        
-        if (!art) {
-            // No local art found - fall back to foobar's async art lookup.
-            // on_get_album_art_done below handles the result.
-            PanelArt.images.currentMetadb = track;
-            utils.GetAlbumArtAsync(window.ID, track, 0);
+            const pathToLoad = foundPath;
+            ArtQueue.enqueue((done) => {
+                // Skip if path unchanged
+                if (PanelArt.images.currentPath === pathToLoad) {
+                    done();
+                    return;
+                }
+                
+                let art = null;
+                try {
+                    art = gdi.Image(pathToLoad);
+                } catch (e) {
+                    console.log("Failed to load image from path:", pathToLoad, e);
+                }
+                
+                if (art) {
+                    PanelArt.images.source = art;
+                    PanelArt.images.currentPath = pathToLoad;
+                    OverlayCache.invalidate();
+                    ImageManager.scheduleBlurRebuild();
+                    RepaintHelper.full();
+                } else {
+                    // Fall back to async
+                    PanelArt.images.currentMetadb = track;
+                    PanelArt.pendingArtToken = PanelArt.loadToken;
+                    utils.GetAlbumArtAsync(window.ID, track, 0);
+                }
+                done();
+            });
             return;
         }
         
-        PanelArt.images.source = art;
-        OverlayCache.invalidate();
-        this.scheduleBlurRebuild();
-        RepaintHelper.full();
+        // No local art - fall back to foobar's async art lookup
+        PanelArt.images.currentMetadb = track;
+        PanelArt.pendingArtToken = PanelArt.loadToken;
+        utils.GetAlbumArtAsync(window.ID, track, 0);
     },
     
     buildBlur() {
@@ -1681,7 +1723,7 @@ const ImageManager = {
         PanelArt.timers.blurRebuild = Utils.clearTimer(PanelArt.timers.blurRebuild);
         PanelArt.timers.blurRebuild = window.SetTimeout(() => {
             this.buildBlur();
-            window.Repaint();
+            RepaintHelper.full();
         }, BLUR_DEBOUNCE_MS);
     },
     
@@ -1869,7 +1911,9 @@ const Renderer = {
             const dw = w - borderPad * 2;
             const dh = h - borderPad * 2;
             
-            gr.DrawImage(img, dx, dy, dw, dh, 0, 0, imgW, imgH);
+            // Use pre-scaled image cache for performance
+            const scaledImg = Utils.getScaledImage(img, dw, dh);
+            gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
         }
         
         // Draw border
@@ -2187,7 +2231,10 @@ const StateManager = {
         try {
             const raw = window.GetProperty(STATE_KEY, null);
             if (!raw) {
-                this.apply(getDefaultState());
+                // First run: apply defaults and save
+                this._config = getDefaultState();
+                this.apply(this._config, true, false, true); // skip font rebuild on init
+                this.save();
                 return;
             }
             
@@ -2203,11 +2250,12 @@ const StateManager = {
             
             this._config = validated;
             
-            this.apply(this._config, true);
+            this.apply(this._config, true, false, true); // skip font rebuild on init
         } catch (e) {
             console.log("State load failed. Using defaults:", e);
             this._config = getDefaultState();
-            this.apply(this._config, true);
+            this.apply(this._config, true, false, true);
+            this.save();
         }
     },
     
@@ -2235,7 +2283,7 @@ const StateManager = {
         TextHeightCache.clear();
         this.apply(this._config, true);
         this.save();
-        window.Repaint();
+        RepaintHelper.full();
     },
     
     save() {
@@ -2276,7 +2324,7 @@ const PresetManager = {
             
             StateManager.apply(validated, true);
             StateManager.save();
-            window.Repaint();
+            RepaintHelper.full();
         } catch (e) {
             console.log("Failed to load preset " + slot + ":", e);
         }
@@ -2307,7 +2355,7 @@ const PhosphorManager = {
                 StateManager.get().currentPhosphorTheme = CUSTOM_THEME_INDEX;
                 OverlayCache.invalidate();  // Required — cache holds stale colour until flushed
                 StateManager.save();
-                window.Repaint();
+                RepaintHelper.full();
             }
         } catch (e) {
             console.log("Error setting custom color:", e);
@@ -2722,7 +2770,7 @@ const MenuManager = {
                     cfg.imageFolder = folder;
                     CommandBus.emitChange(Regions.FULL);
                     StateManager.save();
-                    window.Repaint();
+                    RepaintHelper.full();
                 } else if (folder) {
                     console.log("Invalid folder:", folder);
                 }
@@ -2741,7 +2789,7 @@ const MenuManager = {
             cfg.glitchEnabled = !cfg.glitchEnabled;
             CommandBus.emitChange(Regions.FULL);
             StateManager.save();
-            window.Repaint();
+            RepaintHelper.full();
         }
     }
 };
@@ -2784,7 +2832,9 @@ function on_paint(gr) {
                 // Dark inner edge
                 gr.FillSolidRect(dx + 1, dy + 1, dw - 2, dh - 2, _RGB(20, 20, 20));
                 
-                gr.DrawImage(img, dx, dy, dw, dh, 0, 0, imgW, imgH);
+                // Use pre-scaled image cache for performance
+                const scaledImg = Utils.getScaledImage(img, dw, dh);
+                gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
             }
             
             // Glitch effect over image
@@ -2942,7 +2992,9 @@ function on_paint(gr) {
                 // Dark inner edge
                 gr.FillSolidRect(dx + 1, dy + 1, dw - 2, dh - 2, _RGB(20, 20, 20));
                 
-                gr.DrawImage(img, dx, dy, dw, dh, 0, 0, imgW, imgH);
+                // Use pre-scaled image cache for performance
+                const scaledImg = Utils.getScaledImage(img, dw, dh);
+                gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
             }
             
             // Glitch effect over image
@@ -3006,7 +3058,7 @@ function on_paint(gr) {
                     if (drawW > 0) {
                         const sliceColors = GLITCH_SLICE_COLORS;  // P1
                         const sliceCol = sliceColors[Math.floor(Math.random() * sliceColors.length)];
-                        gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 220));
+                        gr.FillSolidRect(sliceX, sliceY, drawW, sliceH, PanelArt_SetAlpha(sliceCol, 120));  // P1: unified to 120 (matches image/normal mode)
                     }
                 }
                 
@@ -3229,20 +3281,121 @@ function on_paint(gr) {
     }
 }
 
+// ================= ARTWORK DISPATCHER =================
+// Single source of truth for all artwork updates - prevents duplicate loads and repaint storms
+const ArtDispatcher = {
+    _pending: null,      // { reason, metadb }
+    _timer: null,
+    _trackTimer: null,   // B2: inner 60ms delay handle — must be cancellable
+    
+    // Priority: track > stop > selection > playlist
+    _priority: { track: 4, stop: 3, selection: 2, playlist: 1 },
+    
+    request(reason, metadb) {
+        const priority = this._priority[reason] || 0;
+        
+        // If we have a pending request, only override if higher priority
+        if (this._pending) {
+            const currentPriority = this._priority[this._pending.reason] || 0;
+            if (priority <= currentPriority) {
+                return; // Ignore lower/equal priority request
+            }
+        }
+        
+        this._pending = { reason, metadb };
+        
+        // Debounce to prevent repaint storms
+        if (this._timer) {
+            window.ClearTimeout(this._timer);
+        }
+        // B2: cancel any in-flight track delay from a previous _dispatch
+        if (this._trackTimer) {
+            window.ClearTimeout(this._trackTimer);
+            this._trackTimer = null;
+        }
+        
+        this._timer = window.SetTimeout(() => {
+            this._dispatch();
+        }, 50); // 50ms debounce
+    },
+    
+    _dispatch() {
+        if (!this._pending) return;
+        
+        const { reason, metadb } = this._pending;
+        this._pending = null;
+        this._timer = null;
+        
+        switch (reason) {
+            case 'track':
+                if (metadb) {
+                    // B2: store handle so request() can cancel it if a new track fires
+                    this._trackTimer = window.SetTimeout(() => {
+                        this._trackTimer = null;
+                        ArtController.onPlaybackNewTrack(metadb);
+                    }, 60);
+                }
+                break;
+            case 'stop':
+                // B1: pass `metadb` (original numeric reason) not the string 'stop'
+                // onPlaybackStop checks `reason !== 2` to skip cleanup on track-change
+                // stops; passing the string 'stop' always evaluated !== 2 = always cleared art.
+                ArtController.onPlaybackStop(metadb);
+                break;
+            case 'playlist':
+                if (fb.IsPlaying && fb.GetNowPlaying()) {
+                    ArtController.onPlaybackNewTrack(fb.GetNowPlaying());
+                }
+                break;
+        }
+    }
+};
+
+// ================= ASYNC DECODE QUEUE =================
+// Prevents disk bursts - only one decode at a time
+const ArtQueue = {
+    busy: false,
+    pending: null,
+    
+    enqueue(task) {
+        this.pending = task;
+        this._process();
+    },
+    
+    _process() {
+        if (this.busy || !this.pending) return;
+        
+        this.busy = true;
+        const task = this.pending;
+        this.pending = null;
+        
+        // Execute the decode task
+        task(() => {
+            this.busy = false;
+            // Process next in queue
+            this._process();
+        });
+    },
+    
+    clear() {
+        this.pending = null;
+    }
+};
+
 function on_size() {
     ArtController.onSize();
 }
 
 function on_colours_changed() {
     ImageManager.scheduleBlurRebuild();
-    window.Repaint();
+    RepaintHelper.full();
 }
 
 function on_font_changed() {
     // System font changed — clear font cache and rebuild
     FontManager.rebuildFonts();
     TextHeightCache.clear();
-    window.Repaint();
+    RepaintHelper.full();
 }
 
 function runGlitchEffect() {
@@ -3264,12 +3417,20 @@ function runGlitchEffect() {
 }
 
 function on_playback_new_track(metadb) {
-    ArtController.onPlaybackNewTrack(metadb);
+    ArtDispatcher.request('track', metadb);
 }
 
 // image is null if no artwork was found.
 function on_get_album_art_done(metadb, art_id, image, image_path) {
     try {
+        // Discard stale response if token changed (new load started after async request)
+        if (PanelArt.pendingArtToken !== PanelArt.loadToken) {
+            if (image && typeof image.Dispose === 'function') {
+                try { image.Dispose(); } catch (e) {}
+            }
+            return;
+        }
+        
         // Discard art that arrived late for a different track
         const expected = PanelArt.images.currentMetadb;
         if (expected && metadb && !metadb.Compare(expected)) {
@@ -3278,23 +3439,37 @@ function on_get_album_art_done(metadb, art_id, image, image_path) {
             }
             return;
         }
-        PanelArt.images.currentMetadb = null;   // clear; request fulfilled
+        PanelArt.images.currentMetadb = null;
+        
+        const hadArt = !!PanelArt.images.source;
+        
         if (image) {
             PanelArt.images.source = image;
+            PanelArt.images.currentPath = image_path || '';
             OverlayCache.invalidate();
         } else {
-            // Truly no art available - clear any stale source image.
             PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
+            PanelArt.images.currentPath = '';
+            PanelArt.images.folderPath = '';
         }
+        
         ImageManager.scheduleBlurRebuild();
-        window.Repaint();
+        
+        // Only full repaint if we didn't have art before
+        if (!hadArt) {
+            RepaintHelper.full();
+        }
     } catch (e) {
         console.log("on_get_album_art_done error:", e);
     }
 }
 
 function on_playback_stop(reason) {
-    ArtController.onPlaybackStop(reason);
+    ArtDispatcher.request('stop', reason);
+}
+
+function on_playlist_switch() {
+    ArtDispatcher.request('playlist', null);
 }
 
 function on_mouse_wheel(delta) {
@@ -3361,15 +3536,23 @@ const ImageModeManager = {
         }
         
         PanelArt.imageMode = true;
-        PanelArt.currentImage = imagePath;
         
-        // Load the image
-        if (PanelArt.imageImage) {
-            try { PanelArt.imageImage.Dispose(); } catch(e) {}
-        }
-        PanelArt.imageImage = gdi.Image(imagePath);
-        
-        window.Repaint();
+        // Use queue to prevent disk bursts
+        ArtQueue.enqueue((done) => {
+            // Dispose old image
+            if (PanelArt.imageImage) {
+                try { PanelArt.imageImage.Dispose(); } catch(e) {}
+            }
+            
+            try {
+                PanelArt.imageImage = gdi.Image(imagePath);
+            } catch(e) {
+                PanelArt.imageImage = null;
+            }
+            
+            RepaintHelper.full();
+            done();
+        });
     },
     
     stopImageMode() {
@@ -3378,13 +3561,12 @@ const ImageModeManager = {
             PanelArt.timers.imageAnim = null;
         }
         PanelArt.imageMode = false;
-        PanelArt.currentImage = null;
         
         if (PanelArt.imageImage) {
             try { PanelArt.imageImage.Dispose(); } catch(e) {}
             PanelArt.imageImage = null;
         }
-        window.Repaint();
+        RepaintHelper.full();
     },
     
     toggleImageMode() {
@@ -3451,9 +3633,15 @@ const SlideManager = {
         PanelArt.slideMode = true;
         PanelArt.slideImages = images;
         PanelArt.slideIndex = Math.floor(Math.random() * images.length);
-        // B2: pre-load first slide bitmap
-        if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch(e) {} }
-        try { PanelArt.slideImage = gdi.Image(images[PanelArt.slideIndex]); } catch(e) { PanelArt.slideImage = null; }
+        
+        // Use queue to prevent disk bursts
+        ArtQueue.enqueue((done) => {
+            // Dispose old slide
+            if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch(e) {} }
+            try { PanelArt.slideImage = gdi.Image(images[PanelArt.slideIndex]); } catch(e) { PanelArt.slideImage = null; }
+            RepaintHelper.albumArt();
+            done();
+        });
         
         if (PanelArt.slideTimer) {
             window.ClearInterval(PanelArt.slideTimer);
@@ -3464,13 +3652,16 @@ const SlideManager = {
                 randomIdx = Math.floor(Math.random() * PanelArt.slideImages.length);
             } while (randomIdx === PanelArt.slideIndex && PanelArt.slideImages.length > 1);
             PanelArt.slideIndex = randomIdx;
-            // B2: dispose stale bitmap, load next slide
-            if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch(e) {} }
-            try { PanelArt.slideImage = gdi.Image(PanelArt.slideImages[randomIdx]); } catch(e) { PanelArt.slideImage = null; }
-            RepaintHelper.albumArt();
+            
+            // Use queue to prevent disk bursts
+            ArtQueue.enqueue((done) => {
+                // Dispose stale bitmap, load next slide
+                if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch(e) {} }
+                try { PanelArt.slideImage = gdi.Image(PanelArt.slideImages[randomIdx]); } catch(e) { PanelArt.slideImage = null; }
+                RepaintHelper.albumArt();
+                done();
+            });
         }, 12000);
-        
-        RepaintHelper.albumArt();
     },
     
     stopSlideMode() {
@@ -3483,7 +3674,7 @@ const SlideManager = {
         PanelArt.slideIndex = 0;
         // B2: dispose cached slide bitmap
         if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch(e) {} PanelArt.slideImage = null; }
-        window.Repaint();
+        RepaintHelper.full();
     },
     
     toggleSlideMode() {
@@ -3513,6 +3704,15 @@ function on_mouse_rbtn_up(x, y) {
 
 function on_script_unload() {
     ArtController.onUnload();
+    ArtQueue.clear();
+    if (ArtDispatcher._trackTimer) {  // B2: cancel in-flight track delay
+        window.ClearTimeout(ArtDispatcher._trackTimer);
+        ArtDispatcher._trackTimer = null;
+    }
+    if (ArtDispatcher._timer) {
+        window.ClearTimeout(ArtDispatcher._timer);
+        ArtDispatcher._timer = null;
+    }
     
     if (Renderer._sliderFont) {
         try { Renderer._sliderFont.Dispose(); } catch (e) {}
@@ -3526,9 +3726,10 @@ function on_script_unload() {
     FontManager.clearCache();
     TextHeightCache.clear();
     ArtCache.clearAll();
-    RenderCache.invalidateAll();
-    UltraCache.clearAll();
-    _tt('');
+    // B4: RenderCache and UltraCache removed — these objects never existed in this script.
+    // Their intended cleanup (scaled images, blur, overlay) is already handled above by
+    // ArtCache.clearAll(), BlurCache.dispose(), and OverlayCache.dispose().
+    // _tt('') was a stale tooltip-clear call; removed (no tooltip is registered).
 }
 
 // ================= INITIALIZATION =================
@@ -3545,4 +3746,4 @@ PanelArt.imageFolder = cfg.imageFolder;
 // Load current track on init if playing
 const initTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
 ImageManager.loadAlbumArt(initTrack);
-window.Repaint();
+RepaintHelper.full();
