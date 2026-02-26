@@ -92,7 +92,7 @@ const CONFIG = Object.freeze({
     MAX_MASK_CACHE:   10,
     MAX_RIM_CACHE:    10,
     MAX_FILE_CACHE:  200,
-    MAX_BG_CACHE:      1,
+    MAX_BG_CACHE:     0,
     
     MIN_DISC_SIZE: 50,
     MAX_DISC_SIZE: 1000,
@@ -1214,10 +1214,15 @@ const ImageLoader = {
                 const result = this.searchForDisc(metadb, folderPath);
                 if (result) {
                     Utils.safeDispose(coverRaw);   // bgOriginal carries the background; raw not needed
-                    State.setImage(result.img, true, result.type, bgOriginal || result.original);
+                    // Always use album art for background, never disc art
+                    State.setImage(result.img, true, result.type, bgOriginal);
                     props.savedPath.value = result.path;
                     props.savedIsDisc.enabled = true;
                     State.updateTimer();
+                    // Trigger async album art for background if no local album art found
+                    if (!bgOriginal) {
+                        utils.GetAlbumArtAsync(window.ID, metadb, 0);
+                    }
                     return;
                 }
             }
