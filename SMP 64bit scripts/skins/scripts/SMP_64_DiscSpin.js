@@ -62,15 +62,13 @@ const props = {
 };
 
 
-// P1: resolve UI colour once at startup; refresh only in on_colours_changed.
-// The old live getter called GetColourDUI/CUI on every paint frame (~24fps).
 function _getUIColour() {
     if (window.InstanceType) return window.GetColourDUI(1);
     try { return window.GetColourCUI(3); } catch (e) { return window.GetColourDUI(1); }
 }
 
 function on_colours_changed() {
-    State.paintCache.bgColor = _getUIColour();   // P1: refresh on theme change
+    State.paintCache.bgColor = _getUIColour();
     window.Repaint();
 }
 
@@ -86,14 +84,14 @@ const CONFIG = Object.freeze({
     MAX_MASK_CACHE:   10,
     MAX_RIM_CACHE:    10,
     MAX_FILE_CACHE:  200,
-    MAX_BG_CACHE:     4,    // B4: was 0 — LRU evicted instantly, StackBlur ran every paint frame
+    MAX_BG_CACHE:     4,
     
     MIN_DISC_SIZE: 50,
     MAX_DISC_SIZE: 1000,
     MIN_SPIN_SPEED: 0.1,
     MAX_SPIN_SPEED: 10,
     
-    SMOOTHING_MODE: 4,
+    SMOOTHING_MODE: 3,
     DISC_SCALE_FACTOR: 1.00,
     ANGLE_MODULO: 360,
     LOAD_DEBOUNCE_MS: 33,
@@ -221,12 +219,10 @@ const RepaintHelper = {
     },
     
     disc() {
-        const size = Utils.getPanelDiscSize();
         const pad = P.padding;
         const border = P.borderSize;
         const w = window.Width;
         const h = window.Height;
-        // Approximate disc area
         const discSize = Math.min(w, h) - (pad + border) * 2;
         const x = Math.floor((w - discSize) / 2);
         const y = Math.floor((h - discSize) / 2);
@@ -236,8 +232,6 @@ const RepaintHelper = {
     text() {
         const w = window.Width;
         const h = window.Height;
-        const pad = P.padding;
-        // Text is typically at bottom
         this.region(0, h - 80, w, 80);
     },
     
@@ -591,7 +585,7 @@ const CustomFolders = {
     
     load() {
         const saved = window.GetProperty("RP.CustomFolders", "");
-        this.folders = saved ? _jsonParse(saved, []) : [];  // Using helper!
+        this.folders = saved ? _jsonParse(saved, []) : [];
     },
     
     save() {
@@ -645,8 +639,8 @@ const AssetManager = {
     userOverrideMask: false,
     
     init() {
-        this.currentMaskType = props.maskType.value;  // Using props!
-        this.userOverrideMask = props.userOverrideMask.enabled;  // Using props!
+        this.currentMaskType = props.maskType.value;
+        this.userOverrideMask = props.userOverrideMask.enabled;
         this.loadMask();
         this.loadRim();
     },
@@ -686,8 +680,8 @@ const AssetManager = {
         this.currentMaskType = index;
         this.userOverrideMask = isUserOverride;
         
-        props.maskType.value = index;  // Auto-saves!
-        props.userOverrideMask.enabled = isUserOverride;  // Auto-saves!
+        props.maskType.value = index;
+        props.userOverrideMask.enabled = isUserOverride;
         
         this.loadMask();
         return true;
@@ -863,7 +857,7 @@ const ImageProcessor = {
 const State = {
     img: null,
     bgImg: null,
-    _bgIdCounter: 0,   // B3: monotonic counter stamped onto each new bgImg
+    _bgIdCounter: 0,
     angle: 0,
     isDiscImage: false,
     imageType: CONFIG.IMAGE_TYPE.REAL_DISC,
@@ -906,7 +900,6 @@ const State = {
         // Only set bgImg if we have actual album art - don't use disc image as fallback
         // This ensures album art is always used for background when available
         this.bgImg = originalImg;
-        // B3: stamp new bgImg so BackgroundCache._makeKey tracks actual source
         if (this.bgImg && this.bgImg._bgId === undefined) {
             this.bgImg._bgId = ++State._bgIdCounter;
         }
@@ -914,9 +907,6 @@ const State = {
         this.imageType = imgType;
         this.paintCache.valid = false;
         BackgroundCache.invalidate();  // Background might use image for blur
-        // P_N1: invalidate overlay synchronously so the FIRST on_paint after
-        // setImage draws a fresh overlay at the new disc position, not the old one.
-        // setImage() is only called from debounced paths so no storm risk here.
         OverlayCache.invalidate();
         
         // Pre-composite disc + rim for faster rendering during spin
@@ -1017,7 +1007,6 @@ const State = {
         if (shouldRun && !this.spinTimer) {
             this.spinTimer = window.SetInterval(() => {
                 this.angle = (this.angle + P.spinSpeed) % CONFIG.ANGLE_MODULO;
-                // P2: repaint only the disc region; background/overlay/border are unchanged.
                 RepaintHelper.disc();
             }, CONFIG.TIMER_INTERVAL);
         } else if (!shouldRun && this.spinTimer) {
@@ -1148,7 +1137,6 @@ const ImageLoader = {
                         AssetManager.autoSelectMask(match);
                         return { img: processed, path: match, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
                     }
-                    // B7: processForDisc failed — dispose orphaned clone before fallthrough
                     Utils.safeDispose(original);
                 }
             }
@@ -1166,7 +1154,6 @@ const ImageLoader = {
                         AssetManager.autoSelectMask(anyMatch);
                         return { img: processed, path: anyMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
                     }
-                    // B7: processForDisc failed — dispose orphaned clone before fallthrough
                     Utils.safeDispose(original);
                 }
             }
@@ -1259,10 +1246,6 @@ const ImageLoader = {
             State.loadToken++;  // Increment token - any stale async responses will be discarded
             // Don't reset angle - keep disc spinning
             
-            // M2: removed redundant inner `const folderPath` — doLoad already
-            // closes over the identical value computed in the outer scope.
-            // Load cover art ONCE: clone for background blur, keep raw for Phase 2 processing.
-            // Three-load pattern replaced with a single load to avoid waste and memory leaks.
             let bgOriginal = null;
             let coverRaw = null;
             const coverPath = this.searchForCover(metadb, folderPath);
@@ -1357,28 +1340,26 @@ const ImageLoader = {
         
         const metadbMatches = metadb.Compare(State.currentMetadb);
         
-        // Only process if same track or no background yet
         const hadBg = !!State.bgImg;
         
         if (image) {
             try {
-                const original = image.Clone(0, 0, image.Width, image.Height);
-                
-                // B5: guard bgImg update with metadbMatches — out-of-order async
-                // callbacks must not overwrite the background with stale art.
-                if (metadbMatches) {
-                    if (State.bgImg) {
-                        Utils.safeDispose(State.bgImg);
-                    }
-                    State.bgImg = original;
-                    // B3: stamp fresh bgImg
-                    if (State.bgImg && State.bgImg._bgId === undefined) {
-                        State.bgImg._bgId = ++State._bgIdCounter;
-                    }
-                    BackgroundCache.invalidate();
+                if (!metadbMatches) {
+                    Utils.safeDispose(image);
+                    return;
                 }
                 
-                // Only update disc if same track
+                const original = image.Clone(0, 0, image.Width, image.Height);
+                
+                if (State.bgImg) {
+                    Utils.safeDispose(State.bgImg);
+                }
+                State.bgImg = original;
+                if (State.bgImg._bgId === undefined) {
+                    State.bgImg._bgId = ++State._bgIdCounter;
+                }
+                BackgroundCache.invalidate();
+                
                 if (metadbMatches) {
                     const targetSize = Utils.getPanelDiscSize();
                     if (P.useAlbumArtOnly) {
@@ -1407,8 +1388,7 @@ const ImageLoader = {
                 
                 Utils.safeDispose(image);
                 
-                // Only repaint if we didn't have background before or same track with new art
-                if (!hadBg || metadbMatches) {
+                if (!hadBg) {
                     RepaintHelper.background();
                 }
                 State.updateTimer();
@@ -1431,8 +1411,6 @@ const ImageLoader = {
             let raw = gdi.Image(CONFIG.PATHS.DEFAULT_DISC);
             if (!raw) return;
             
-            // B2: removed dead `original` clone — it was allocated then passed
-            //     as null, leaking a GdiBitmap on every default-disc load.
             const targetSize = Utils.getPanelDiscSize();
             const scaled = ImageProcessor.scaleToSquare(
                 raw, 
@@ -1512,7 +1490,6 @@ const DiscComposite = {
         } catch (e) {
             console.log('DiscSpin: DiscComposite build error:', e);
             this.dispose();
-  
             this.valid = true;
         }
     }
@@ -1525,9 +1502,6 @@ const BackgroundCache = {
     img:        null,   // alias into _lru for the currently active blurred bitmap
 
     _makeKey(w, h) {
-        // B3: key on bgImg._bgId (increments on every bgImg change) not savedPath.
-        // savedPath can point to disc art while bgImg is the cover — diverged keys
-        // meant the old blurred bitmap was reused even after the art changed.
         const bgId = (State.bgImg && State.bgImg._bgId !== undefined)
             ? State.bgImg._bgId : 'none';
         return `${bgId}|${P.blurRadius}|${w}|${h}`;
@@ -1538,9 +1512,6 @@ const BackgroundCache = {
         this.img = null;
     },
     
-    // M_N1: validSize() removed — redundant; ensure() already has an O(1)
-    // _activeKey fast path that handles all the same cases correctly.
-
     ensure(w, h) {
         if (w <= 0 || h <= 0) return;
 
@@ -1598,7 +1569,7 @@ const BackgroundCache = {
 // Batches overlay invalidation to prevent repaint storms
 const OverlayInvalidator = (() => {
     let pending = false;
-    let _timer  = null;   // B_N1: store handle so on_script_unload can cancel it
+    let _timer  = null;
     
     return {
         request() {
@@ -1612,7 +1583,6 @@ const OverlayInvalidator = (() => {
                 window.Repaint();
             }, 16);
         },
-        // B_N1: called from on_script_unload to prevent post-teardown callback
         cancel() {
             if (_timer !== null) {
                 window.ClearTimeout(_timer);
@@ -2652,9 +2622,6 @@ function on_paint(gr) {
         // Use UI Color: let the SMP/Windows theme colour show as the background.
         gr.FillSolidRect(0, 0, w, h, bgColor);
     } else {
-        // B_N2: always draw the solid fill first as a guaranteed base layer.
-        // Skipping it when hasBgImage=true caused a blank panel when
-        // BackgroundCache.ensure() failed (OOM / exception) and img stayed null.
         gr.FillSolidRect(0, 0, w, h, P.customBackgroundColor);
         
         // Draw background image (blurred if enabled, otherwise stretch to cover)
@@ -2756,9 +2723,6 @@ const ArtDispatcher = {
                 }
                 break;
             case 'stop':
-                // B1: metadb holds the numeric foobar stop reason.
-                // reason=2 means foobar is starting the next track —
-                // skip the angle reset so the disc keeps spinning smoothly.
                 if (metadb !== 2) {
                     State.angle = 0;
                 }
@@ -2788,8 +2752,6 @@ function on_playback_pause() {
 }
 
 function on_playback_stop(reason) {
-    // B1: pass numeric reason — _dispatch skips angle reset for reason=2
-    //     (reason 2 = foobar starting the next track; keep disc spinning)
     ArtDispatcher.request('stop', reason);
 }
 
@@ -2858,13 +2820,10 @@ function on_mouse_wheel(delta) {
     Slider.timers.overlayRebuild = window.SetTimeout(() => {
         Slider.timers.overlayRebuild = null;
         OverlayInvalidator.request();
-        RepaintHelper.full();
     }, 100);
 }
 
 function on_script_unload() {
-    // B6: cancel dispatcher and load timers BEFORE tearing down State/bitmaps.
-    // Without this, a 50ms debounce timer fires after unload and touches disposed objects.
     if (ArtDispatcher._timer) {
         window.ClearTimeout(ArtDispatcher._timer);
         ArtDispatcher._timer = null;
@@ -2878,7 +2837,6 @@ function on_script_unload() {
         window.ClearTimeout(readyTimer);
         readyTimer = null;
     }
-    // B_N1: cancel OverlayInvalidator's debounce timer before teardown
     OverlayInvalidator.cancel();
     if (SliderRenderer._font) { try { SliderRenderer._font.Dispose(); } catch (e) {} SliderRenderer._font = null; }
     Slider.cleanup();
@@ -2889,7 +2847,6 @@ function on_script_unload() {
     OverlayCache.dispose();
     DiscComposite.dispose();
     FileManager.clear();
-    // M1: _tt('') removed — DiscSpin never registers a tooltip; was dead code.
 }
 
 // ====================== INITIALIZATION ======================
@@ -2902,9 +2859,9 @@ function init() {
     
     if (nowPlaying) {
         ImageLoader.loadForMetadb(nowPlaying, true);
-    } else if (props.savedPath.value && FileManager.exists(props.savedPath.value)) {  // Using props!
+    } else if (props.savedPath.value && FileManager.exists(props.savedPath.value)) {
         try {
-            const imageType = Utils.getImageType(props.savedPath.value);  // Using props!
+            const imageType = Utils.getImageType(props.savedPath.value);
             
             if (imageType === CONFIG.IMAGE_TYPE.DEFAULT_DISC) {
                 ImageLoader.loadDefaultDisc();
