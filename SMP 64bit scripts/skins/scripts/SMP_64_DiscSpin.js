@@ -2548,12 +2548,13 @@ function on_paint(gr) {
     if (!OverlayCache.valid) {
         OverlayCache.build(w, h, State.paintCache);
     }
+    
+    Renderer.drawBorder(gr);  // Draw border BEFORE overlay so overlay appears on top
+
     if (OverlayCache.img) {
         const oi = OverlayCache.img;
         gr.DrawImage(oi, 0, 0, w, h, 0, 0, oi.Width, oi.Height);
     }
-
-    Renderer.drawBorder(gr);  // BUG-3 fix: border drawn AFTER overlay so it is never obscured
 
     SliderRenderer.draw(gr);
 }
