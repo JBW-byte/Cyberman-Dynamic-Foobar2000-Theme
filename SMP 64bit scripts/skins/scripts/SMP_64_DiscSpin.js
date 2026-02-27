@@ -288,7 +288,7 @@ const Utils = {
             try {
                 obj.Dispose();
             } catch (e) {
-                console.log("Dispose error:", e);
+                // Silently ignore
             }
         }
     },
@@ -341,7 +341,8 @@ const Utils = {
         const totalInset = pad + border;
         const availW = w - (totalInset * 2);
         const availH = h - (totalInset * 2);
-        return Math.floor(Math.min(availW, availH) * CONFIG.DISC_SCALE_FACTOR);
+        const calculatedSize = Math.floor(Math.min(availW, availH) * CONFIG.DISC_SCALE_FACTOR);
+        return Math.min(calculatedSize, props.maxImageSize.value);
     }
 };
 
@@ -470,7 +471,7 @@ const FileManager = {
                     if (this.isDirectory(item)) subfolders.push(item);
                 });
             } catch (e2) {
-                console.log("DiscSpin: Error enumerating subfolders with utils.Glob:", e2);
+                // Silently ignore
             }
         }
         
@@ -559,7 +560,6 @@ const FileManager = {
             const paths = this.buildSearchPaths(baseFolder, CONFIG.COVER_PATTERNS, []);
             return this.findImageInPaths(paths);
         } catch (e) {
-            console.log("DiscSpin: Error parsing Last.fm JSON:", jsonPath, e);
             return null;
         }
     },
@@ -592,7 +592,7 @@ const CustomFolders = {
         try {
             window.SetProperty("RP.CustomFolders", JSON.stringify(this.folders));
         } catch (e) {
-            console.log("Error saving custom folders:", e);
+            // Silently ignore
         }
     },
     
@@ -660,7 +660,7 @@ const AssetManager = {
                 this.maskSource = gdi.Image(maskPath);
             }
         } catch (e) {
-            console.log("Failed to load mask:", maskPath, e);
+            // Silently ignore
         }
     },
     
@@ -670,7 +670,7 @@ const AssetManager = {
                 this.rimSource = gdi.Image(CONFIG.PATHS.RIM);
             }
         } catch (e) {
-            console.log("Failed to load rim:", e);
+            // Silently ignore
         }
     },
     
@@ -720,7 +720,6 @@ const AssetManager = {
             this.maskCache.set(key, resized);
             return resized;
         } catch (e) {
-            console.log("Mask resize error:", e);
             return null;
         }
     },
@@ -737,7 +736,6 @@ const AssetManager = {
             this.rimCache.set(key, resized);
             return resized;
         } catch (e) {
-            console.log("Rim resize error:", e);
             return null;
         }
     },
@@ -783,7 +781,6 @@ const ImageProcessor = {
             Utils.safeDispose(raw);
             return newImg;
         } catch (e) {
-            console.log("Scale error:", e);
             return raw;
         }
     },
@@ -811,7 +808,6 @@ const ImageProcessor = {
             Utils.safeDispose(raw);
             return newImg;
         } catch (e) {
-            console.log("Proportional scale error:", e);
             return raw;
         }
     },
@@ -830,7 +826,6 @@ const ImageProcessor = {
             Utils.safeDispose(image);
             return clone;
         } catch (e) {
-            console.log("Mask apply error:", e);
             return image;
         }
     },
@@ -1050,7 +1045,6 @@ const ImageLoader = {
             
             return processed;
         } catch (e) {
-            console.log("Load error:", path, e);
             return null;
         }
     },
@@ -1308,7 +1302,6 @@ const ImageLoader = {
                     Utils.safeDispose(coverRaw);
                     Utils.safeDispose(bgOriginal);
                 } catch (e) {
-                    console.log("Cover load error:", e);
                     Utils.safeDispose(coverRaw);
                     Utils.safeDispose(bgOriginal);
                 }
@@ -1394,7 +1387,7 @@ const ImageLoader = {
                 State.updateTimer();
                 return;
             } catch (e) {
-                console.log("Album art processing error:", e);
+                // Silently ignore
             }
         }
         
@@ -1427,7 +1420,7 @@ const ImageLoader = {
                 State.updateTimer();
             }
         } catch (e) {
-            console.log("Default disc load error:", e);
+            // Silently ignore
         }
     },
     
@@ -1488,7 +1481,6 @@ const DiscComposite = {
             this.img.ReleaseGraphics(g);
             this.valid = true;
         } catch (e) {
-            console.log('DiscSpin: DiscComposite build error:', e);
             this.dispose();
             this.valid = true;
         }
@@ -1550,7 +1542,6 @@ const BackgroundCache = {
             this._activeKey = key;
             this.img = newImg;
         } catch (e) {
-            console.log('DiscSpin: BackgroundCache build error:', e);
             // On error set sentinel so we don't retry every frame.
             this._activeKey = key;
             this.img = null;
@@ -1701,7 +1692,6 @@ const OverlayCache = {
             
             this.img.ReleaseGraphics(g);
         } catch (e) {
-            console.log('DiscSpin: OverlayCache build error:', e);
             this.dispose();
             this.valid = true;
         }
@@ -1773,7 +1763,7 @@ const Renderer = {
             gr.FillSolidRect(0, borderSize, borderSize, h - borderSize * 2, borderColor);  // Left
             gr.FillSolidRect(w - borderSize, borderSize, borderSize, h - borderSize * 2, borderColor);  // Right
         } catch (e) {
-            console.log('DiscSpin: Error drawing border:', e);
+            // Silently ignore
         }
     }
 };
@@ -1817,7 +1807,7 @@ const PhosphorManager = {
                 RepaintHelper.full();
             }
         } catch (e) {
-            console.log('DiscSpin: Error setting custom phosphor color:', e);
+            // Silently ignore
         }
     }
 };
@@ -1869,7 +1859,7 @@ const PresetManager = {
         try {
             window.SetProperty('Disc.Preset' + slot, JSON.stringify(this._capture()));
         } catch (e) {
-            console.log('DiscSpin: Failed to save preset ' + slot + ':', e);
+            // Silently ignore
         }
     },
     
@@ -1945,7 +1935,7 @@ const PresetManager = {
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             RepaintHelper.full();
         } catch (e) {
-            console.log('DiscSpin: Failed to load preset ' + slot + ':', e);
+            // Silently ignore
         }
     }
 };
@@ -2370,7 +2360,7 @@ const MenuManager = {
                     changed = true;
                 }
             } catch (e) {
-                console.log("Error adding custom folder:", e);
+                // Silently ignore
             }
         } else if (idx >= 60 && idx <= 64) {
             if (CustomFolders.remove(idx - 60)) {
@@ -2883,7 +2873,7 @@ function init() {
                 utils.GetAlbumArtAsync(window.ID, np, 0);
             }
         } catch (e) {
-            console.log("Init error:", e);
+            // Silently ignore
         }
     }
     
