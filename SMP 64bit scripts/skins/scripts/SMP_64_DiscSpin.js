@@ -1,6 +1,6 @@
 'use strict';
 			  // -============ AUTHOR L.E.D. ===========- \\
-			 // -======== SMP 64bit Disc Spin V3 ========- \\
+			 // -======== SMP 64bit Disc Spin V3.1 ========- \\
 			// -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -9,7 +9,7 @@
  // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
 // ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
 
-window.DefineScript('SMP 64bit Disc Spin V3', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.1', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -86,7 +86,7 @@ const CONFIG = Object.freeze({
     MAX_FILE_CACHE:  200,
     MAX_BG_CACHE:     4,
 
-    MIN_DISC_SIZE: 50,
+    MIN_DISC_SIZE: 125,
     MAX_DISC_SIZE: 1000,
     MIN_SPIN_SPEED: 0.1,
     MAX_SPIN_SPEED: 10,
@@ -438,6 +438,11 @@ const FileManager = {
         }
 
         try {
+            const fso = new ActiveXObject('Scripting.FileSystemObject');
+            if (!fso.FolderExists(folder)) {
+                this.subfolderCache.set(folder, subfolders);
+                return subfolders;
+            }
             const folderObj = fso.GetFolder(folder);
             const subFoldersEnum = new Enumerator(folderObj.SubFolders);
 
@@ -445,12 +450,7 @@ const FileManager = {
                 subfolders.push(subFoldersEnum.item().Path);
             }
         } catch (e) {
-            try {
-                const items = utils.Glob(folder + "\\*").toArray();
-                _.forEach(items, item => {
-                    if (this.isDirectory(item)) subfolders.push(item);
-                });
-            } catch (e2) {}
+            console.log('DiscSpin: getSubfolders error for "' + folder + '":', e);
         }
 
         this.subfolderCache.set(folder, subfolders);
@@ -513,9 +513,17 @@ const FileManager = {
         return _.some(searchNames, name => {
             if (!name) return false;
             const n = _.toLower(this.sanitizeMetadata(name));
-            return folderName === n ||
-                   folderName.includes(n) ||
-                   n.includes(folderName);
+            if (folderName === n || folderName.includes(n) || n.includes(folderName)) {
+                return true;
+            }
+            // Check first letter match (for folders like "a", "b", "c")
+            if (folderName.length === 1 && n.length > 0) {
+                if (n.charAt(0) === folderName) return true;
+            }
+            if (n.length === 1 && folderName.length > 0) {
+                if (folderName.charAt(0) === n) return true;
+            }
+            return false;
         });
     },
 
@@ -523,7 +531,7 @@ const FileManager = {
     parseLastFmJson(jsonPath, baseFolder) {
         try {
             if (!_isFile(jsonPath)) return null;
-            const content = _open(jsonPath);
+            const content = utils.ReadUTF8(jsonPath);
             if (!content) return null;
             const data = JSON.parse(content);
             if (!data || !_.isObject(data)) return null;
@@ -1044,38 +1052,146 @@ const ImageLoader = {
     },
 
     searchInFolderAnyFile(folder, patterns) {
-        const jsonArt = FileManager.searchLastFmJson(folder);
-        if (jsonArt) return jsonArt;
-
         const paths = FileManager.buildSearchPaths(folder, patterns, []);
         return FileManager.findImageInPaths(paths);
     },
 
-    searchCustomFolders(uniqueSearchNames, patterns, isDiscSearch) {
-        for (const customFolder of CustomFolders.getAll()) {
-            if (!FileManager.isDirectory(customFolder)) continue;
+    // Search a folder tree up to maxLevels deep for any image file
+    _searchFolderTree(folder, patterns, maxLevels, isDiscSearch) {
+        if (maxLevels <= 0 || !folder) return null;
+        
+        // First check current folder
+        const found = this.searchFolderForImage(folder, patterns, isDiscSearch);
+        if (found) return found;
+        
+        // Then check subfolders up to maxLevels
+        const subfolders = FileManager.getSubfolders(folder);
+        for (const sub of subfolders) {
+            const result = this._searchFolderTree(sub, patterns, maxLevels - 1, isDiscSearch);
+            if (result) return result;
+        }
+        
+        return null;
+    },
 
-            if (FileManager.matchesFolderName(customFolder, uniqueSearchNames)) {
-                const result = this.searchFolderForImage(customFolder, patterns, isDiscSearch);
-                if (result) return result;
+    // Search a folder tree up to maxLevels deep for name-matched image files
+    _searchFolderTreeNameMatch(folder, patterns, metadata, maxLevels, isDiscSearch) {
+        if (maxLevels <= 0 || !folder) return null;
+        
+        // First check current folder for name-matched images
+        const found = this.searchInFolder(folder, patterns, metadata, true);
+        if (found) {
+            if (isDiscSearch) return this._loadDiscResult(found);
+            return found;
+        }
+        
+        // Then check subfolders up to maxLevels
+        const subfolders = FileManager.getSubfolders(folder);
+        for (const sub of subfolders) {
+            const result = this._searchFolderTreeNameMatch(sub, patterns, metadata, maxLevels - 1, isDiscSearch);
+            if (result) return result;
+        }
+        
+        return null;
+    },
+
+    // Custom folder search - simplified
+    searchCustomFolders(metadata, patterns, isDiscSearch) {
+        // Create search names: title, artist, album, artist - album (dash) and artist album (space)
+        const artistAlbumDash  = metadata.artistAlbum || '';   // already "artist - album" from getMetadataNames
+        const artistAlbumSpace = (metadata.artist && metadata.album)
+            ? metadata.artist + ' ' + metadata.album
+            : '';
+        
+        const simpleNames = _.compact([
+            metadata.title,
+            metadata.artist,
+            metadata.album,
+            artistAlbumDash,
+            artistAlbumSpace
+        ]);
+        
+        // Create variations (lowercase and Title Case for matching)
+        const toTitleCase = (str) => {
+            return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+        };
+        
+        const nameVariations = [];
+        _.forEach(simpleNames, (name) => {
+            if (name) {
+                const lower = name.toLowerCase();
+                nameVariations.push(lower);
+                nameVariations.push(lower.replace(/\s+/g, '-'));
+                nameVariations.push(lower.replace(/\s+/g, '_'));
+                
+                const title = toTitleCase(name);
+                nameVariations.push(title);
+                nameVariations.push(title.replace(/\s+/g, '-'));
+                nameVariations.push(title.replace(/\s+/g, '_'));
             }
-
+        });
+        const folderMatchNames = _.uniq(nameVariations);
+        
+        const customFolders = CustomFolders.getAll();
+        
+        // Search each custom folder for matching subfolders, then search inside them
+        for (const customFolder of customFolders) {
+            if (!FileManager.isDirectory(customFolder)) continue;
+            
+            // Get all subfolders (level 1 and level 2)
             const level1 = FileManager.getSubfolders(customFolder);
             for (const sub1 of level1) {
-                if (FileManager.matchesFolderName(sub1, uniqueSearchNames)) {
-                    const result = this.searchFolderForImage(sub1, patterns, isDiscSearch);
-                    if (result) return result;
+                // Check if level 1 folder name matches
+                const sub1Name = _.last(sub1.split('\\')).toLowerCase();
+                const match1 = folderMatchNames.some(n => 
+                    sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
+                    sub1Name.replace(/\s+/g, '-') === n ||
+                    sub1Name.replace(/\s+/g, '_') === n
+                );
+                
+                if (match1) {
+                    // Search inside matching folder (includes artist - album.ext filenames)
+                    const img = this.searchInFolder(sub1, patterns, metadata, true)
+                             || this.searchInFolderAnyFile(sub1, patterns);
+                    if (img) {
+                        if (isDiscSearch) return this._loadDiscResult(img);
+                        return img;
+                    }
+                    
+                    // Also check subfolders inside
+                    const sub1Folders = FileManager.getSubfolders(sub1);
+                    for (const subSub of sub1Folders) {
+                        const sImg = this.searchInFolder(subSub, patterns, metadata, true)
+                                  || this.searchInFolderAnyFile(subSub, patterns);
+                        if (sImg) {
+                            if (isDiscSearch) return this._loadDiscResult(sImg);
+                            return sImg;
+                        }
+                    }
                 }
-
+                
+                // Check level 2 folders
                 const level2 = FileManager.getSubfolders(sub1);
                 for (const sub2 of level2) {
-                    if (FileManager.matchesFolderName(sub2, uniqueSearchNames)) {
-                        const result = this.searchFolderForImage(sub2, patterns, isDiscSearch);
-                        if (result) return result;
+                    const sub2Name = _.last(sub2.split('\\')).toLowerCase();
+                    const match2 = folderMatchNames.some(n => 
+                        sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
+                        sub2Name.replace(/\s+/g, '-') === n ||
+                        sub2Name.replace(/\s+/g, '_') === n
+                    );
+                    
+                    if (match2) {
+                        const img = this.searchInFolder(sub2, patterns, metadata, true)
+                                 || this.searchInFolderAnyFile(sub2, patterns);
+                        if (img) {
+                            if (isDiscSearch) return this._loadDiscResult(img);
+                            return img;
+                        }
                     }
                 }
             }
         }
+        
         return null;
     },
 
@@ -1097,6 +1213,14 @@ const ImageLoader = {
     },
 
     searchFolderForImage(folder, patterns, isDiscSearch) {
+        // Check Last.fm JSON artwork files first (matches PanelArt behavior)
+        const jsonArt = FileManager.searchLastFmJson(folder);
+        if (jsonArt) {
+            if (isDiscSearch) return this._loadDiscResult(jsonArt);
+            return jsonArt;
+        }
+        
+        // Then search with metadata names
         const found = this.searchInFolder(folder, patterns, {}, true)
                    || this.searchInFolderAnyFile(folder, patterns);
         if (!found) return null;
@@ -1107,13 +1231,7 @@ const ImageLoader = {
     searchForDisc(metadb, baseFolder) {
         const metadata = this.getMetadataNames(metadb);
 
-        const rawNames = _.compact([
-            metadata.artist, metadata.album, metadata.title,
-            metadata.folder, metadata.artistTitle, metadata.artistAlbum
-        ]);
-        const uniqueSearchNames = _.uniq(_.flatMap(rawNames, n => FileManager.createSearchVariations(n)));
-
-        // PHASE 1: Track folder tree
+        // PHASE 1A: Track folder for metadata-named files (exact match)
         const trackFolderMatch = this.searchInFolder(baseFolder, CONFIG.DISC_PATTERNS, metadata);
         if (trackFolderMatch) {
             const img = this.loadCached(trackFolderMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
@@ -1126,41 +1244,47 @@ const ImageLoader = {
             }
         }
 
-        const trackSubfolders = FileManager.enumSubfolders(baseFolder);
-        for (let subfolder of trackSubfolders) {
-            if (subfolder === baseFolder) continue;
-            const result = this.searchFolderForImage(subfolder, CONFIG.DISC_PATTERNS, true);
-            if (result) return result;
+        // PHASE 1B: Track folder for any image file
+        const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.DISC_PATTERNS);
+        if (trackAnyMatch) {
+            const img = this.loadCached(trackAnyMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
+            if (img) {
+                AssetManager.autoSelectMask(trackAnyMatch);
+                const _rawOrig = gdi.Image(trackAnyMatch);
+                const original = _rawOrig ? _rawOrig.Clone(0, 0, _rawOrig.Width, _rawOrig.Height) : img;
+                Utils.safeDispose(_rawOrig);
+                return { img, path: trackAnyMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
+            }
         }
 
-        // PHASE 2: Custom folders
-        return this.searchCustomFolders(uniqueSearchNames, CONFIG.DISC_PATTERNS, true);
+        // PHASE 1C: Track folder subfolders (up to 2 levels deep) for any image file
+        const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, 2, true);
+        if (trackSubMatch) return trackSubMatch;
+
+        // PHASE 2: Custom folders with name matching
+        return this.searchCustomFolders(metadata, CONFIG.DISC_PATTERNS, true);
     },
 
     searchForCover(metadb, baseFolder) {
         const metadata = this.getMetadataNames(metadb);
 
-        const rawNames = _.compact([
-            metadata.artist, metadata.album, metadata.folder, metadata.artistAlbum
-        ]);
-        const uniqueSearchNames = _.uniq(_.flatMap(rawNames, n => FileManager.createSearchVariations(n)));
-
-        // PHASE 1: Track folder tree
+        // PHASE 1A: Track folder for metadata-named files (exact match)
         const jsonArt = FileManager.searchLastFmJson(baseFolder);
         if (jsonArt) return jsonArt;
 
         const trackMatch = this.searchInFolder(baseFolder, CONFIG.COVER_PATTERNS, metadata);
         if (trackMatch) return trackMatch;
 
-        const trackSubfolders = FileManager.enumSubfolders(baseFolder);
-        for (let subfolder of trackSubfolders) {
-            if (subfolder === baseFolder) continue;
-            const result = this.searchFolderForImage(subfolder, CONFIG.COVER_PATTERNS, false);
-            if (result) return result;
-        }
+        // PHASE 1B: Track folder for any image file
+        const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.COVER_PATTERNS);
+        if (trackAnyMatch) return trackAnyMatch;
 
-        // PHASE 2: Custom folders
-        return this.searchCustomFolders(uniqueSearchNames, CONFIG.COVER_PATTERNS, false);
+        // PHASE 1C: Track folder subfolders (up to 2 levels deep) for any image file
+        const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, 2, false);
+        if (trackSubMatch) return trackSubMatch;
+
+        // PHASE 2: Custom folders with name matching
+        return this.searchCustomFolders(metadata, CONFIG.COVER_PATTERNS, false);
     },
 
     loadForMetadb(metadb, immediate = false) {
@@ -2283,6 +2407,7 @@ const MenuManager = {
 
         // Clear cache (900)
         if (idx === 900) {
+            FileManager.clear();
             ImageLoader.cache.clear();
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
@@ -2669,6 +2794,14 @@ function on_selection_changed() {
 }
 
 function on_playlist_switch() {
+    ArtDispatcher.request('playlist', null);
+}
+
+function on_playlist_items_added(playlist_index) {
+    ArtDispatcher.request('playlist', null);
+}
+
+function on_playlist_items_removed(playlist_index) {
     ArtDispatcher.request('playlist', null);
 }
 
