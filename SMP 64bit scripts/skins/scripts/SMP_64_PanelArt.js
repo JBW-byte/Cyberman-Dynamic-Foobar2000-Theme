@@ -110,7 +110,9 @@ function PanelArt_SetAlpha(col, a) {
 const PA_BLACK   = _RGB(0,   0,   0);
 const PA_WHITE   = _RGB(255, 255, 255);
 const PA_GREY200 = _RGB(200, 200, 200);   // artist text
-const PA_GREY180 = _RGB(180, 180, 180);   // extra-info text
+const PA_GREY180       = _RGB(180, 180, 180);   // extra-info text
+const PA_BORDER_LIGHT  = _RGB(80,  80,  80);    // border bezel outer highlight (pre-hoisted, not per-paint)
+const PA_BORDER_DARK   = _RGB(20,  20,  20);    // border bezel inner shadow
 
 const GLITCH_SHIFT_COLORS = [
     _RGB(100, 200, 255), _RGB(180, 200, 230), _RGB(150, 255, 150),
@@ -703,14 +705,24 @@ const ArtCache = {
         const scaled = srcImg.Resize(targetW, targetH);
         this._scaledCache.set(key, { image: scaled, refCount: 1 });
         if (this._scaledCache.size > 20) {
+            // First pass: evict low-use entries and age down the rest.
+            let evicted = false;
             for (const [k, v] of this._scaledCache) {
                 if (v.refCount <= 1) {
                     try { v.image.Dispose(); } catch(e) {}
                     this._scaledCache.delete(k);
+                    evicted = true;
                     if (this._scaledCache.size <= 20) break;
                 } else {
                     v.refCount--;
                 }
+            }
+            // Fallback: if nothing qualified for eviction (all still hot), force-evict
+            // the oldest insertion-order entry so the cache cannot grow without bound.
+            if (!evicted && this._scaledCache.size > 20) {
+                const [oldestKey, oldestVal] = this._scaledCache.entries().next().value;
+                try { oldestVal.image.Dispose(); } catch(e) {}
+                this._scaledCache.delete(oldestKey);
             }
         }
         return scaled;
@@ -1221,15 +1233,20 @@ const TextManager = {
     clipText(gr, textContent, font, maxWidth) {
         if (!textContent || !font) return "";
         
-        const width = gr.CalcTextWidth(textContent, font);
-        if (width <= maxWidth) return textContent;
+        if (gr.CalcTextWidth(textContent, font) <= maxWidth) return textContent;
         
-        let clipped = textContent;
-        while (clipped.length > 0 && 
-               gr.CalcTextWidth(clipped + '…', font) > maxWidth) {
-            clipped = clipped.substring(0, clipped.length - 1);
+        // Binary search for the longest prefix that fits with an ellipsis appended.
+        let lo = 0;
+        let hi = textContent.length;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (gr.CalcTextWidth(textContent.substring(0, mid) + '\u2026', font) <= maxWidth) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
         }
-        return clipped + '…';
+        return textContent.substring(0, lo) + '\u2026';
     }
 };
 
@@ -1557,15 +1574,11 @@ const ImageManager = {
         // Increment token - any stale async responses will be discarded
         PanelArt.loadToken++;
         
-        if (!track) {
-            TextManager.update(null);
-            RepaintHelper.full();
-            return;
-        }
-        
         const folderPath = PanelArt.titleFormats.path.EvalWithMetadb(track);
         
-        // Skip if same album - keep existing art and blur
+        // Skip if same album AND art is already loaded — keep existing art and blur.
+        // NOTE: intentionally does NOT skip when images.source is null (e.g. after a
+        // playback-stop flush) even if the folder path matches — we must reload in that case.
         if (PanelArt.images.source && PanelArt.images.folderPath === folderPath) {
             TextManager.update(track);
             RepaintHelper.text(); // Repaint text area only
@@ -2068,15 +2081,15 @@ const Renderer = {
                 const bw = w - b * 2;
                 const bh = h - b * 2;
                 // Light outer edge (1px outside content area)
-                gr.FillSolidRect(bx - 1, by - 1, bw + 2, 1, _RGB(80, 80, 80));
-                gr.FillSolidRect(bx - 1, by + bh, bw + 2, 1, _RGB(80, 80, 80));
-                gr.FillSolidRect(bx - 1, by - 1, 1, bh + 2, _RGB(80, 80, 80));
-                gr.FillSolidRect(bx + bw, by - 1, 1, bh + 2, _RGB(80, 80, 80));
+                gr.FillSolidRect(bx - 1, by - 1, bw + 2, 1, PA_BORDER_LIGHT);
+                gr.FillSolidRect(bx - 1, by + bh, bw + 2, 1, PA_BORDER_LIGHT);
+                gr.FillSolidRect(bx - 1, by - 1, 1, bh + 2, PA_BORDER_LIGHT);
+                gr.FillSolidRect(bx + bw, by - 1, 1, bh + 2, PA_BORDER_LIGHT);
                 // Dark inner edge (1px inside)
-                gr.FillSolidRect(bx + 1, by + 1, bw - 2, 1, _RGB(20, 20, 20));
-                gr.FillSolidRect(bx + 1, by + bh - 1, bw - 2, 1, _RGB(20, 20, 20));
-                gr.FillSolidRect(bx + 1, by + 1, 1, bh - 2, _RGB(20, 20, 20));
-                gr.FillSolidRect(bx + bw - 1, by + 1, 1, bh - 2, _RGB(20, 20, 20));
+                gr.FillSolidRect(bx + 1, by + 1, bw - 2, 1, PA_BORDER_DARK);
+                gr.FillSolidRect(bx + 1, by + bh - 1, bw - 2, 1, PA_BORDER_DARK);
+                gr.FillSolidRect(bx + 1, by + 1, 1, bh - 2, PA_BORDER_DARK);
+                gr.FillSolidRect(bx + bw - 1, by + 1, 1, bh - 2, PA_BORDER_DARK);
             }
         } catch (e) {
             console.log("Error drawing border:", e);
@@ -2823,10 +2836,10 @@ function _paintGlitch(gr, w, h, intensity, pad) {
         const ns   = Math.floor(Math.random() * 2) + 1;
         const gray = Math.floor(Math.random() * 150);
         const pick = Math.floor(Math.random() * 4);
-        const nc   = pick === 0 ? _RGB(gray * 0.7, gray * 0.8, gray)
-                   : pick === 1 ? _RGB(gray * 0.5, gray,        gray * 0.5)
-                   : pick === 2 ? _RGB(gray,        gray,        gray * 0.6)
-                   :              _RGB(gray,        gray * 0.5,  gray * 0.5);
+        const nc   = pick === 0 ? _RGB(Math.round(gray * 0.7), Math.round(gray * 0.8), gray)
+                   : pick === 1 ? _RGB(Math.round(gray * 0.5), gray,                   Math.round(gray * 0.5))
+                   : pick === 2 ? _RGB(gray,                   gray,                   Math.round(gray * 0.6))
+                   :              _RGB(gray,                   Math.round(gray * 0.5), Math.round(gray * 0.5));
         gr.FillSolidRect(nx, ny, ns, ns, nc);
     }
 
@@ -3038,6 +3051,29 @@ function on_playback_new_track(metadb) {
     ArtDispatcher.request('track', metadb);
 }
 
+// Refresh display when tags are edited while a track is playing.
+function on_metadb_changed(metadb_list, fromhook) {
+    if (!fb.IsPlaying) return;
+    const nowPlaying = fb.GetNowPlaying();
+    if (!nowPlaying) return;
+    
+    let affected = false;
+    for (let i = 0; i < metadb_list.Count; i++) {
+        const item = metadb_list[i];
+        if (item && item.Compare && item.Compare(nowPlaying)) {
+            affected = true;
+            break;
+        }
+    }
+    
+    if (affected) {
+        TextManager.update(nowPlaying);
+        // Clear folder path to bypass the same-folder optimisation so art also refreshes.
+        PanelArt.images.folderPath = '';
+        ImageManager.loadAlbumArt(nowPlaying);
+    }
+}
+
 // image is null if no artwork was found.
 function on_get_album_art_done(metadb, art_id, image, image_path) {
     try {
@@ -3111,6 +3147,33 @@ function on_mouse_lbtn_up(x, y) {
     return ArtController.onMouseLbtnUp();
 }
 
+// ================= SHARED IMAGE FILE LISTING HELPER =================
+// Used by both ImageModeManager and SlideManager to avoid duplicated FSO code.
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'];
+
+function _listImagesInFolder(folder) {
+    folder = (folder || '').replace(/\\+$/, '');
+    if (!folder) return [];
+    try {
+        const fso = new ActiveXObject('Scripting.FileSystemObject');
+        if (!fso.FolderExists(folder)) return [];
+        const fldr = fso.GetFolder(folder);
+        const filesEnum = new Enumerator(fldr.Files);
+        const images = [];
+        for (; !filesEnum.atEnd(); filesEnum.moveNext()) {
+            const fileName = filesEnum.item().Name.toLowerCase();
+            const ext = fileName.substring(fileName.lastIndexOf('.'));
+            if (IMAGE_EXTS.indexOf(ext) !== -1) {
+                images.push(filesEnum.item().Path);
+            }
+        }
+        return images;
+    } catch (e) {
+        console.log('PanelArt: _listImagesInFolder error:', e);
+        return [];
+    }
+}
+
 // ================= IMAGE FUNCTIONS =================
 const ImageModeManager = {
     files: [],
@@ -3118,40 +3181,12 @@ const ImageModeManager = {
     
     getRandomImage() {
         const cfg = StateManager.get();
-        let folder = cfg.imageFolder;
+        const folder = cfg.imageFolder || (fb.ProfilePath + 'skins\\images');
         
-        // Fall back to default images folder if not set
-        if (!folder) {
-            folder = fb.ProfilePath + 'skins\\images';
-        }
+        const imageFiles = _listImagesInFolder(folder);
+        if (imageFiles.length === 0) return null;
         
-        folder = folder.replace(/\\+$/, '');
-        
-        try {
-            const _localFso = new ActiveXObject("Scripting.FileSystemObject");
-            if (!_localFso.FolderExists(folder)) return null;
-            
-            const fldr = _localFso.GetFolder(folder);
-            const files = new Enumerator(fldr.Files);
-            const imageFiles = [];
-            const exts = ['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'];
-            
-            for (; !files.atEnd(); files.moveNext()) {
-                const fileName = files.item().Name.toLowerCase();
-                const ext = fileName.substring(fileName.lastIndexOf('.'));
-                if (exts.indexOf(ext) !== -1) {
-                    imageFiles.push(files.item().Path);
-                }
-            }
-            
-            if (imageFiles.length === 0) return null;
-            
-            const idx = Math.floor(Math.random() * imageFiles.length);
-            return imageFiles[idx];
-        } catch (e) {
-            console.log("Error getting random image:", e);
-            return null;
-        }
+        return imageFiles[Math.floor(Math.random() * imageFiles.length)];
     },
     
     startImageMode() {
@@ -3217,43 +3252,16 @@ const ImageModeManager = {
 const SlideManager = {
     getImages() {
         const cfg = StateManager.get();
-        let folder = cfg.imageFolder;
+        const folder = cfg.imageFolder || (fb.ProfilePath + 'skins\\images');
         
-        // Fall back to default images folder if not set
-        if (!folder) {
-            folder = fb.ProfilePath + 'skins\\images';
+        const images = _listImagesInFolder(folder);
+        
+        // Shuffle images for random order
+        for (let i = images.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [images[i], images[j]] = [images[j], images[i]];
         }
-        
-        folder = folder.replace(/\\+$/, '');
-        
-        try {
-            const _localFso = new ActiveXObject("Scripting.FileSystemObject");
-            if (!_localFso.FolderExists(folder)) return [];
-            
-            const fldr = _localFso.GetFolder(folder);
-            const files = new Enumerator(fldr.Files);
-            const images = [];
-            const exts = ['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif'];
-            
-            for (; !files.atEnd(); files.moveNext()) {
-                const fileName = files.item().Name.toLowerCase();
-                const ext = fileName.substring(fileName.lastIndexOf('.'));
-                if (exts.indexOf(ext) !== -1) {
-                    images.push(files.item().Path);
-                }
-            }
-            
-            // Shuffle images for random order
-            for (let i = images.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [images[i], images[j]] = [images[j], images[i]];
-            }
-            
-            return images;
-            
-        } catch (e) {
-            return [];
-        }
+        return images;
     },
     
     startSlideMode(useSavedIndex) {
@@ -3358,6 +3366,8 @@ function on_mouse_rbtn_up(x, y) {
 function on_script_unload() {
     ArtController.onUnload();
     ArtQueue.clear();
+    
+    // Cancel any pending ArtDispatcher timers and state
     if (ArtDispatcher._trackTimer) {
         window.ClearTimeout(ArtDispatcher._trackTimer);
         ArtDispatcher._trackTimer = null;
@@ -3366,6 +3376,7 @@ function on_script_unload() {
         window.ClearTimeout(ArtDispatcher._timer);
         ArtDispatcher._timer = null;
     }
+    ArtDispatcher._pending = null;    // prevent stale dispatch after unload
     
     if (Renderer._sliderFont) {
         try { Renderer._sliderFont.Dispose(); } catch (e) {}
@@ -3377,6 +3388,7 @@ function on_script_unload() {
         CommandBus._saveTimer = null;
         CommandBus._saveScheduled = false;
     }
+    
     StateManager.save();
     BlurCache.dispose();
     ImageManager.cleanup();
@@ -3384,6 +3396,19 @@ function on_script_unload() {
     FontManager.clearCache();
     TextHeightCache.clear();
     ArtCache.clearAll();
+    
+    // Cancel UltraCachePro's background cleanup interval (if it started one).
+    UltraCachePro.cancel();
+    
+    // Clean up global GDI measurement objects created by helpers.js.
+    // helpers.js defined its own on_script_unload which this function supersedes;
+    // we must replicate that cleanup here so _bmp / _gr are properly released.
+    _tt('');
+    if (_bmp && _gr) {
+        try { _bmp.ReleaseGraphics(_gr); } catch (e) {}
+    }
+    _gr  = null;
+    _bmp = null;
 }
 
 // ================= INITIALIZATION =================

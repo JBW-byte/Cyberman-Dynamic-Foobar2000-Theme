@@ -15,6 +15,7 @@ window.DefineScript('SMP 64bit Disc Spin V3.1', { author: 'L.E.D.', grab_focus: 
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 
+// Defined here explicitly — do not rely on helpers.js include for this symbol.
 function _fbSanitise(str) {
     if (!str) return '';
     return utils.ReplaceIllegalChars(str, true);
@@ -571,7 +572,16 @@ const CustomFolders = {
 
     load() {
         const saved = window.GetProperty("RP.CustomFolders", "");
-        this.folders = saved ? _jsonParse(saved, []) : [];
+        if (!saved) {
+            this.folders = [];
+            return;
+        }
+        // _jsonParse returns [] on parse failure; guard against non-array JSON
+        // (e.g. someone manually set the property to a number or null).
+        const parsed = _jsonParse(saved);
+        this.folders = _.isArray(parsed)
+            ? _.filter(parsed, f => _.isString(f) && f.length > 0)
+            : [];
     },
 
     save() {
@@ -1197,9 +1207,23 @@ const ImageLoader = {
 
     // Helper to search a folder for image (reduces duplication)
     _loadDiscResult(imagePath) {
-        const raw = gdi.Image(imagePath);
+        let raw = null;
+        let original = null;
+        try {
+            raw = gdi.Image(imagePath);
+        } catch (e) {
+            console.log('DiscSpin: _loadDiscResult gdi.Image failed for "' + imagePath + '":', e);
+            return null;
+        }
         if (!raw) return null;
-        const original   = raw.Clone(0, 0, raw.Width, raw.Height);
+
+        try {
+            original = raw.Clone(0, 0, raw.Width, raw.Height);
+        } catch (e) {
+            Utils.safeDispose(raw);
+            return null;
+        }
+
         const targetSize = Utils.getPanelDiscSize();
         const processed  = ImageProcessor.processForDisc(
             raw, targetSize, CONFIG.IMAGE_TYPE.REAL_DISC, P.interpolationMode
@@ -1403,6 +1427,19 @@ const ImageLoader = {
             return;
         }
 
+        // SMP can deliver a null metadb on cancelled/stale requests.
+        if (!metadb) {
+            // No metadb means we can't verify the track — treat as matched so the
+            // default disc fallback still fires for the active track.
+            if (image) {
+                Utils.safeDispose(image);
+            } else {
+                this.loadDefaultDisc();
+                State.updateTimer();
+            }
+            return;
+        }
+
         const metadbMatches = metadb.Compare(State.currentMetadb);
 
         const hadBg = !!State.bgImg;
@@ -1511,7 +1548,11 @@ const DiscComposite = {
         const showRim = AssetManager.shouldShowRim(imageType);
 
         if (!showRim) {
-            this.img = discImg.Clone(0, 0, discImg.Width, discImg.Height);
+            try {
+                this.img = discImg.Clone(0, 0, discImg.Width, discImg.Height);
+            } catch (e) {
+                // Clone failed (stale bitmap handle) — fall through without composite
+            }
             this.valid = true;
             return;
         }
@@ -2768,6 +2809,28 @@ function on_playback_new_track(metadb) {
     ArtDispatcher.request('track', metadb);
 }
 
+// Refresh display when tags are edited while a track is playing.
+function on_metadb_changed(metadb_list, fromhook) {
+    if (!fb.IsPlaying && !fb.IsPaused) return;
+    const nowPlaying = fb.GetNowPlaying();
+    if (!nowPlaying) return;
+
+    let affected = false;
+    for (let i = 0; i < metadb_list.Count; i++) {
+        const item = metadb_list[i];
+        if (item && item.Compare && item.Compare(nowPlaying)) {
+            affected = true;
+            break;
+        }
+    }
+
+    if (affected) {
+        // Invalidate same-folder shortcut so art + metadata fully reload.
+        State.currentMetadb = null;
+        ImageLoader.loadForMetadb(nowPlaying, true);
+    }
+}
+
 function on_playback_pause() {
     State.updateTimer();
 }
@@ -2852,7 +2915,7 @@ function on_script_unload() {
         window.ClearTimeout(ArtDispatcher._timer);
         ArtDispatcher._timer = null;
     }
-    ArtDispatcher._pending = null;
+    ArtDispatcher._pending = null;   // prevent stale dispatch after unload
     if (State.loadTimer) {
         window.ClearTimeout(State.loadTimer);
         State.loadTimer = null;
@@ -2871,6 +2934,16 @@ function on_script_unload() {
     OverlayCache.dispose();
     DiscComposite.dispose();
     FileManager.clear();
+
+    // Clean up global GDI measurement objects created by helpers.js.
+    // helpers.js defines its own on_script_unload for these — we must replicate
+    // that teardown here since our definition supersedes theirs.
+    _tt('');
+    if (_bmp && _gr) {
+        try { _bmp.ReleaseGraphics(_gr); } catch (e) {}
+    }
+    _gr  = null;
+    _bmp = null;
 }
 
 // ====================== INITIALIZATION ======================
@@ -2897,12 +2970,8 @@ function init() {
                     State.setImage(img, props.savedIsDisc.enabled, imageType, original);
                 }
             }
-            const np = fb.GetNowPlaying();
-            if (np) {
-                State.loadToken++;
-                State.pendingArtToken = State.loadToken;
-                utils.GetAlbumArtAsync(window.ID, np, 0);
-            }
+            // NOTE: nowPlaying is null in this branch so fb.GetAlbumArtAsync
+            // would have nothing to act on — no async request is needed here.
         } catch (e) {}
     }
 
