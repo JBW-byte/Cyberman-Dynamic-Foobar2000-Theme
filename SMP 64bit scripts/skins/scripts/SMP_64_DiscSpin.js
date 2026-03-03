@@ -1,6 +1,6 @@
 'use strict';
 			  // -============ AUTHOR L.E.D. ===========- \\
-			 // -======== SMP 64bit Disc Spin V3.1 ========- \\
+			 // -======= SMP 64bit Disc Spin V3.1 =======- \\
 			// -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
