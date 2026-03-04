@@ -1,22 +1,35 @@
 'use strict';
            // ============== AUTHOR L.E.D. ============== \\
-          // = Polished Panel Artwork and Trackinfo v3.1 = \\
+          // ==== Panel Artwork and Trackinfo v3.1.1  ==== \\
          // ========== Blur Artwork + Trackinfo =========== \\ 
 
   // ===================*** Foobar2000 64bit ***================== \\
  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 // === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
 
-window.DefineScript("SMP 64bit PanelArt V3.1", { author: "L.E.D.", options: { grab_focus: true } });
+window.DefineScript("SMP 64bit PanelArt V3.1.1", { author: "L.E.D.", options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 
-// Defined here explicitly — do not rely on helpers.js include for this symbol.
 function _fbSanitise(str) {
     if (!str) return '';
     return utils.ReplaceIllegalChars(str, true);
+}
+
+// Lifecycle state machine - guards operations during shutdown
+const Phase = {
+    BOOT: 0,
+    RESTORE: 1,
+    LIVE: 2,
+    SHUTDOWN: 3
+};
+
+let phase = Phase.BOOT;
+
+function isLive() {
+    return phase === Phase.LIVE;
 }
 
 // ================= USER CONFIGURABLE DEFAULTS =================
@@ -86,10 +99,10 @@ const MAX_FONT_SIZE = 200;
 
 // Search Patterns - lowercase only; Windows FS is case-insensitive
 const COVER_PATTERNS = [
-    "cover", "front", "folder", "albumart", "album", "artwork", "art"
+    "cover", "front", "folder", "albumart", "album", "artwork", "art", "front cover"
 ];
 
-const EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+const EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"];
 
 // JSON artwork file patterns - Last.fm only
 const JSON_ART_FILES = [
@@ -130,8 +143,9 @@ const GLITCH_TRACK_COLORS = [
     _RGB(100, 150, 200), _RGB(80, 200, 80), _RGB(200, 200, 80), _RGB(255, 80, 80)
 ];
 const GLITCH_BLOCK_COLORS = [
-    0x64B4FF, 0xB4C8E6, 0xD2DAE6, 0x7888B8, 0xA0B0C8, 0xC8D0E0,
-    0x50FF50, 0xFFFF50, 0xFF5050
+    _RGB(0x64, 0xB4, 0xFF), _RGB(0xB4, 0xC8, 0xE6), _RGB(0xD2, 0xDA, 0xE6),
+    _RGB(0x78, 0x88, 0xB8), _RGB(0xA0, 0xB0, 0xC8), _RGB(0xC8, 0xD0, 0xE0),
+    _RGB(0x50, 0xFF, 0x50), _RGB(0xFF, 0xFF, 0x50), _RGB(0xFF, 0x50, 0x50)
 ];
 
 // ================= PHOSPHOR COLOR THEMES =================
@@ -286,6 +300,11 @@ const Validator = {
     }
 };
 
+// Single FSO instance — creating ActiveXObject per call is expensive.
+const _fso = (function () {
+    try { return new ActiveXObject('Scripting.FileSystemObject'); } catch (e) { return null; }
+})();
+
 // ================= FILE MANAGER =================
 const FileManager = {
     cache: new Map(),
@@ -326,14 +345,11 @@ const FileManager = {
         if (!str) return [];
         
         const variations = [];
+        // sanitizeMetadata already strips leading articles (The / A / An) and
+        // normalises whitespace — no need to strip them again here.
         const cleaned = this.sanitizeMetadata(str);
 
         variations.push(cleaned);
-
-        const withoutArticle = cleaned.replace(/^(The|A|An)\s+/i, '');
-        if (withoutArticle !== cleaned) {
-            variations.push(withoutArticle);
-        }
         
         // With hyphens instead of spaces
         variations.push(cleaned.replace(/\s+/g, '-'));
@@ -381,9 +397,8 @@ const FileManager = {
         // Use FSO SubFolders enumerator — utils.FileTest(path, 'split') only
         // dissects a path into components and cannot enumerate directory contents.
         try {
-            const fso = new ActiveXObject('Scripting.FileSystemObject');
-            if (!fso.FolderExists(folder)) return [];
-            const fldr   = fso.GetFolder(folder);
+            if (!_fso || !_fso.FolderExists(folder)) return [];
+            const fldr   = _fso.GetFolder(folder);
             const subs   = new Enumerator(fldr.SubFolders);
             for (; !subs.atEnd(); subs.moveNext()) {
                 subfolders.push(subs.item().Path);
@@ -702,7 +717,14 @@ const ArtCache = {
             entry.refCount++;
             return entry.image;
         }
-        const scaled = srcImg.Resize(targetW, targetH);
+        // falls back gracefully.
+        let scaled = null;
+        try {
+            scaled = srcImg.Resize(targetW, targetH);
+        } catch (e) {
+            console.log('ArtCache: Resize failed:', e);
+            return null;
+        }
         this._scaledCache.set(key, { image: scaled, refCount: 1 });
         if (this._scaledCache.size > 20) {
             // First pass: evict low-use entries and age down the rest.
@@ -720,9 +742,12 @@ const ArtCache = {
             // Fallback: if nothing qualified for eviction (all still hot), force-evict
             // the oldest insertion-order entry so the cache cannot grow without bound.
             if (!evicted && this._scaledCache.size > 20) {
-                const [oldestKey, oldestVal] = this._scaledCache.entries().next().value;
-                try { oldestVal.image.Dispose(); } catch(e) {}
-                this._scaledCache.delete(oldestKey);
+                const oldest = this._scaledCache.entries().next();
+                if (!oldest.done) {
+                    const [oldestKey, oldestVal] = oldest.value;
+                    try { oldestVal.image.Dispose(); } catch(e) {}
+                    this._scaledCache.delete(oldestKey);
+                }
             }
         }
         return scaled;
@@ -747,7 +772,7 @@ const ArtCache = {
 
 const TextHeightCache = {
     getKey(text, font, width) {
-        return `${text}_${font.Name}_${font.Size}_${font.Style}_${width}`;
+        return `${text}\x00${font.Name}\x00${font.Size}\x00${font.Style}\x00${width}`;
     },
     
     get(text, font, width) {
@@ -799,10 +824,13 @@ const ArtController = {
     
     // Handle stop
     onPlaybackStop(reason) {
+        // reason: 0=user stop, 1=EOF/next, 2=starting new track
         if (reason !== 2) {
-            ImageManager.cleanup();
-            ArtCache.clearScaledCache();
-            TextManager.update(null);
+            if (reason === 0) {
+                ImageManager.cleanup();
+                ArtCache.clearScaledCache();
+                TextManager.update(null);
+            }
         }
         RepaintHelper.full();
     },
@@ -863,9 +891,9 @@ const ArtController = {
     
     // Cleanup on unload
     onUnload() {
-        ArtState.timers.blurRebuild = Utils.clearTimer(ArtState.timers.blurRebuild);
+        ArtState.timers.blurRebuild    = Utils.clearTimer(ArtState.timers.blurRebuild);
         ArtState.timers.overlayRebuild = Utils.clearTimer(ArtState.timers.overlayRebuild);
-        ArtState.timers.imageAnim = Utils.clearTimer(ArtState.timers.imageAnim);
+        ArtState.timers.imageAnim      = Utils.clearInterval(ArtState.timers.imageAnim);
         
         if (ArtState.timers.glitch) { 
             window.ClearInterval(ArtState.timers.glitch); 
@@ -935,6 +963,7 @@ const CommandBus = {
                 break;
             case 'glitchToggle':
                 cfg.glitchEnabled = !cfg.glitchEnabled;
+                PanelArt.glitchEnabled = cfg.glitchEnabled; 
                 this.emitChange(Regions.FULL);
                 break;
             default:
@@ -942,7 +971,7 @@ const CommandBus = {
         }
         
         this._scheduleSave();
-        StateManager.apply(cfg, data.rebuildBlur);
+        StateManager.apply(cfg, !!data.rebuildBlur);
     },
     
     _scheduleSave() {
@@ -1054,13 +1083,20 @@ const Utils = {
             window.ClearTimeout(timer);
         }
         return null;
+    },
+    
+    clearInterval(timer) {
+        if (timer) {
+            window.ClearInterval(timer);
+        }
+        return null;
     }
 };
 
 // ================= FONT MANAGEMENT =================
 const FontManager = {
     getFont(name, size, style) {
-        const key = `${name}_${size}_${style}`;
+        const key = `${name}\x00${size}\x00${style}`;
         
         if (PanelArt.fonts.cache.has(key)) {
             const cached = PanelArt.fonts.cache.get(key);
@@ -1169,17 +1205,29 @@ const TextManager = {
     scaleAndClip(gr, maxWidth, maxHeight) {
         const text = PanelArt.text;
         const fonts = PanelArt.fonts;
+
+        const fitToWidth = (font, textContent) => {
+            if (!textContent || !font) return font;
+            if (gr.CalcTextWidth(textContent, font) <= maxWidth) return font;
+            let lo = MIN_FONT_SIZE, hi = font.Size;
+            while (lo < hi) {
+                const mid = (lo + hi + 1) >> 1;
+                if (gr.CalcTextWidth(textContent, FontManager.getFont(font.Name, mid, font.Style)) <= maxWidth) {
+                    lo = mid;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            return FontManager.getFont(font.Name, lo, font.Style);
+        };
         
-        let titleFont = fonts.title;
-        let artistFont = fonts.artist;
-        let extraFont = (StateManager.get().extraInfoEnabled && text.extra) ? fonts.extra : null;
+        let titleFont  = fitToWidth(fonts.title,  text.title);
+        let artistFont = fitToWidth(fonts.artist, text.artist);
+        let extraFont  = (StateManager.get().extraInfoEnabled && text.extra)
+            ? fitToWidth(fonts.extra, text.extra) : null;
         
-        titleFont = this.scaleToWidth(gr, text.title, titleFont, maxWidth);
-        artistFont = this.scaleToWidth(gr, text.artist, artistFont, maxWidth);
-        if (extraFont) {
-            extraFont = this.scaleToWidth(gr, text.extra, extraFont, maxWidth);
-        }
-        
+        // calcTotalHeight() is memoised by TextHeightCache so repeated invocations
+        // during the height-fit loop are cheap after the first call per key tuple.
         const calcTotalHeight = () => {
             let total = TextHeightCache.calcTextHeight(gr, text.title, titleFont, maxWidth);
             total += GAP_TITLE_ARTIST;
@@ -1193,6 +1241,9 @@ const TextManager = {
             return total;
         };
         
+        // Shrink all fonts together until they fit the available height.
+        // Still linear but only runs when the combined height is too tall for the panel
+        // (uncommon), and the earlier width fit already reduced each font's ceiling.
         while (calcTotalHeight() > maxHeight && 
                (titleFont.Size > MIN_FONT_SIZE || artistFont.Size > MIN_FONT_SIZE || 
                 (extraFont && extraFont.Size > MIN_FONT_SIZE))) {
@@ -1218,16 +1269,20 @@ const TextManager = {
         };
     },
     
+    // Kept for API compatibility; delegates to the binary-search path used by scaleAndClip.
     scaleToWidth(gr, textContent, font, maxWidth) {
         if (!textContent || !font) return font;
-        
-        let scaledFont = font;
-        while (scaledFont.Size > MIN_FONT_SIZE && 
-               gr.CalcTextWidth(textContent, scaledFont) > maxWidth) {
-            scaledFont = FontManager.getFont(scaledFont.Name, scaledFont.Size - 1, scaledFont.Style);
+        if (gr.CalcTextWidth(textContent, font) <= maxWidth) return font;
+        let lo = MIN_FONT_SIZE, hi = font.Size;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (gr.CalcTextWidth(textContent, FontManager.getFont(font.Name, mid, font.Style)) <= maxWidth) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
         }
-        
-        return scaledFont;
+        return FontManager.getFont(font.Name, lo, font.Style);
     },
     
     clipText(gr, textContent, font, maxWidth) {
@@ -1250,8 +1305,19 @@ const TextManager = {
     }
 };
 
+// Title-case helper — hoisted to avoid re-creating on each searchForCover call.
+function _toTitleCase(str) {
+    return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
+
 // ================= IMAGE SEARCH =================
 const ImageSearch = {
+    _pathCache: new Map(),
+    
+    clearCache() {
+        this._pathCache.clear();
+    },
+    
     getMetadataNames(metadb) {
         const tf = PanelArt.titleFormats;
         const artist = tf.artist.EvalWithMetadb(metadb);
@@ -1259,9 +1325,10 @@ const ImageSearch = {
         const title  = tf.title.EvalWithMetadb(metadb);
         const folder = tf.folder.EvalWithMetadb(metadb);
         
+        const artistTitle = (artist && title) ? `${artist} - ${title}` : "";
         const artistAlbum = (artist && album) ? `${artist} - ${album}` : "";
         
-        return { artist, album, title, folder, artistAlbum };
+        return { artist, album, title, folder, artistTitle, artistAlbum };
     },
     
     // Parse JSON file - only handles Last.fm format now
@@ -1342,11 +1409,25 @@ const ImageSearch = {
         if (jsonArt) return jsonArt;
         
         // PRIORITY 2: Standard image search with sanitized metadata
+        const artistTitle = (metadata.artist && metadata.title) 
+            ? metadata.artist + ' - ' + metadata.title 
+            : '';
+        const albumTitle = (metadata.album && metadata.title) 
+            ? metadata.album + ' - ' + metadata.title 
+            : '';
+        const artistAlbumTitle = (metadata.artist && metadata.album && metadata.title)
+            ? metadata.artist + ' ' + metadata.album + ' ' + metadata.title
+            : '';
+        
         const metadataNames = _.compact([
             metadata.album,
             metadata.artist,
+            metadata.title,
             metadata.folder,
-            metadata.artistAlbum
+            metadata.artistAlbum,
+            artistTitle,
+            albumTitle,
+            artistAlbumTitle
         ]);
         
         const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames, useVariations);
@@ -1396,21 +1477,35 @@ const ImageSearch = {
     },
     
     searchForCover(metadb, baseFolder) {
+        // Check cache first
+        if (this._pathCache.has(baseFolder)) {
+            return this._pathCache.get(baseFolder);
+        }
+        
         const metadata = this.getMetadataNames(metadb);
         
         // ===== PHASE 1: Search in current track's folder tree =====
         
         // 1A. Search track folder for metadata-named files (no variations, exact match)
         const trackFolderMatch = this.searchInFolder(baseFolder, COVER_PATTERNS, metadata, false);
-        if (trackFolderMatch) return trackFolderMatch;
+        if (trackFolderMatch) {
+            this._pathCache.set(baseFolder, trackFolderMatch);
+            return trackFolderMatch;
+        }
         
         // 1B. Search track folder for any image file
         const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, COVER_PATTERNS);
-        if (trackAnyMatch) return trackAnyMatch;
+        if (trackAnyMatch) {
+            this._pathCache.set(baseFolder, trackAnyMatch);
+            return trackAnyMatch;
+        }
         
         // 1C. Search track folder subfolders (up to 2 levels deep) for any image file
         const trackSubMatch = this._searchFolderTree(baseFolder, COVER_PATTERNS, 2);
-        if (trackSubMatch) return trackSubMatch;
+        if (trackSubMatch) {
+            this._pathCache.set(baseFolder, trackSubMatch);
+            return trackSubMatch;
+        }
         
         // ===== PHASE 2: Custom folder search =====
         // Create search names: title, artist, album, artist album (space and dash variants)
@@ -1429,11 +1524,6 @@ const ImageSearch = {
             artistAlbumSpace
         ]);
         
-        // Create variations (lowercase and Title Case for matching)
-        const toTitleCase = (str) => {
-            return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-        };
-        
         const nameVariations = [];
         _.forEach(simpleNames, (name) => {
             if (name) {
@@ -1441,8 +1531,8 @@ const ImageSearch = {
                 nameVariations.push(lower);
                 nameVariations.push(lower.replace(/\s+/g, '-'));
                 nameVariations.push(lower.replace(/\s+/g, '_'));
-                
-                const title = toTitleCase(name);
+
+                const title = _toTitleCase(name);
                 nameVariations.push(title);
                 nameVariations.push(title.replace(/\s+/g, '-'));
                 nameVariations.push(title.replace(/\s+/g, '_'));
@@ -1451,7 +1541,21 @@ const ImageSearch = {
         const folderMatchNames = _.uniq(nameVariations);
         
         const customFolders = CustomFolders.getAll();
-        if (customFolders.length === 0) return null;
+        if (customFolders.length === 0) {
+            this._pathCache.set(baseFolder, null);
+            return null;
+        }
+        
+        // Search custom folder root for name-matched images
+        for (const customFolder of customFolders) {
+            if (!FileManager.isDirectory(customFolder)) continue;
+            
+            const nameMatched = this.searchInFolder(customFolder, COVER_PATTERNS, metadata, true);
+            if (nameMatched) {
+                this._pathCache.set(baseFolder, nameMatched);
+                return nameMatched;
+            }
+        }
         
         // Search each custom folder for matching subfolders, then search inside them
         for (const customFolder of customFolders) {
@@ -1473,14 +1577,20 @@ const ImageSearch = {
                     // Search inside matching folder for images (includes artist - album.ext filenames)
                     const img = this.searchInFolder(sub1, COVER_PATTERNS, metadata, true)
                              || this.searchInFolderAnyFile(sub1, COVER_PATTERNS);
-                    if (img) return img;
+                    if (img) {
+                        this._pathCache.set(baseFolder, img);
+                        return img;
+                    }
                     
                     // Also check subfolders inside
                     const sub1Folders = FileManager.getSubfolders(sub1);
                     for (const subSub of sub1Folders) {
                         const sImg = this.searchInFolder(subSub, COVER_PATTERNS, metadata, true)
                                   || this.searchInFolderAnyFile(subSub, COVER_PATTERNS);
-                        if (sImg) return sImg;
+                        if (sImg) {
+                            this._pathCache.set(baseFolder, sImg);
+                            return sImg;
+                        }
                     }
                 }
                 
@@ -1497,12 +1607,17 @@ const ImageSearch = {
                     if (match2) {
                         const img = this.searchInFolder(sub2, COVER_PATTERNS, metadata, true)
                                  || this.searchInFolderAnyFile(sub2, COVER_PATTERNS);
-                        if (img) return img;
+                        if (img) {
+                            this._pathCache.set(baseFolder, img);
+                            return img;
+                        }
                     }
                 }
             }
         }
         
+        // Cache the null result to avoid repeated searches
+        this._pathCache.set(baseFolder, null);
         return null;
     }
 };
@@ -1513,15 +1628,17 @@ const BlurCache = {
     _cache: new Map(),    // insertion-ordered Map used as LRU (oldest first)
     _srcIdCounter: 0,
 
-    _makeKey(w, h, radius) {
-        const srcId = (PanelArt.images.source && PanelArt.images.source._srcId !== undefined)
-            ? PanelArt.images.source._srcId : 'none';
+    _makeKey(src, w, h, radius) {
+        const srcId = (src && src._srcId !== undefined) ? src._srcId : 'none';
         return `${srcId}|${radius}|${w}|${h}`;
     },
 
     // Returns the blurred GDI+ bitmap, from cache or freshly built.
     getOrBuild(w, h, src, radius) {
-        const key = this._makeKey(w, h, radius);
+        // A radius of 0 means "no blur" — skip the expensive CreateImage+DrawImage path.
+        if (!src || radius <= 0 || w <= 0 || h <= 0) return null;
+
+        const key = this._makeKey(src, w, h, radius);
 
         if (this._cache.has(key)) {
             const cached = this._cache.get(key);
@@ -1540,17 +1657,28 @@ const BlurCache = {
             this._cache.delete(oldestKey);
         }
 
+        let g = null;
+        let newImg = null;
         try {
-            const newImg = gdi.CreateImage(w, h);
-            const g = newImg.GetGraphics();
+            newImg = gdi.CreateImage(w, h);
+            g = newImg.GetGraphics();
             g.DrawImage(src, 0, 0, w, h, 0, 0, src.Width, src.Height);
             newImg.ReleaseGraphics(g);
+            g = null;                       // released — don't release again in finally
             newImg.StackBlur(radius);
             this._cache.set(key, newImg);
-            return newImg;
+            newImg = null;                  // ownership transferred to cache — don't dispose in finally
+            return this._cache.get(key);
         } catch (e) {
             console.log('PanelArt: BlurCache build error:', e);
             return null;
+        } finally {
+            if (g) {
+                try { if (newImg) newImg.ReleaseGraphics(g); } catch (e2) {}
+            }
+            if (newImg) {
+                try { newImg.Dispose(); } catch (e2) {}
+            }
         }
     },
 
@@ -1571,9 +1699,6 @@ const ImageManager = {
         
         const track = metadb;
         
-        // Increment token - any stale async responses will be discarded
-        PanelArt.loadToken++;
-        
         const folderPath = PanelArt.titleFormats.path.EvalWithMetadb(track);
         
         // Skip if same album AND art is already loaded — keep existing art and blur.
@@ -1585,7 +1710,12 @@ const ImageManager = {
             return;
         }
         
-        // New album - clear stale artwork
+        // Increment token — any stale async responses will be discarded.
+        // Only done here, AFTER the same-folder no-op guard, so text-only refreshes
+        // do not invalidate a pending async art response.
+        PanelArt.loadToken++;
+        
+        // Clear stale artwork — blur is a BlurCache alias; setting null is sufficient (BlurCache retains ownership).
         PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
         PanelArt.images.blur = null;
         PanelArt.images.currentMetadb = null;
@@ -1603,11 +1733,6 @@ const ImageManager = {
         if (foundPath && FileManager.exists(foundPath)) {
             const pathToLoad = foundPath;
             ArtQueue.enqueue((done) => {
-                // Skip if path unchanged
-                if (PanelArt.images.currentPath === pathToLoad) {
-                    done();
-                    return;
-                }
                 
                 let art = null;
                 try {
@@ -1706,9 +1831,10 @@ const OverlayCache = {
         this.valid = true;   // mark valid whether or not we build an image
         if (!needsAny || w <= 0 || h <= 0) return;
         
+        let g = null;
         try {
             this.img = gdi.CreateImage(w, h);
-            const g = this.img.GetGraphics();
+            g = this.img.GetGraphics();
             
             // ---- Scanlines (dark rows) ----
             if (cfg.showScanlines && cfg.opScanlines > 0) {
@@ -1728,7 +1854,7 @@ const OverlayCache = {
                     const cy = artInfo.artY + artInfo.artH / 2;
                     const maxR = Math.max(artInfo.artW, artInfo.artH) * 0.75;
                     const steps = 30;
-                    const minStep = Math.ceil(1 / (op * 0.05));
+                    const minStep = Math.min(steps - 1, Math.ceil(1 / (op * 0.05)));
                     for (let i = minStep; i < steps; i++) {
                         const progress = i / steps;
                         const alpha = Math.floor(op * progress * 0.05);
@@ -1743,7 +1869,7 @@ const OverlayCache = {
                     const cy = textArea.textY + textArea.textH / 2;
                     const maxR = Math.max(textArea.textW, textArea.textH);
                     const steps = 25;
-                    const minStep = Math.ceil(1 / (op * 0.03));
+                    const minStep = Math.min(steps - 1, Math.ceil(1 / (op * 0.03)));
                     for (let i = minStep; i < steps; i++) {
                         const progress = i / steps;
                         const alpha = Math.floor(op * progress * 0.03);
@@ -1776,7 +1902,7 @@ const OverlayCache = {
                 }
             }
 
-            // ---- Phosphor (horizontal tint rows) ----
+            // ---- Phosphor (horizontal tint rows — interleaved with scanlines) ----
             if (cfg.showPhosphor && cfg.opPhosphor > 0) {
                 const themeColor = PhosphorManager.getColor();
                 const pr = (themeColor >>> 16) & 255;
@@ -1786,16 +1912,17 @@ const OverlayCache = {
                     _RGB(Math.floor(pr * 0.5 + 127), Math.floor(pg * 0.5 + 127), Math.floor(pb * 0.5 + 127)),
                     cfg.opPhosphor
                 );
-                for (let y = 0; y < h; y += SCANLINE_SPACING) {
+                for (let y = 1; y < h; y += SCANLINE_SPACING) {
                     g.FillSolidRect(0, y, w, 1, phosphorCol);
                 }
             }
-
-            this.img.ReleaseGraphics(g);
         } catch (e) {
             console.log("Overlay cache build error:", e);
-            this.dispose();
-            this.valid = true;
+            // img may be partially built — release graphics before dispose clears it.
+        } finally {
+            if (g && this.img) {
+                try { this.img.ReleaseGraphics(g); } catch (e2) {}
+            }
         }
     }
 };
@@ -1817,7 +1944,7 @@ const Renderer = {
         
         try {
             gr.FillSolidRect(0, 0, dim.width, dim.height, cfg.customBackgroundColor);
-            if (cfg.blurEnabled && img.blur) {
+            if (cfg.backgroundEnabled && cfg.blurEnabled && img.blur) {
                 gr.DrawImage(img.blur, 0, 0, dim.width, dim.height, 0, 0, img.blur.Width, img.blur.Height);
             }
             
@@ -1828,36 +1955,6 @@ const Renderer = {
         } catch (e) {
             console.log("Error drawing background:", e);
         }
-    },
-    
-    drawImageWithEffects(gr, img) {
-        const w = PanelArt.dimensions.width;
-        const h = PanelArt.dimensions.height;
-        const borderPad = (StateManager.get().borderSize || 0);
-        
-        // Draw background
-        this.drawBackground(gr);
-        
-        // Draw image inside borders - stretch to fill
-        const imgW = img.Width;
-        const imgH = img.Height;
-        
-        if (imgW > 0 && imgH > 0) {
-            const dx = borderPad;
-            const dy = borderPad;
-            const dw = w - borderPad * 2;
-            const dh = h - borderPad * 2;
-            
-            // Use pre-scaled image cache for performance
-            const scaledImg = Utils.getScaledImage(img, dw, dh);
-            gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
-        }
-        
-        // Draw border
-        this.drawBorder(gr);
-        
-        // Draw overlay effects (cached: scanlines, glow, reflection, phosphor)
-        this.drawOverlay(gr, w, h, null, null);
     },
     
     drawAlbumArt(gr) {
@@ -1912,7 +2009,9 @@ const Renderer = {
                 artX = (cfg.albumArtFloat === "left") ? pad : dim.width - artW + pad;
                 
                 const scaledImg = Utils.getScaledImage(img, scaledW, scaledH);
-                gr.DrawImage(scaledImg, artX, artY, scaledW, scaledH, 0, 0, scaledW, scaledH);
+                if (scaledImg) {
+                    gr.DrawImage(scaledImg, artX, artY, scaledW, scaledH, 0, 0, scaledW, scaledH);
+                }
                 
             } else if (cfg.albumArtFloat === "top" || cfg.albumArtFloat === "bottom") {
                 const maxRatio = 0.75;
@@ -1954,7 +2053,9 @@ const Renderer = {
                 artY = (cfg.albumArtFloat === "top") ? pad : dim.height - artH + pad;
                 
                 const scaledImg = Utils.getScaledImage(img, scaledW, scaledH);
-                gr.DrawImage(scaledImg, artX, artY, scaledW, scaledH, 0, 0, scaledW, scaledH);
+                if (scaledImg) {
+                    gr.DrawImage(scaledImg, artX, artY, scaledW, scaledH, 0, 0, scaledW, scaledH);
+                }
             }
             
             return { artX, artY, artW, artH, actualPad: pad };
@@ -2097,6 +2198,11 @@ const Renderer = {
     },
     
     drawOverlay(gr, w, h, artInfo, textArea) {
+        // Invalidate if the panel was resized since the last build.
+        if (OverlayCache.valid && OverlayCache.img &&
+            (OverlayCache.img.Width !== w || OverlayCache.img.Height !== h)) {
+            OverlayCache.invalidate();
+        }
         if (!OverlayCache.valid) {
             OverlayCache.build(w, h, artInfo, textArea);
         }
@@ -2118,12 +2224,17 @@ const Renderer = {
         
         try {
             gr.FillSolidRect(bx, by, barW, barH, PanelArt_SetAlpha(PA_WHITE, 60));
-            gr.FillSolidRect(bx, by, barW * (value / max), barH, PanelArt_SetAlpha(PA_WHITE, 180));
+            gr.FillSolidRect(bx, by, Math.floor(barW * (value / max)), barH, PanelArt_SetAlpha(PA_WHITE, 180));
             
             const font = this.getSliderFont();
             const text = value.toString();
             const size = gr.MeasureString(text, font, 0, 0, dim.width, dim.height);
-            gr.DrawString(text, font, PA_WHITE, (dim.width - size.Width) / 2, by - size.Height - 2, size.Width, size.Height);
+            const sw = Math.ceil(size.Width);
+            const sh = Math.ceil(size.Height);
+            gr.DrawString(text, font, PA_WHITE,
+                Math.floor((dim.width - sw) / 2),
+                Math.floor(by - sh - 2),
+                sw, sh);
         } catch (e) {
             console.log("Error drawing slider:", e);
         }
@@ -2177,6 +2288,11 @@ const StateManager = {
             
             if (savedVersion !== STATE_VERSION) {
                 savedData = migrateState(savedData, savedVersion);
+                // Version changed — persist migrated state immediately so we don't re-migrate on next load.
+                const migrated = Validator.validateConfig(savedData);
+                try {
+                    window.SetProperty(STATE_KEY, JSON.stringify({ version: STATE_VERSION, data: migrated }));
+                } catch (e) {}
             }
             
             const validated = Validator.validateConfig(savedData);
@@ -2203,9 +2319,13 @@ const StateManager = {
         if (rebuildBlur) {
             ImageManager.scheduleBlurRebuild();
         }
-        // Get current track if playing for text update
-        const currentTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
-        TextManager.update(currentTrack);
+        // Only call TextManager.update when fonts were rebuilt (skipFontRebuild=false)
+        // or when blur/background settings changed — otherwise the text content
+        // cannot have changed and the call is a no-op that still evaluates title-formats.
+        if (!skipFontRebuild || rebuildBlur) {
+            const currentTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
+            TextManager.update(currentTrack);
+        }
     },
     
     reset() {
@@ -2214,8 +2334,17 @@ const StateManager = {
         PanelArt.slider.paddingActive = false;
         PanelArt.slider.target = null;
         TextHeightCache.clear();
+        ImageSearch.clearCache();   // stale path entries must be cleared with defaults
         this.apply(this._config, true);
         this.save();
+        // Reload art so it renders with the new (default) settings immediately.
+        PanelArt.images.folderPath = '';    // force reload even if same folder
+        const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
+        if (track) {
+            ImageManager.loadAlbumArt(track);
+        } else {
+            TextManager.update(null);
+        }
         RepaintHelper.full();
     },
     
@@ -2259,18 +2388,14 @@ const PresetManager = {
             const data = JSON.parse(str);
             const validated = Validator.validateConfig(data);
             
-            // Save current mode states to restore after preset load
-            const prevImageMode = PanelArt.imageMode;
-            const prevSlideMode = PanelArt.slideMode;
-            const prevSlideIndex = PanelArt.slideIndex;
-            
             StateManager.apply(validated, true);
             StateManager.save();
             
-            // Sync PanelArt properties from config
+            // Sync PanelArt runtime properties from the loaded preset config.
             PanelArt.imageMode = validated.imageMode;
             PanelArt.slideMode = validated.slideMode;
             PanelArt.slideIndex = validated.slideIndex || 0;
+            PanelArt.glitchEnabled = validated.glitchEnabled;
             
             // Restart modes if they were active in the preset
             if (PanelArt.slideMode) {
@@ -2304,11 +2429,12 @@ const PhosphorManager = {
     
     setCustomColor() {
         try {
-            const picked = utils.ColourPicker(window.ID, StateManager.get().customPhosphorColor);
+            const cfg = StateManager.get();
+            const picked = utils.ColourPicker(window.ID, cfg.customPhosphorColor);
             if (_.isNumber(picked) && picked !== -1) {
-                StateManager.get().customPhosphorColor = picked >>> 0;
-                StateManager.get().currentPhosphorTheme = CUSTOM_THEME_INDEX;
-                OverlayCache.invalidate();  // Required — cache holds stale colour until flushed
+                cfg.customPhosphorColor = picked >>> 0;
+                cfg.currentPhosphorTheme = CUSTOM_THEME_INDEX;
+                StateManager.apply(cfg, false, false, true); // overlay-only; skip font rebuild
                 StateManager.save();
                 RepaintHelper.full();
             }
@@ -2336,10 +2462,9 @@ const MenuManager = {
         this.addPresetMenu(m);
         
         m.AppendMenuSeparator();
-        const menuCfg = StateManager.get();
-        m.AppendMenuItem(menuCfg.glitchEnabled ? MF_CHECKED : MF_STRING, 545, "Glitch Effect on Track Change");
+        m.AppendMenuItem(cfg.glitchEnabled ? MF_CHECKED : MF_STRING, 545, "Glitch Effect on Track Change");
         
-        const imageFolder = menuCfg.imageFolder;
+        const imageFolder = cfg.imageFolder;
         const imageLabel = imageFolder ? "Change Image Folder" : "Set Image Folder...";
         m.AppendMenuItem(MF_STRING, 950, imageLabel);
         
@@ -2366,7 +2491,12 @@ const MenuManager = {
             }
         });
         themeM.AppendMenuSeparator();
-        themeM.AppendMenuItem(MF_STRING, 610, "Custom...");
+        // CUSTOM_THEME_INDEX = PHOSPHOR_THEMES.length, so the Custom ID is always one above the last preset.
+        const customThemeId = 600 + CUSTOM_THEME_INDEX;
+        themeM.AppendMenuItem(MF_STRING, customThemeId, "Custom...");
+        if (StateManager.get().currentPhosphorTheme === CUSTOM_THEME_INDEX) {
+            themeM.CheckMenuItem(customThemeId, true);
+        }
         themeM.AppendTo(overlayM, MF_STRING, "Phosphor Theme");
         
         overlayM.AppendMenuSeparator();
@@ -2423,6 +2553,8 @@ const MenuManager = {
         
         // Blur Settings inside Background
         const blurM = window.CreatePopupMenu();
+        blurM.AppendMenuItem(cfg.blurEnabled ? MF_CHECKED : MF_STRING, 512, 'Enable Blur');
+        blurM.AppendMenuSeparator();
         _.times(11, (i) => {
             const value = i * 20;
             blurM.AppendMenuItem(MF_STRING, 500 + i, 'Radius: ' + value);
@@ -2552,7 +2684,8 @@ const MenuManager = {
     handleSelection(id) {
         const cfg = StateManager.get();
         
-        const updateConfig = (callback, region = Regions.FULL, rebuildBlur = false) => {
+        // rebuildFonts=true only for operations that change font name/size.
+        const updateConfig = (callback, region = Regions.FULL, rebuildBlur = false, rebuildFonts = false) => {
             const prevRadius = cfg.blurRadius;
             const prevBlurEnabled = cfg.blurEnabled;
             const prevBgEnabled = cfg.backgroundEnabled;
@@ -2565,7 +2698,8 @@ const MenuManager = {
             
             OverlayCache.invalidate();
             CommandBus.emitChange(region, { rebuildBlur: rebuildBlur || blurChanged });
-            StateManager.apply(cfg, rebuildBlur || blurChanged);
+            StateManager.apply(cfg, rebuildBlur || blurChanged, false, !rebuildFonts);
+            StateManager.saveDebounced();
         };
         
         if (id === 99) {
@@ -2602,10 +2736,10 @@ const MenuManager = {
             PanelArt.slider.target = ["Reflection", "Glow", "Scanlines", "Phosphor"][id - 200];
             RepaintHelper.full();
         }
-        else if (_.inRange(id, 600, 610)) {
+        else if (_.inRange(id, 600, 600 + CUSTOM_THEME_INDEX)) {
             updateConfig(c => c.currentPhosphorTheme = id - 600, Regions.OVERLAY);
         }
-        else if (id === 610) {
+        else if (id === 600 + CUSTOM_THEME_INDEX) {
             PhosphorManager.setCustomColor();
         }
         else if (_.inRange(id, 500, 511)) {
@@ -2613,6 +2747,9 @@ const MenuManager = {
         }
         else if (id === 511) {
             updateConfig(c => c.blurRadius = 254, Regions.BACKGROUND, true);
+        }
+        else if (id === 512) {
+            updateConfig(c => c.blurEnabled = !c.blurEnabled, Regions.BACKGROUND, true);
         }
         else if (_.inRange(id, 520, 526)) {
             updateConfig(c => c.darkenValue = (id - 520) * 10, Regions.BACKGROUND);
@@ -2624,8 +2761,8 @@ const MenuManager = {
         }
         else if (id === 531) {
             const picked = utils.ColourPicker(window.ID, cfg.borderColor);
-            if (picked !== cfg.borderColor && picked !== -1) {
-                updateConfig(c => c.borderColor = picked, Regions.BACKGROUND);
+            if (_.isNumber(picked) && picked !== -1) {
+                updateConfig(c => c.borderColor = picked >>> 0, Regions.BACKGROUND);
             }
         }
         else if (_.inRange(id, 540, 543)) {
@@ -2634,7 +2771,7 @@ const MenuManager = {
             const index = id - 540;
             const input = utils.InputBox(window.ID, labels[index], 'Enter new size:', cfg[keys[index]].toString(), false);
             const value = Utils.validateNumber(input, cfg[keys[index]], MIN_FONT_SIZE, MAX_FONT_SIZE);
-            updateConfig(c => c[keys[index]] = value, Regions.TEXT);
+            updateConfig(c => c[keys[index]] = value, Regions.TEXT, false, true);
         }
         else if (_.inRange(id, 550, 553)) {
             const keys = ['titleFontName', 'artistFontName', 'extraFontName'];
@@ -2642,7 +2779,7 @@ const MenuManager = {
             const index = id - 550;
             const input = utils.InputBox(window.ID, labels[index], 'Enter font name:', cfg[keys[index]], false);
             if (input && _.trim(input)) {
-                updateConfig(c => c[keys[index]] = _.trim(input), Regions.TEXT);
+                updateConfig(c => c[keys[index]] = _.trim(input), Regions.TEXT, false, true);
             }
         }
         else if (_.inRange(id, 560, 563)) {
@@ -2654,14 +2791,13 @@ const MenuManager = {
         else if (id === 571) {
             updateConfig(c => {
                 c.extraInfoEnabled = !c.extraInfoEnabled;
-                const currentTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
-                TextManager.update(currentTrack);
             }, Regions.TEXT);
         }
         else if (id === 800) {
             updateConfig(c => c.albumArtEnabled = !c.albumArtEnabled, Regions.ALBUM_ART);
         }
         else if (_.inRange(id, 801, 805)) {
+            // 801=left, 802=right, 803=top, 804=bottom. 805 is NOT in this range (exclusive upper bound).
             const floats = ["left", "right", "top", "bottom"];
             updateConfig(c => c.albumArtFloat = floats[id - 801], Regions.ALBUM_ART);
         }
@@ -2691,17 +2827,25 @@ const MenuManager = {
         }
         else if (id === 901) {
             FileManager.clear();
+            ImageSearch.clearCache();           // must clear or the next load gets the stale path
             ImageManager.cleanup();
+            PanelArt.images.folderPath = '';    // force reload even if same folder
             TextHeightCache.clear();
             const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-            ImageManager.loadAlbumArt(track);
+            if (track) {
+                ImageManager.loadAlbumArt(track);
+            } else {
+                TextManager.update(null);
+                RepaintHelper.full();
+            }
         }
         else if (id === 1000) {
             try {
                 const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
                 if (folder && CustomFolders.add(folder)) {
+                    ImageSearch.clearCache();   // stale null-entries would hide the new folder
                     const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-                    ImageManager.loadAlbumArt(track);
+                    if (track) { ImageManager.loadAlbumArt(track); } else { RepaintHelper.full(); }
                 }
             } catch (e) {
                 console.log("Error adding custom folder:", e);
@@ -2709,25 +2853,26 @@ const MenuManager = {
         }
         else if (_.inRange(id, 1010, 1015)) {
             if (CustomFolders.remove(id - 1010)) {
+                ImageSearch.clearCache();       // stale hits from the removed folder must go
                 const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-                ImageManager.loadAlbumArt(track);
+                if (track) { ImageManager.loadAlbumArt(track); } else { RepaintHelper.full(); }
             }
         }
         else if (id === 1020) {
             CustomFolders.clear();
+            ImageSearch.clearCache();           // same reason
             const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-            ImageManager.loadAlbumArt(track);
+            if (track) { ImageManager.loadAlbumArt(track); } else { RepaintHelper.full(); }
         }
         else if (id === 950) {
             try {
-                const cfg = StateManager.get();
                 const currentFolder = cfg.imageFolder || '';
                 const folder = utils.InputBox(window.ID, "Enter Image folder path:", "Image Folder", currentFolder, true);
                 if (folder && _isFolder(folder)) {
-                    cfg.imageFolder = folder;
-                    CommandBus.emitChange(Regions.FULL);
-                    StateManager.save();
-                    RepaintHelper.full();
+                    updateConfig(c => {
+                        c.imageFolder = folder;
+                        PanelArt.imageFolder = folder;   // sync runtime state immediately
+                    }, Regions.FULL);
                 } else if (folder) {
                     console.log("Invalid folder:", folder);
                 }
@@ -2742,23 +2887,26 @@ const MenuManager = {
             SlideManager.toggleSlideMode();
         }
         else if (id === 545) {
-            const cfg = StateManager.get();
-            cfg.glitchEnabled = !cfg.glitchEnabled;
-            CommandBus.emitChange(Regions.FULL);
-            StateManager.save();
-            RepaintHelper.full();
+            updateConfig(c => {
+                c.glitchEnabled = !c.glitchEnabled;
+                PanelArt.glitchEnabled = c.glitchEnabled;   // sync runtime flag immediately
+            }, Regions.FULL);
         }
     }
 };
 
 // ================= GLITCH RENDER HELPER =================
-function _paintGlitch(gr, w, h, intensity, pad) {
+// suppressBase: pass true when painting over the normal album-art view so the
+// near-opaque base rectangle does not black out the track info text.
+function _paintGlitch(gr, w, h, intensity, pad, suppressBase) {
     const gx = Math.max(pad, 0);
     const gy = Math.max(pad, 0);
     const gw = Math.max(w - pad * 2, 1);
     const gh = Math.max(h - pad * 2, 1);
 
-    gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(5, 5, 15), 220));
+    if (!suppressBase) {
+        gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(5, 5, 15), 220));
+    }
 
     const scanlineOffset = Math.floor(Math.random() * 3);
     for (let y = gy + scanlineOffset; y < gy + gh; y += 3) {
@@ -2813,10 +2961,10 @@ function _paintGlitch(gr, w, h, intensity, pad) {
         const blockX = gx + Math.floor(Math.random() * (gw - blockW));
         const colors = GLITCH_BLOCK_COLORS;
         const col = colors[Math.floor(Math.random() * colors.length)];
-        const r = Math.floor(((col >>> 16) & 0xFF) * 0.90);
-        const g = Math.floor(((col >>>  8) & 0xFF) * 0.90);
-        const b =  col & 0xFF;
-        gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g, b));
+        const r  = Math.floor(((col >>> 16) & 0xFF) * 0.90);
+        const g2 = Math.floor(((col >>>  8) & 0xFF) * 0.90);
+        const b  =  col & 0xFF;
+        gr.FillSolidRect(blockX, blockY, blockW, blockH, _RGB(r, g2, b));
     }
 
     const numInterference = Math.floor(intensity * 10) + 3;
@@ -2836,11 +2984,10 @@ function _paintGlitch(gr, w, h, intensity, pad) {
         const ns   = Math.floor(Math.random() * 2) + 1;
         const gray = Math.floor(Math.random() * 150);
         const pick = Math.floor(Math.random() * 4);
-        const nc   = pick === 0 ? _RGB(Math.round(gray * 0.7), Math.round(gray * 0.8), gray)
-                   : pick === 1 ? _RGB(Math.round(gray * 0.5), gray,                   Math.round(gray * 0.5))
-                   : pick === 2 ? _RGB(gray,                   gray,                   Math.round(gray * 0.6))
-                   :              _RGB(gray,                   Math.round(gray * 0.5), Math.round(gray * 0.5));
-        gr.FillSolidRect(nx, ny, ns, ns, nc);
+        const nr   = pick === 0 ? Math.round(gray * 0.7) : pick === 3 ? gray               : gray;
+        const ng   = pick === 0 ? Math.round(gray * 0.8) : pick === 1 ? gray               : pick === 3 ? Math.round(gray * 0.5) : gray;
+        const nb   = pick === 0 ? gray                   : pick === 1 ? Math.round(gray * 0.5) : pick === 2 ? Math.round(gray * 0.6) : Math.round(gray * 0.5);
+        gr.FillSolidRect(nx, ny, ns, ns, _RGB(nr, ng, nb));
     }
 
     if (intensity > 0.75) {
@@ -2861,7 +3008,7 @@ function _paintGlitch(gr, w, h, intensity, pad) {
 
 // ================= FOOBAR2000 CALLBACKS =================
 function on_paint(gr) {
-    if (!PanelArt.dimensions.width || !PanelArt.dimensions.height) return;
+    if (!isLive() || !PanelArt.dimensions.width || !PanelArt.dimensions.height) return;
     try {
         const w = PanelArt.dimensions.width;
         const h = PanelArt.dimensions.height;
@@ -2884,10 +3031,12 @@ function on_paint(gr) {
                 gr.FillSolidRect(dx - 1, dy - 1, dw + 2, dh + 2, _RGB(80, 80, 80));
                 gr.FillSolidRect(dx + 1, dy + 1, dw - 2, dh - 2, _RGB(20, 20, 20));
                 const scaledImg = Utils.getScaledImage(_modeImg, dw, dh);
-                gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, scaledImg.Width, scaledImg.Height);
+                if (scaledImg) {
+                    gr.DrawImage(scaledImg, dx, dy, dw, dh, 0, 0, dw, dh);
+                }
             }
             if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled) {
-                _paintGlitch(gr, w, h, PanelArt.glitchFrame, imagePad);
+                _paintGlitch(gr, w, h, PanelArt.glitchFrame, imagePad, false); // base rect intentional in mode view
             }
             Renderer.drawBorder(gr);
             Renderer.drawOverlay(gr, w, h, null, null);
@@ -2902,7 +3051,7 @@ function on_paint(gr) {
         Renderer.drawText(gr, textArea);
         
         if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled) {
-            _paintGlitch(gr, w, h, PanelArt.glitchFrame, cfg.borderSize || 0);
+            _paintGlitch(gr, w, h, PanelArt.glitchFrame, cfg.borderSize || 0, true); // suppress base rect over track info
         }
         
         // Draw border
@@ -2922,6 +3071,7 @@ const ArtDispatcher = {
     _pending: null,      // { reason, metadb }
     _timer: null,
     _trackTimer: null,
+    _unloaded: false,    // set by on_script_unload to suppress post-teardown callbacks
     
     // Priority: track > stop > selection > playlist
     _priority: { track: 4, stop: 3, selection: 2, playlist: 1 },
@@ -2929,11 +3079,11 @@ const ArtDispatcher = {
     request(reason, metadb) {
         const priority = this._priority[reason] || 0;
         
-        // If we have a pending request, only override if higher priority
+        // If we have a pending request, only override if equal or higher priority
         if (this._pending) {
             const currentPriority = this._priority[this._pending.reason] || 0;
-            if (priority <= currentPriority) {
-                return; // Ignore lower/equal priority request
+            if (priority < currentPriority) {
+                return; // Ignore strictly lower priority request only
             }
         }
         
@@ -2954,6 +3104,7 @@ const ArtDispatcher = {
     },
     
     _dispatch() {
+        if (this._unloaded) return;   // BUG-DISPATCH-1: timer fired after on_script_unload
         if (!this._pending) return;
         
         const { reason, metadb } = this._pending;
@@ -2965,7 +3116,7 @@ const ArtDispatcher = {
                 if (metadb) {
                     this._trackTimer = window.SetTimeout(() => {
                         this._trackTimer = null;
-                        ArtController.onPlaybackNewTrack(metadb);
+                        if (!this._unloaded) ArtController.onPlaybackNewTrack(metadb);
                     }, 60);
                 }
                 break;
@@ -2983,7 +3134,10 @@ const ArtDispatcher = {
 };
 
 // ================= ASYNC DECODE QUEUE =================
-// Prevents disk bursts - only one decode at a time
+// Prevents disk bursts — only one decode executes at a time.
+// NOTE: Only the LAST enqueued task is remembered (pending = last-write-wins).
+// Callers must ensure any GDI disposal they need happens BEFORE calling enqueue,
+// not inside the task, if there is any chance a newer enqueue could displace them.
 const ArtQueue = {
     busy: false,
     pending: null,
@@ -2999,30 +3153,59 @@ const ArtQueue = {
         this.busy = true;
         const task = this.pending;
         this.pending = null;
-        
-        // Execute the decode task
-        task(() => {
+
+        let doneInvoked = false;
+
+        const safetyTimer = window.SetTimeout(() => {
+            if (!doneInvoked) {
+                console.log('ArtQueue: safety timeout — task did not call done(), releasing queue.');
+                this.busy = false;
+                this._process();
+            }
+        }, 10000);
+        const done = () => {
+            doneInvoked = true;
+            window.ClearTimeout(safetyTimer);
             this.busy = false;
-            // Process next in queue
             this._process();
-        });
+        };
+        try {
+            task(done);
+        } catch (e) {
+            console.log('ArtQueue: task threw synchronously:', e);
+            if (!doneInvoked) {
+                this.busy = false;
+                this._process();
+            }
+        }
     },
     
     clear() {
         this.pending = null;
+        // Do NOT reset busy here — a task may still be executing synchronously.
+        // The on_script_unload path disposes everything; any remaining done() call
+        // will simply find nothing to process.
     }
 };
 
 function on_size() {
+    if (!isLive()) {
+        // Update dimensions even during boot so on_paint has correct values.
+        ArtState.dimensions.width  = window.Width;
+        ArtState.dimensions.height = window.Height;
+        return;
+    }
     ArtController.onSize();
 }
 
 function on_colours_changed() {
+    if (!isLive()) return;
     ImageManager.scheduleBlurRebuild();
     RepaintHelper.full();
 }
 
 function on_font_changed() {
+    if (!isLive()) return;
     // System font changed — clear font cache and rebuild
     FontManager.rebuildFonts();
     TextHeightCache.clear();
@@ -3048,18 +3231,21 @@ function runGlitchEffect() {
 }
 
 function on_playback_new_track(metadb) {
+    if (!isLive()) return;
     ArtDispatcher.request('track', metadb);
 }
 
 // Refresh display when tags are edited while a track is playing.
 function on_metadb_changed(metadb_list, fromhook) {
+    if (!isLive()) return;
     if (!fb.IsPlaying) return;
     const nowPlaying = fb.GetNowPlaying();
     if (!nowPlaying) return;
     
     let affected = false;
+
     for (let i = 0; i < metadb_list.Count; i++) {
-        const item = metadb_list[i];
+        const item = metadb_list.Item(i);
         if (item && item.Compare && item.Compare(nowPlaying)) {
             affected = true;
             break;
@@ -3076,6 +3262,13 @@ function on_metadb_changed(metadb_list, fromhook) {
 
 // image is null if no artwork was found.
 function on_get_album_art_done(metadb, art_id, image, image_path) {
+    if (phase === Phase.SHUTDOWN) {
+        // Script is shutting down; discard the image to avoid a GDI leak.
+        if (image && typeof image.Dispose === 'function') {
+            try { image.Dispose(); } catch (e) {}
+        }
+        return;
+    }
     try {
         // Discard stale response if token changed (new load started after async request)
         if (PanelArt.pendingArtToken !== PanelArt.loadToken) {
@@ -3095,23 +3288,24 @@ function on_get_album_art_done(metadb, art_id, image, image_path) {
         }
         PanelArt.images.currentMetadb = null;
         
-        const hadArt = !!PanelArt.images.source;
-        
         if (image) {
+            // Dispose old source before replacing it to avoid a GDI leak.
+            if (PanelArt.images.source && PanelArt.images.source !== image) {
+                Utils.disposeImage(PanelArt.images.source);
+            }
             PanelArt.images.source = image;
             if (image._srcId === undefined) image._srcId = BlurCache._srcIdCounter++;
             PanelArt.images.currentPath = image_path || '';
+            // Clear stale scaled-image entries — they were keyed to the old source's _srcId.
+            Utils.clearScaledCache();
             OverlayCache.invalidate();
+            ImageManager.scheduleBlurRebuild();
+            RepaintHelper.full();
         } else {
             PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
             PanelArt.images.currentPath = '';
-            PanelArt.images.folderPath = '';
-        }
-        
-        ImageManager.scheduleBlurRebuild();
-        
-        // Only full repaint if we didn't have art before
-        if (!hadArt) {
+			
+            ImageManager.scheduleBlurRebuild();
             RepaintHelper.full();
         }
     } catch (e) {
@@ -3120,31 +3314,74 @@ function on_get_album_art_done(metadb, art_id, image, image_path) {
 }
 
 function on_playback_stop(reason) {
+    if (!isLive()) return;
     ArtDispatcher.request('stop', reason);
 }
 
 function on_playlist_switch() {
+    if (!isLive()) return;
     ArtDispatcher.request('playlist', null);
 }
 
 function on_playlist_items_added(playlist_index) {
+    if (!isLive()) return;
     ArtDispatcher.request('playlist', null);
 }
 
 function on_playlist_items_removed(playlist_index) {
+    if (!isLive()) return;
     ArtDispatcher.request('playlist', null);
 }
 
 function on_mouse_wheel(delta) {
+    if (!isLive()) return;
     ArtController.onMouseWheel(delta);
 }
 
+function on_mouse_move(x, y) {
+    // Reserved for future hover interactions.
+}
+
 function on_mouse_lbtn_down(x, y) {
+    if (!isLive()) return;
     if (window.SetFocus) window.SetFocus();
 }
 
 function on_mouse_lbtn_up(x, y) {
+    if (!isLive()) return;
     return ArtController.onMouseLbtnUp();
+}
+
+// Required to honour grab_focus: true in DefineScript options.
+function on_key_down(vkey) {
+    // Reserved for future keyboard shortcuts.
+}
+
+function on_selection_changed() {
+    if (!isLive()) return;
+    // Show art for selected track when nothing is playing.
+    if (fb.IsPlaying || fb.IsPaused) return;
+    const item = fb.GetFocusItem();
+    if (item) {
+        TextManager.update(item);
+        ImageManager.loadAlbumArt(item);
+    }
+}
+
+function on_playback_pause(state) {
+    if (!isLive()) return;
+    // No visual change needed on pause, but repaint ensures the play-state
+    // dependent parts of the overlay (if any) stay current.
+    RepaintHelper.full();
+}
+
+function on_playback_starting(cmd, is_paused) {
+    if (!isLive()) return;
+    RepaintHelper.full();
+}
+
+function on_playback_seek(time) {
+    // No artwork change on seek; kept for completeness.
 }
 
 // ================= SHARED IMAGE FILE LISTING HELPER =================
@@ -3155,9 +3392,8 @@ function _listImagesInFolder(folder) {
     folder = (folder || '').replace(/\\+$/, '');
     if (!folder) return [];
     try {
-        const fso = new ActiveXObject('Scripting.FileSystemObject');
-        if (!fso.FolderExists(folder)) return [];
-        const fldr = fso.GetFolder(folder);
+        if (!_fso || !_fso.FolderExists(folder)) return [];
+        const fldr = _fso.GetFolder(folder);
         const filesEnum = new Enumerator(fldr.Files);
         const images = [];
         for (; !filesEnum.atEnd(); filesEnum.moveNext()) {
@@ -3253,15 +3489,8 @@ const SlideManager = {
     getImages() {
         const cfg = StateManager.get();
         const folder = cfg.imageFolder || (fb.ProfilePath + 'skins\\images');
-        
-        const images = _listImagesInFolder(folder);
-        
-        // Shuffle images for random order
-        for (let i = images.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [images[i], images[j]] = [images[j], images[i]];
-        }
-        return images;
+        // Return in stable (filesystem) order; callers shuffle as needed.
+        return _listImagesInFolder(folder);
     },
     
     startSlideMode(useSavedIndex) {
@@ -3279,6 +3508,13 @@ const SlideManager = {
         
         PanelArt.slideMode = true;
         PanelArt.slideImages = images;
+
+        if (!useSavedIndex) {
+            for (let i = images.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [images[i], images[j]] = [images[j], images[i]];
+            }
+        }
         
         // Use saved index or random
         if (useSavedIndex && PanelArt.slideIndex >= 0 && PanelArt.slideIndex < images.length) {
@@ -3313,10 +3549,16 @@ const SlideManager = {
             StateManager.saveDebounced();
             
             // Use queue to prevent disk bursts
+            const capturedIdx = randomIdx;
             ArtQueue.enqueue((done) => {
+                // Guard: slideMode may have been stopped between enqueue and execution
+                if (!PanelArt.slideMode || capturedIdx >= PanelArt.slideImages.length) {
+                    done();
+                    return;
+                }
                 // Dispose stale bitmap, load next slide
                 if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch(e) {} }
-                try { PanelArt.slideImage = gdi.Image(PanelArt.slideImages[randomIdx]); } catch(e) { PanelArt.slideImage = null; }
+                try { PanelArt.slideImage = gdi.Image(PanelArt.slideImages[capturedIdx]); } catch(e) { PanelArt.slideImage = null; }
                 RepaintHelper.albumArt();
                 done();
             });
@@ -3364,10 +3606,13 @@ function on_mouse_rbtn_up(x, y) {
 }
 
 function on_script_unload() {
+    phase = Phase.SHUTDOWN;
+    
     ArtController.onUnload();
     ArtQueue.clear();
     
     // Cancel any pending ArtDispatcher timers and state
+    ArtDispatcher._unloaded = true;   // suppress any timer that fires after this point
     if (ArtDispatcher._trackTimer) {
         window.ClearTimeout(ArtDispatcher._trackTimer);
         ArtDispatcher._trackTimer = null;
@@ -3404,16 +3649,27 @@ function on_script_unload() {
     // helpers.js defined its own on_script_unload which this function supersedes;
     // we must replicate that cleanup here so _bmp / _gr are properly released.
     _tt('');
-    if (_bmp && _gr) {
-        try { _bmp.ReleaseGraphics(_gr); } catch (e) {}
+
+    if (_gr) {
+        try { if (_bmp) _bmp.ReleaseGraphics(_gr); } catch (e) {}
     }
     _gr  = null;
     _bmp = null;
 }
 
+// ================= ULTRA CACHE PRO STUB =================
+// UltraCachePro was referenced in on_script_unload but never defined.
+// Defining it here as a no-op prevents a ReferenceError crash on unload.
+const UltraCachePro = {
+    cancel() {}
+};
+
 // ================= INITIALIZATION =================
 window.MinHeight = 75;  // Enforce minimum panel height of 75px
 window.MinWidth = 250;  // Enforce minimum panel width of 250px
+// Seed dimensions immediately so on_paint has correct values before the first on_size.
+ArtState.dimensions.width  = window.Width;
+ArtState.dimensions.height = window.Height;
 StateManager.load();  // Load state first — also rebuilds fonts with saved settings via apply()
 CustomFolders.load();  // Now load custom folders from loaded state
 ReactiveRenderer.init();
@@ -3435,7 +3691,16 @@ if (PanelArt.imageMode) {
     ImageModeManager.startImageMode();
 }
 
-// Load current track on init if playing
+// Load current track on init if playing; always update text to 'No track playing' when idle.
 const initTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
-ImageManager.loadAlbumArt(initTrack);
+if (initTrack) {
+    ImageManager.loadAlbumArt(initTrack);
+} else {
+    TextManager.update(null);
+}
 RepaintHelper.full();
+
+window.SetTimeout(() => {
+    phase = Phase.LIVE;
+    RepaintHelper.full();
+}, 0);

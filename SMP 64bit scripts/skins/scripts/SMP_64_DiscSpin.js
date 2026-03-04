@@ -1,6 +1,6 @@
 'use strict';
 			  // -============ AUTHOR L.E.D. ===========- \\
-			 // -======= SMP 64bit Disc Spin V3.1 =======- \\
+			 // -====== SMP 64bit Disc Spin V3.1.1 ======- \\
 			// -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -9,16 +9,31 @@
  // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
 // ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
 
-window.DefineScript('SMP 64bit Disc Spin V3.1', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.1.1', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 
-// Defined here explicitly — do not rely on helpers.js include for this symbol.
-function _fbSanitise(str) {
-    if (!str) return '';
-    return utils.ReplaceIllegalChars(str, true);
+// _fbSanitise —
+    function _fbSanitise(str) {
+        if (!str) return '';
+        return utils.ReplaceIllegalChars(str, true);
+    }
+
+// Lifecycle state machine - guards operations during shutdown
+const Phase = {
+    BOOT:     0,
+    // 1 intentionally unused — reserved gap so LIVE and SHUTDOWN
+    // are never confused with a falsy 0 in accidental numeric comparisons.
+    LIVE:     2,
+    SHUTDOWN: 3
+};
+
+let phase = Phase.BOOT;
+
+function isLive() {
+    return phase === Phase.LIVE;
 }
 
 // ====================== PROPERTIES (Using helpers _p) ======================
@@ -27,8 +42,8 @@ const props = {
     spinSpeed:          new _p('RP.SpinSpeed', 2.0),
     useAlbumArtOnly:    new _p('RP.UseAlbumArtOnly', false),
     keepAspectRatio:    new _p('RP.KeepAspectRatio', true),
-    interpolationMode:  new _p('RP.InterpolationMode', 1),
-    maxImageSize:       new _p('RP.MaxImageSize', 250),
+    interpolationMode:  new _p('RP.InterpolationMode', 0),
+    maxImageSize:       new _p('RP.MaxImageSize', 500),
     savedPath:          new _p('RP.SavedPath', ''),
     savedIsDisc:        new _p('RP.SavedIsDisc', false),
     maskType:           new _p('RP.MaskType', 0),
@@ -37,7 +52,7 @@ const props = {
     // Overlay effects
     showReflection:     new _p('Disc.ShowReflection', true),
     opReflection:       new _p('Disc.OpReflection', 30),
-    showGlow:           new _p('Disc.ShowGlow', true),
+    showGlow:           new _p('Disc.ShowGlow', false),
     opGlow:             new _p('Disc.OpGlow', 40),
     showScanlines:      new _p('Disc.ShowScanlines', false),
     opScanlines:        new _p('Disc.OpScanlines', 80),
@@ -62,24 +77,30 @@ const props = {
     bgUseUIColor:       new _p('Disc.BgUseUIColor', false)
 };
 
-
 function _getUIColour() {
     if (window.InstanceType) return window.GetColourDUI(1);
     try { return window.GetColourCUI(3); } catch (e) { return window.GetColourDUI(1); }
 }
 
 function on_colours_changed() {
+    if (!isLive()) return;
     State.paintCache.bgColor = _getUIColour();
     window.Repaint();
 }
 
 function on_font_changed() {
+    if (!isLive()) return;
+    // Dispose cached font so it is recreated at the new system size/style.
+    if (SliderRenderer._font) {
+        try { SliderRenderer._font.Dispose(); } catch (e) {}
+        SliderRenderer._font = null;
+    }
     window.Repaint();
 }
 
 // ====================== CONFIGURATION ======================
 const CONFIG = Object.freeze({
-    TIMER_INTERVAL: 50,
+    TIMER_INTERVAL: 42,
     MAX_STATIC_SIZE: 1000,
     MAX_CACHE_ENTRIES: 50,
     MAX_MASK_CACHE:   10,
@@ -89,14 +110,14 @@ const CONFIG = Object.freeze({
 
     MIN_DISC_SIZE: 125,
     MAX_DISC_SIZE: 1000,
-    MIN_SPIN_SPEED: 0.1,
-    MAX_SPIN_SPEED: 10,
+    MIN_SPIN_SPEED: 0.5,
+    MAX_SPIN_SPEED: 5,
 
-    SMOOTHING_MODE: 3,
+    SMOOTHING_MODE: 4,
     DISC_SCALE_FACTOR: 1.00,
     ANGLE_MODULO: 360,
     LOAD_DEBOUNCE_MS: 33,
-    MAX_SUBFOLDER_DEPTH: 4,
+    MAX_SUBFOLDER_DEPTH: 3,
     MAX_CUSTOM_FOLDERS: 5,
 
     PATHS: {
@@ -116,7 +137,7 @@ const CONFIG = Object.freeze({
     ],
 
     COVER_PATTERNS: [
-        "cover", "front", "folder", "albumart", "album", "artwork", "art"
+        "cover", "front", "folder", "albumart", "album", "artwork", "art", "front cover"
     ],
 
     EXTENSIONS: [".png", ".jpg", ".jpeg", ".webp", ".bmp"],
@@ -151,9 +172,9 @@ const CONFIG = Object.freeze({
     ],
 
     INTERPOLATION_MODES: [
-        { name: "Nearest Neighbor (Fastest)", value: 5 },
+        { name: "Nearest Neighbor (Fastest)", value: 0 },
         { name: "Low Quality", value: 1 },
-        { name: "Bilinear", value: 3 }
+        { name: "Bilinear", value: 2 }
     ],
 
     DISC_SIZE_PRESETS: [
@@ -209,6 +230,11 @@ const RepaintHelper = {
     },
 
     disc() {
+        const pc = State.paintCache;
+        if (pc.valid && pc.discSize > 0) {
+            this.region(pc.discX - 10, pc.discY - 10, pc.discSize + 20, pc.discSize + 20);
+            return;
+        }
         const pad = P.padding;
         const border = P.borderSize;
         const w = window.Width;
@@ -235,7 +261,6 @@ const P = {
     get interpolationMode() { return props.interpolationMode.value; },
     get maxImageSize() { return props.maxImageSize.value; },
     get savedPath() { return props.savedPath.value; },
-    get savedIsDisc() { return props.savedIsDisc.enabled; },
     get maskType() { return props.maskType.value; },
     get userOverrideMask() { return props.userOverrideMask.enabled; },
 
@@ -335,9 +360,14 @@ const DS_WHITE = _RGB(255, 255, 255);
 
 // ====================== LRU CACHE ======================
 class LRUCache {
-    constructor(maxSize) {
-        this.maxSize = maxSize;
-        this.cache = new Map();
+    constructor(maxSize, autoDispose = true) {
+        this.maxSize     = maxSize;
+        this.autoDispose = autoDispose;  // set false for non-GDI value caches
+        this.cache       = new Map();
+    }
+
+    _dispose(value) {
+        if (this.autoDispose) Utils.safeDispose(value);
     }
 
     get(key) {
@@ -351,11 +381,15 @@ class LRUCache {
 
     set(key, value) {
         if (this.cache.has(key)) {
-            Utils.safeDispose(this.cache.get(key));  // Dispose old GDI bitmap before overwriting
+            const existing = this.cache.get(key);
+            if (existing !== value) {
+                this._dispose(existing);
+            }
             this.cache.delete(key);
         } else if (this.cache.size >= this.maxSize) {
             const firstKey = this.cache.keys().next().value;
-            Utils.safeDispose(this.cache.get(firstKey));
+            const firstVal = this.cache.get(firstKey);
+            if (firstVal !== value) this._dispose(firstVal);
             this.cache.delete(firstKey);
         }
 
@@ -367,12 +401,17 @@ class LRUCache {
     }
 
     clear() {
-        this.cache.forEach(item => Utils.safeDispose(item));
+        this.cache.forEach(item => this._dispose(item));
         this.cache.clear();
     }
 }
 
 // ====================== FILE MANAGER ======================
+// Single FSO instance — creating ActiveXObject on every subfolder scan is costly.
+const _fso = (function() {
+    try { return new ActiveXObject('Scripting.FileSystemObject'); } catch (e) { return null; }
+})();
+
 const FileManager = {
     cache: new Map(),
     subfolderCache: new Map(),
@@ -384,7 +423,7 @@ const FileManager = {
         const exists = _isFile(path);
         this.cache.set(path, exists);
 
-        if (this.cache.size > CONFIG.MAX_FILE_CACHE) {
+        if (this.cache.size >= CONFIG.MAX_FILE_CACHE) {
             const firstKey = this.cache.keys().next().value;
             this.cache.delete(firstKey);
         }
@@ -439,12 +478,11 @@ const FileManager = {
         }
 
         try {
-            const fso = new ActiveXObject('Scripting.FileSystemObject');
-            if (!fso.FolderExists(folder)) {
+            if (!_fso || !_fso.FolderExists(folder)) {
                 this.subfolderCache.set(folder, subfolders);
                 return subfolders;
             }
-            const folderObj = fso.GetFolder(folder);
+            const folderObj = _fso.GetFolder(folder);
             const subFoldersEnum = new Enumerator(folderObj.SubFolders);
 
             for (; !subFoldersEnum.atEnd(); subFoldersEnum.moveNext()) {
@@ -456,7 +494,7 @@ const FileManager = {
 
         this.subfolderCache.set(folder, subfolders);
 
-        if (this.subfolderCache.size > CONFIG.MAX_FILE_CACHE) {
+        if (this.subfolderCache.size >= CONFIG.MAX_FILE_CACHE) {
             const firstKey = this.subfolderCache.keys().next().value;
             this.subfolderCache.delete(firstKey);
         }
@@ -566,6 +604,11 @@ const FileManager = {
     }
 };
 
+// Title-case helper — hoisted to avoid re-creating on each searchCustomFolders call.
+function _toTitleCase(str) {
+    return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
+}
+
 // ====================== CUSTOM FOLDERS MANAGER ======================
 const CustomFolders = {
     folders: [],
@@ -664,8 +707,8 @@ const AssetManager = {
         } catch (e) {}
     },
 
-    setMaskType(index, isUserOverride = true) {
-        if (index === this.currentMaskType) return false;
+    setMaskType(index, isUserOverride = true, forceReload = false) {
+        if (index === this.currentMaskType && !forceReload) return false;
 
         this.currentMaskType = index;
         this.userOverrideMask = isUserOverride;
@@ -746,30 +789,47 @@ const ImageProcessor = {
         const w = raw.Width;
         const h = raw.Height;
 
-        if (w === targetSize && h === targetSize) return raw;
+        // Dimensions already match — return a clone so callers can safely dispose the return value
+        // without risk of double-disposing the original.
+        if (w === targetSize && h === targetSize) {
+            try {
+                const cloned = raw.Clone(0, 0, w, h);
+                // raw was loaded by the caller solely for processing — dispose it now
+                // that we have an independent clone, so it doesn't leak.
+                Utils.safeDispose(raw);
+                return cloned;
+            } catch (e) {
+                return raw;
+            }
+        }
 
         try {
             const newImg = gdi.CreateImage(targetSize, targetSize);
-            const g = newImg.GetGraphics();
-            g.SetInterpolationMode(interpolationMode);
+            let g = null;
+            try {
+                g = newImg.GetGraphics();
+                g.SetInterpolationMode(interpolationMode);
 
-            if (AssetManager.hasMask() && imageType === CONFIG.IMAGE_TYPE.ALBUM_ART) {
-                g.FillSolidRect(0, 0, targetSize, targetSize, 0xFF000000);
+                if (AssetManager.hasMask() && imageType === CONFIG.IMAGE_TYPE.ALBUM_ART) {
+                    g.FillSolidRect(0, 0, targetSize, targetSize, 0xFF000000);
+                }
+
+                const scale = targetSize / Math.min(w, h);
+                const scaledW = Math.floor(w * scale);
+                const scaledH = Math.floor(h * scale);
+                const offsetX = Math.floor((targetSize - scaledW) / 2);
+                const offsetY = Math.floor((targetSize - scaledH) / 2);
+
+                g.DrawImage(raw, offsetX, offsetY, scaledW, scaledH, 0, 0, w, h);
+            } finally {
+                if (g) { try { newImg.ReleaseGraphics(g); } catch (e2) {} }
             }
-
-            const scale = targetSize / Math.min(w, h);
-            const scaledW = Math.floor(w * scale);
-            const scaledH = Math.floor(h * scale);
-            const offsetX = Math.floor((targetSize - scaledW) / 2);
-            const offsetY = Math.floor((targetSize - scaledH) / 2);
-
-            g.DrawImage(raw, offsetX, offsetY, scaledW, scaledH, 0, 0, w, h);
-            newImg.ReleaseGraphics(g);
-
+            // Only dispose raw after newImg is fully built and graphics released.
             Utils.safeDispose(raw);
             return newImg;
         } catch (e) {
-            return raw;
+            // Do NOT dispose raw here — caller still owns it and must handle cleanup.
+            return null;
         }
     },
 
@@ -780,7 +840,16 @@ const ImageProcessor = {
         const h = raw.Height;
         const maxDim = Math.max(w, h);
 
-        if (maxDim <= maxSize) return raw;
+        if (maxDim <= maxSize) {
+            // Return a clone so callers can safely dispose the result independently.
+            try {
+                const cloned = raw.Clone(0, 0, w, h);
+                Utils.safeDispose(raw);
+                return cloned;
+            } catch (e) {
+                return raw;
+            }
+        }
 
         try {
             const scale = maxSize / maxDim;
@@ -788,15 +857,20 @@ const ImageProcessor = {
             const nh = Math.floor(h * scale);
 
             const newImg = gdi.CreateImage(nw, nh);
-            const g = newImg.GetGraphics();
-            g.SetInterpolationMode(interpolationMode);
-            g.DrawImage(raw, 0, 0, nw, nh, 0, 0, w, h);
-            newImg.ReleaseGraphics(g);
-
+            let g = null;
+            try {
+                g = newImg.GetGraphics();
+                g.SetInterpolationMode(interpolationMode);
+                g.DrawImage(raw, 0, 0, nw, nh, 0, 0, w, h);
+            } finally {
+                if (g) { try { newImg.ReleaseGraphics(g); } catch (e2) {} }
+            }
+            // Only dispose raw after newImg is fully built and graphics released.
             Utils.safeDispose(raw);
             return newImg;
         } catch (e) {
-            return raw;
+            // Do NOT dispose raw here — caller still owns it.
+            return null;
         }
     },
 
@@ -822,7 +896,12 @@ const ImageProcessor = {
         if (!raw) return null;
 
         let processed = this.scaleToSquare(raw, targetSize, interpolationMode, imageType);
-        if (!processed) return null;
+        // scaleToSquare either consumed raw (success) or left raw untouched (failure/null).
+        // On failure raw is still valid — dispose it so we don't leak.
+        if (!processed) {
+            Utils.safeDispose(raw);
+            return null;
+        }
 
         const shouldMask = AssetManager.hasMask() &&
                           (imageType === CONFIG.IMAGE_TYPE.REAL_DISC ||
@@ -871,23 +950,32 @@ const State = {
     },
 
     setImage(newImg, discState, imgType, originalImg) {
-        if (this.img && this.img !== newImg) {
-            Utils.safeDispose(this.img);
-        }
-        if (this.bgImg && this.bgImg !== this.img) {
-            Utils.safeDispose(this.bgImg);
-        }
+        const oldImg   = this.img;
+        const oldBgImg = this.bgImg;
 
-        this.img = newImg;
-        this.bgImg = originalImg;
+        this.img     = newImg;
+        this.bgImg   = originalImg;
         if (this.bgImg && this.bgImg._bgId === undefined) {
             this.bgImg._bgId = ++State._bgIdCounter;
         }
         this.isDiscImage = discState;
-        this.imageType = imgType;
+        this.imageType   = imgType;
         this.paintCache.valid = false;
-        BackgroundCache.invalidate();  // Background might use image for blur
+        BackgroundCache.invalidate();
         OverlayCache.invalidate();
+
+        // Dispose old bitmaps only if they are not being reused.
+        if (oldImg && oldImg !== newImg && oldImg !== originalImg) {
+            Utils.safeDispose(oldImg);
+        }
+        // oldBgImg may equal oldImg — only dispose it if it's a distinct object
+        // that isn't being reused, and wasn't already disposed above.
+        if (oldBgImg &&
+            oldBgImg !== oldImg &&
+            oldBgImg !== newImg &&
+            oldBgImg !== originalImg) {
+            Utils.safeDispose(oldBgImg);
+        }
 
         if (discState && newImg) {
             const size = Utils.getPanelDiscSize();
@@ -896,7 +984,7 @@ const State = {
             DiscComposite.dispose();
         }
 
-        RepaintHelper.full();  // Full repaint required: background (blurred art) covers whole panel
+        RepaintHelper.full();
     },
 
     updatePaintCache() {
@@ -952,20 +1040,33 @@ const State = {
                 pc.staticX = sx;
                 pc.staticY = sy;
             }
-        }
 
-        pc.valid = true;
+            pc.valid = true;
+        } else {
+            // No image — reset computed dimensions so stale values are never used.
+            pc.imgWidth  = 0;
+            pc.imgHeight = 0;
+            pc.discSize  = 0;
+            pc.staticW   = 0;
+            pc.staticH   = 0;
+            // Leave pc.valid = false so next paint recomputes once img arrives.
+        }
     },
 
     cleanup() {
         this.stopTimer();
-        if (this.loadTimer) window.ClearTimeout(this.loadTimer);
-        Utils.safeDispose(this.img);
-        if (this.bgImg && this.bgImg !== this.img) {
-            Utils.safeDispose(this.bgImg);
+        if (this.loadTimer) {
+            window.ClearTimeout(this.loadTimer);
+            this.loadTimer = null;
         }
-        this.img = null;
-        this.bgImg = null;
+        const img   = this.img;
+        const bgImg = this.bgImg;
+        this.img    = null;
+        this.bgImg  = null;
+        Utils.safeDispose(img);
+        if (bgImg && bgImg !== img) {
+            Utils.safeDispose(bgImg);
+        }
     },
 
     stopTimer() {
@@ -997,18 +1098,29 @@ const State = {
 // ====================== IMAGE LOADER ======================
 const ImageLoader = {
     cache: new LRUCache(CONFIG.MAX_CACHE_ENTRIES),
+    _pathCache: new Map(),
     tf_path: fb.TitleFormat("$directory_path(%path%)"),
     tf_folder: fb.TitleFormat("$directory(%path%)"),
     tf_artist: fb.TitleFormat("%artist%"),
     tf_album: fb.TitleFormat("%album%"),
     tf_title: fb.TitleFormat("%title%"),
+    
+    clearCache() {
+        this._pathCache.clear();
+    },
 
     loadCached(path, imageType) {
         const targetSize = Utils.getPanelDiscSize();
         const key = `${path}|${targetSize}|${imageType}|${AssetManager.currentMaskType}`;
 
-        let cached = this.cache.get(key);
-        if (cached) return cached;
+        const cached = this.cache.get(key);
+        if (cached) {
+            try {
+                return cached.Clone(0, 0, cached.Width, cached.Height);
+            } catch (e) {
+                // Stale / already-disposed entry — fall through and reload from disk.
+            }
+        }
 
         if (!FileManager.exists(path)) return null;
 
@@ -1024,10 +1136,16 @@ const ImageLoader = {
             );
 
             if (processed) {
+                // Store template in LRU; give the caller an independent clone.
                 this.cache.set(key, processed);
+                try {
+                    return processed.Clone(0, 0, processed.Width, processed.Height);
+                } catch (e) {
+                    return null;
+                }
             }
 
-            return processed;
+            return null;
         } catch (e) {
             return null;
         }
@@ -1053,9 +1171,20 @@ const ImageLoader = {
     },
 
     searchInFolder(folder, patterns, metadata, useVariations = false) {
+        const artistTitle = (metadata.artist && metadata.title) 
+            ? metadata.artist + ' - ' + metadata.title 
+            : '';
+        const albumTitle = (metadata.album && metadata.title) 
+            ? metadata.album + ' - ' + metadata.title 
+            : '';
+        const artistAlbumTitle = (metadata.artist && metadata.album && metadata.title)
+            ? metadata.artist + ' ' + metadata.album + ' ' + metadata.title
+            : '';
+        
         const metadataNames = _.compact([
             metadata.album, metadata.title, metadata.artist,
-            metadata.folder, metadata.artistTitle, metadata.artistAlbum
+            metadata.folder, metadata.artistTitle, metadata.artistAlbum,
+            artistTitle, albumTitle, artistAlbumTitle
         ]);
         const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames, useVariations);
         return FileManager.findImageInPaths(paths);
@@ -1067,48 +1196,26 @@ const ImageLoader = {
     },
 
     // Search a folder tree up to maxLevels deep for any image file
-    _searchFolderTree(folder, patterns, maxLevels, isDiscSearch) {
+    _searchFolderTree(folder, patterns, maxLevels, isDiscSearch, metadata) {
         if (maxLevels <= 0 || !folder) return null;
-        
-        // First check current folder
-        const found = this.searchFolderForImage(folder, patterns, isDiscSearch);
-        if (found) return found;
-        
-        // Then check subfolders up to maxLevels
-        const subfolders = FileManager.getSubfolders(folder);
-        for (const sub of subfolders) {
-            const result = this._searchFolderTree(sub, patterns, maxLevels - 1, isDiscSearch);
-            if (result) return result;
-        }
-        
-        return null;
-    },
 
-    // Search a folder tree up to maxLevels deep for name-matched image files
-    _searchFolderTreeNameMatch(folder, patterns, metadata, maxLevels, isDiscSearch) {
-        if (maxLevels <= 0 || !folder) return null;
-        
-        // First check current folder for name-matched images
-        const found = this.searchInFolder(folder, patterns, metadata, true);
-        if (found) {
-            if (isDiscSearch) return this._loadDiscResult(found);
-            return found;
-        }
-        
+        // First check current folder
+        const found = this.searchFolderForImage(folder, patterns, isDiscSearch, metadata);
+        if (found) return found;
+
         // Then check subfolders up to maxLevels
         const subfolders = FileManager.getSubfolders(folder);
         for (const sub of subfolders) {
-            const result = this._searchFolderTreeNameMatch(sub, patterns, metadata, maxLevels - 1, isDiscSearch);
+            const result = this._searchFolderTree(sub, patterns, maxLevels - 1, isDiscSearch, metadata);
             if (result) return result;
         }
-        
+
         return null;
     },
 
     // Custom folder search - simplified
     searchCustomFolders(metadata, patterns, isDiscSearch) {
-        // Create search names: title, artist, album, artist - album (dash) and artist album (space)
-        const artistAlbumDash  = metadata.artistAlbum || '';   // already "artist - album" from getMetadataNames
+        const artistAlbumDash  = metadata.artistAlbum || '';
         const artistAlbumSpace = (metadata.artist && metadata.album)
             ? metadata.artist + ' ' + metadata.album
             : '';
@@ -1121,11 +1228,6 @@ const ImageLoader = {
             artistAlbumSpace
         ]);
         
-        // Create variations (lowercase and Title Case for matching)
-        const toTitleCase = (str) => {
-            return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-        };
-        
         const nameVariations = [];
         _.forEach(simpleNames, (name) => {
             if (name) {
@@ -1133,8 +1235,8 @@ const ImageLoader = {
                 nameVariations.push(lower);
                 nameVariations.push(lower.replace(/\s+/g, '-'));
                 nameVariations.push(lower.replace(/\s+/g, '_'));
-                
-                const title = toTitleCase(name);
+
+                const title = _toTitleCase(name);
                 nameVariations.push(title);
                 nameVariations.push(title.replace(/\s+/g, '-'));
                 nameVariations.push(title.replace(/\s+/g, '_'));
@@ -1144,14 +1246,21 @@ const ImageLoader = {
         
         const customFolders = CustomFolders.getAll();
         
-        // Search each custom folder for matching subfolders, then search inside them
         for (const customFolder of customFolders) {
             if (!FileManager.isDirectory(customFolder)) continue;
             
-            // Get all subfolders (level 1 and level 2)
+            const nameMatched = this.searchInFolder(customFolder, patterns, metadata, true);
+            if (nameMatched) {
+                if (isDiscSearch) return this._loadDiscResult(nameMatched);
+                return nameMatched;
+            }
+        }
+        
+        for (const customFolder of customFolders) {
+            if (!FileManager.isDirectory(customFolder)) continue;
+            
             const level1 = FileManager.getSubfolders(customFolder);
             for (const sub1 of level1) {
-                // Check if level 1 folder name matches
                 const sub1Name = _.last(sub1.split('\\')).toLowerCase();
                 const match1 = folderMatchNames.some(n => 
                     sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
@@ -1160,7 +1269,6 @@ const ImageLoader = {
                 );
                 
                 if (match1) {
-                    // Search inside matching folder (includes artist - album.ext filenames)
                     const img = this.searchInFolder(sub1, patterns, metadata, true)
                              || this.searchInFolderAnyFile(sub1, patterns);
                     if (img) {
@@ -1168,7 +1276,6 @@ const ImageLoader = {
                         return img;
                     }
                     
-                    // Also check subfolders inside
                     const sub1Folders = FileManager.getSubfolders(sub1);
                     for (const subSub of sub1Folders) {
                         const sImg = this.searchInFolder(subSub, patterns, metadata, true)
@@ -1180,7 +1287,6 @@ const ImageLoader = {
                     }
                 }
                 
-                // Check level 2 folders
                 const level2 = FileManager.getSubfolders(sub1);
                 for (const sub2 of level2) {
                     const sub2Name = _.last(sub2.split('\\')).toLowerCase();
@@ -1205,7 +1311,6 @@ const ImageLoader = {
         return null;
     },
 
-    // Helper to search a folder for image (reduces duplication)
     _loadDiscResult(imagePath) {
         let raw = null;
         let original = null;
@@ -1236,16 +1341,15 @@ const ImageLoader = {
         return null;
     },
 
-    searchFolderForImage(folder, patterns, isDiscSearch) {
-        // Check Last.fm JSON artwork files first (matches PanelArt behavior)
+    searchFolderForImage(folder, patterns, isDiscSearch, metadata) {
         const jsonArt = FileManager.searchLastFmJson(folder);
         if (jsonArt) {
             if (isDiscSearch) return this._loadDiscResult(jsonArt);
             return jsonArt;
         }
-        
-        // Then search with metadata names
-        const found = this.searchInFolder(folder, patterns, {}, true)
+
+        const meta = metadata || { artist: '', album: '', title: '', folder: '', artistTitle: '', artistAlbum: '' };
+        const found = this.searchInFolder(folder, patterns, meta, true)
                    || this.searchInFolderAnyFile(folder, patterns);
         if (!found) return null;
         if (isDiscSearch) return this._loadDiscResult(found);
@@ -1253,62 +1357,99 @@ const ImageLoader = {
     },
 
     searchForDisc(metadb, baseFolder) {
-        const metadata = this.getMetadataNames(metadb);
+        const cacheKey = 'disc:' + baseFolder;
+        if (this._pathCache.has(cacheKey)) {
+            const cached = this._pathCache.get(cacheKey);
+            if (!cached) return null;   // explicitly-cached miss — no disc art for this folder
+            return this._loadDiscResult(cached.path);
+        }
+
+        const metadata = metadb ? this.getMetadataNames(metadb) : { artist:'', album:'', title:'', folder:'', artistTitle:'', artistAlbum:'' };
 
         // PHASE 1A: Track folder for metadata-named files (exact match)
         const trackFolderMatch = this.searchInFolder(baseFolder, CONFIG.DISC_PATTERNS, metadata);
         if (trackFolderMatch) {
-            const img = this.loadCached(trackFolderMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
-            if (img) {
+            const result = this._loadDiscResult(trackFolderMatch);
+            if (result) {
                 AssetManager.autoSelectMask(trackFolderMatch);
-                const _rawOrig = gdi.Image(trackFolderMatch);
-                const original = _rawOrig ? _rawOrig.Clone(0, 0, _rawOrig.Width, _rawOrig.Height) : img;
-                Utils.safeDispose(_rawOrig);
-                return { img, path: trackFolderMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
+                this._pathCache.set(cacheKey, { path: trackFolderMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC });
+                return result;
             }
         }
 
         // PHASE 1B: Track folder for any image file
         const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.DISC_PATTERNS);
         if (trackAnyMatch) {
-            const img = this.loadCached(trackAnyMatch, CONFIG.IMAGE_TYPE.REAL_DISC);
-            if (img) {
+            const result = this._loadDiscResult(trackAnyMatch);
+            if (result) {
                 AssetManager.autoSelectMask(trackAnyMatch);
-                const _rawOrig = gdi.Image(trackAnyMatch);
-                const original = _rawOrig ? _rawOrig.Clone(0, 0, _rawOrig.Width, _rawOrig.Height) : img;
-                Utils.safeDispose(_rawOrig);
-                return { img, path: trackAnyMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
+                this._pathCache.set(cacheKey, { path: trackAnyMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC });
+                return result;
             }
         }
 
         // PHASE 1C: Track folder subfolders (up to 2 levels deep) for any image file
-        const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, 2, true);
-        if (trackSubMatch) return trackSubMatch;
+        const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, 2, true, metadata);
+        if (trackSubMatch) {
+            this._pathCache.set(cacheKey, { path: trackSubMatch.path, type: trackSubMatch.type });
+            return trackSubMatch;
+        }
 
         // PHASE 2: Custom folders with name matching
-        return this.searchCustomFolders(metadata, CONFIG.DISC_PATTERNS, true);
+        const customResult = this.searchCustomFolders(metadata, CONFIG.DISC_PATTERNS, true);
+        if (customResult) {
+            this._pathCache.set(cacheKey, { path: customResult.path, type: customResult.type });
+            return customResult;
+        }
+        
+        this._pathCache.set(cacheKey, null);
+        return null;
     },
 
     searchForCover(metadb, baseFolder) {
-        const metadata = this.getMetadataNames(metadb);
+        const cacheKey = 'cover:' + baseFolder;
+        if (this._pathCache.has(cacheKey)) {
+            return this._pathCache.get(cacheKey);
+        }
+
+        const metadata = metadb ? this.getMetadataNames(metadb) : { artist:'', album:'', title:'', folder:'', artistTitle:'', artistAlbum:'' };
 
         // PHASE 1A: Track folder for metadata-named files (exact match)
         const jsonArt = FileManager.searchLastFmJson(baseFolder);
-        if (jsonArt) return jsonArt;
+        if (jsonArt) {
+            this._pathCache.set(cacheKey, jsonArt);
+            return jsonArt;
+        }
 
         const trackMatch = this.searchInFolder(baseFolder, CONFIG.COVER_PATTERNS, metadata);
-        if (trackMatch) return trackMatch;
+        if (trackMatch) {
+            this._pathCache.set(cacheKey, trackMatch);
+            return trackMatch;
+        }
 
         // PHASE 1B: Track folder for any image file
         const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.COVER_PATTERNS);
-        if (trackAnyMatch) return trackAnyMatch;
+        if (trackAnyMatch) {
+            this._pathCache.set(cacheKey, trackAnyMatch);
+            return trackAnyMatch;
+        }
 
         // PHASE 1C: Track folder subfolders (up to 2 levels deep) for any image file
-        const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, 2, false);
-        if (trackSubMatch) return trackSubMatch;
+        const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, 2, false, metadata);
+        if (trackSubMatch) {
+            this._pathCache.set(cacheKey, trackSubMatch);
+            return trackSubMatch;
+        }
 
         // PHASE 2: Custom folders with name matching
-        return this.searchCustomFolders(metadata, CONFIG.COVER_PATTERNS, false);
+        const customResult = this.searchCustomFolders(metadata, CONFIG.COVER_PATTERNS, false);
+        if (customResult) {
+            this._pathCache.set(cacheKey, customResult);
+            return customResult;
+        }
+        
+        this._pathCache.set(cacheKey, null);
+        return null;
     },
 
     loadForMetadb(metadb, immediate = false) {
@@ -1331,6 +1472,8 @@ const ImageLoader = {
 
         const doLoad = () => {
             State.currentMetadb = metadb;
+            // Increment token only here, after the same-folder early-return guard above,
+            // so text-only same-folder refreshes don't invalidate an in-flight async response.
             State.loadToken++;
 
             let bgOriginal = null;
@@ -1341,7 +1484,7 @@ const ImageLoader = {
                     const _loaded = gdi.Image(coverPath);
                     if (_loaded) {
                         bgOriginal = _loaded.Clone(0, 0, _loaded.Width, _loaded.Height);
-                        coverRaw = _loaded;   // consumed by Phase 2 processor (or disposed below)
+                        coverRaw = _loaded;
                     }
                 } catch (e) {}
             }
@@ -1351,11 +1494,12 @@ const ImageLoader = {
                 const result = this.searchForDisc(metadb, folderPath);
                 if (result) {
                     Utils.safeDispose(coverRaw);
-                    // PERF-1 fix: searchForDisc._loadDiscResult already provides original;
-                    // use it as bgOriginal if we have no cover art from Phase 0.
-                    const bgSrc = bgOriginal || result.original;
-                    if (!bgOriginal && result.original) {
-                        // result.original is the unprocessed disc raw — good BG fallback
+                    let bgSrc;
+                    if (bgOriginal) {
+                        bgSrc = bgOriginal;
+                        Utils.safeDispose(result.original);
+                    } else {
+                        bgSrc = result.original;
                     }
                     State.setImage(result.img, true, result.type, bgSrc);
                     props.savedPath.value = result.path;
@@ -1383,6 +1527,9 @@ const ImageLoader = {
                             State.updateTimer();
                             return;
                         }
+                        // scaleProportional failed — coverRaw still alive, dispose it.
+                        Utils.safeDispose(coverRaw);
+                        Utils.safeDispose(bgOriginal);
                     } else {
                         const processed = ImageProcessor.processForDisc(
                             coverRaw, targetSize, CONFIG.IMAGE_TYPE.ALBUM_ART, P.interpolationMode
@@ -1394,10 +1541,9 @@ const ImageLoader = {
                             State.updateTimer();
                             return;
                         }
+                        // processForDisc already disposed coverRaw internally on failure.
+                        Utils.safeDispose(bgOriginal);
                     }
-
-                    Utils.safeDispose(coverRaw);
-                    Utils.safeDispose(bgOriginal);
                 } catch (e) {
                     Utils.safeDispose(coverRaw);
                     Utils.safeDispose(bgOriginal);
@@ -1429,29 +1575,29 @@ const ImageLoader = {
 
         // SMP can deliver a null metadb on cancelled/stale requests.
         if (!metadb) {
-            // No metadb means we can't verify the track — treat as matched so the
-            // default disc fallback still fires for the active track.
             if (image) {
                 Utils.safeDispose(image);
             } else {
-                this.loadDefaultDisc();
-                State.updateTimer();
+
+                if (State.pendingArtToken === State.loadToken && State.currentMetadb) {
+                    this.loadDefaultDisc();
+                    State.updateTimer();
+                }
             }
             return;
         }
 
         const metadbMatches = metadb.Compare(State.currentMetadb);
 
-        const hadBg = !!State.bgImg;
-
         if (image) {
+            let original;
             try {
                 if (!metadbMatches) {
                     Utils.safeDispose(image);
                     return;
                 }
 
-                const original   = image.Clone(0, 0, image.Width, image.Height);
+                original = image.Clone(0, 0, image.Width, image.Height);
                 const targetSize = Utils.getPanelDiscSize();
                 if (P.useAlbumArtOnly) {
                     const scaled = ImageProcessor.scaleProportional(
@@ -1461,6 +1607,7 @@ const ImageLoader = {
                         State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
                         if (image_path) props.savedPath.value = image_path;
                     } else {
+                        Utils.safeDispose(image);
                         Utils.safeDispose(original);
                     }
                 } else {
@@ -1471,16 +1618,19 @@ const ImageLoader = {
                         State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
                         if (image_path) props.savedPath.value = image_path;
                     } else {
+                        // processForDisc disposes image internally on failure.
                         Utils.safeDispose(original);
                     }
                 }
 
-                if (!hadBg) {
-                    RepaintHelper.background();
-                }
+                RepaintHelper.background();  // always repaint — covers both "new art" and "art replaced previous" cases
                 State.updateTimer();
                 return;
-            } catch (e) {}
+            } catch (e) {
+
+                Utils.safeDispose(image);
+                Utils.safeDispose(original);
+            }
         }
 
         if (metadbMatches) {
@@ -1510,6 +1660,9 @@ const ImageLoader = {
                 props.savedPath.value = CONFIG.PATHS.DEFAULT_DISC;
                 props.savedIsDisc.enabled = true;
                 State.updateTimer();
+            } else {
+
+                Utils.safeDispose(raw);
             }
         } catch (e) {}
     },
@@ -1557,35 +1710,45 @@ const DiscComposite = {
             return;
         }
 
+        let g = null;
+        let gReleased = false;
         try {
             this.img = gdi.CreateImage(size, size);
-            const g = this.img.GetGraphics();
+            g = this.img.GetGraphics();
 
             g.DrawImage(discImg, 0, 0, size, size, 0, 0, discImg.Width, discImg.Height);
             const rim = AssetManager.getRim(size);
             if (rim) {
                 g.DrawImage(rim, 0, 0, size, size, 0, 0, rim.Width, rim.Height);
             }
-
-            this.img.ReleaseGraphics(g);
-            this.valid = true;
         } catch (e) {
+            // Draw failed — dispose the partial bitmap.
+            if (!gReleased && g && this.img) {
+                try { this.img.ReleaseGraphics(g); gReleased = true; } catch (e2) {}
+            }
             this.dispose();
             this.valid = true;
+            return;
+        } finally {
+            if (!gReleased && g && this.img) {
+                try { this.img.ReleaseGraphics(g); } catch (e2) {}
+            }
         }
+        this.valid = true;
     }
 };
 
 // ====================== BACKGROUND CACHE ======================
 const BackgroundCache = {
     _lru:       new LRUCache(CONFIG.MAX_BG_CACHE),
-    _activeKey: '',     // key that produced .img; '' means "needs rebuild"
-    img:        null,   // alias into _lru for the currently active blurred bitmap
+    _activeKey: '',
+    img:        null,
 
     _makeKey(w, h) {
         const bgId = (State.bgImg && State.bgImg._bgId !== undefined)
             ? State.bgImg._bgId : 'none';
-        return `${bgId}|${P.blurRadius}|${w}|${h}`;
+
+        return `${bgId}|${P.blurRadius}|${P.blurEnabled ? 1 : 0}|${w}|${h}`;
     },
 
     invalidate() {
@@ -1596,7 +1759,8 @@ const BackgroundCache = {
     ensure(w, h) {
         if (w <= 0 || h <= 0) return;
 
-        const wantBlur = !P.bgUseUIColor && P.backgroundEnabled && P.blurEnabled && State.bgImg;
+        const wantBlur = !P.bgUseUIColor && P.backgroundEnabled && P.blurEnabled &&
+                         P.blurRadius > 0 && State.bgImg;
 
         if (!wantBlur) {
             if (this._activeKey !== 'none') {
@@ -1609,7 +1773,6 @@ const BackgroundCache = {
         const key = this._makeKey(w, h);
         if (this._activeKey === key) return;
 
-        // Check LRU before doing any GDI work.
         const cached = this._lru.get(key);
         if (cached) {
             this._activeKey = key;
@@ -1617,34 +1780,44 @@ const BackgroundCache = {
             return;
         }
 
-        // Cache miss — build and store.  This is the only place StackBlur runs.
+        let g = null;
+        let newImg = null;
+        let gReleased = false;
         try {
-            const src    = State.bgImg;
-            const newImg = gdi.CreateImage(w, h);
-            const g      = newImg.GetGraphics();
+            const src = State.bgImg;
+            newImg = gdi.CreateImage(w, h);
+            g = newImg.GetGraphics();
             g.DrawImage(src, 0, 0, w, h, 0, 0, src.Width, src.Height);
             newImg.ReleaseGraphics(g);
+            gReleased = true;               // released — don't release again in finally
             newImg.StackBlur(P.blurRadius);
 
             this._lru.set(key, newImg);
+            newImg = null;                  // ownership transferred to LRU — don't dispose in finally
             this._activeKey = key;
-            this.img = newImg;
+            this.img = this._lru.get(key);
         } catch (e) {
+            // Build failed — leave img null so on_paint falls back to flat colour.
             this._activeKey = key;
             this.img = null;
+        } finally {
+            if (!gReleased && g) {
+                try { if (newImg) newImg.ReleaseGraphics(g); } catch (e2) {}
+            }
+            if (newImg) {
+                Utils.safeDispose(newImg);  // only reached when ownership was NOT transferred
+            }
         }
     },
 
-    // Dispose all cached bitmaps (called from on_script_unload only).
     dispose() {
-        this._lru.clear();       // LRUCache.clear() calls Utils.safeDispose on every entry
+        this._lru.clear();
         this.img = null;
         this._activeKey = '';
     }
 };
 
 // ====================== OVERLAY INVALIDATOR ======================
-// Batches overlay invalidation to prevent repaint storms
 const OverlayInvalidator = (() => {
     let pending = false;
     let _timer  = null;
@@ -1688,7 +1861,6 @@ const OverlayCache = {
         this.valid = false;
     },
 
-    // pc = State.paintCache (needed for glow position)
     build(w, h, pc) {
         this.dispose();
 
@@ -1702,9 +1874,10 @@ const OverlayCache = {
         this.valid = true;
         if (!needsAny || w <= 0 || h <= 0) return;
 
+        let g = null;
         try {
             this.img = gdi.CreateImage(w, h);
-            const g = this.img.GetGraphics();
+            g = this.img.GetGraphics();
 
             const spacing = CONFIG.OVERLAY.SCANLINE_SPACING;
 
@@ -1718,20 +1891,23 @@ const OverlayCache = {
 
             // ---- Glow (ellipses around art/image position) ----
             if (P.showGlow && P.opGlow > 0 && pc) {
-                const op    = P.opGlow;
-                const white = DS_WHITE;
-                const cx = State.isDiscImage ? pc.discX + pc.discSize / 2 : pc.staticX + pc.staticW / 2;
-                const cy = State.isDiscImage ? pc.discY + pc.discSize / 2 : pc.staticY + pc.staticH / 2;
-                const maxR = (State.isDiscImage ? pc.discSize : Math.max(pc.staticW, pc.staticH)) * 0.75;
-                const steps = CONFIG.OVERLAY.GLOW_ART_STEPS;
-                const mult  = CONFIG.OVERLAY.GLOW_ART_MULT;
-                const minStep = Math.ceil(1 / (op * mult));
-                for (let i = minStep; i < steps; i++) {
-                    const progress = i / steps;
-                    const alpha = Math.floor(op * progress * mult);
-                    if (alpha <= 0) continue;
-                    const r = maxR * (1 - progress);
-                    g.FillEllipse(cx - r, cy - r, r * 2, r * 2, DiscSpin_SetAlpha(white, alpha));
+                const discSz = State.isDiscImage ? pc.discSize : Math.max(pc.staticW, pc.staticH);
+                if (discSz > 0) {
+                    const op    = P.opGlow;
+                    const white = DS_WHITE;
+                    const cx = State.isDiscImage ? pc.discX + pc.discSize / 2 : pc.staticX + pc.staticW / 2;
+                    const cy = State.isDiscImage ? pc.discY + pc.discSize / 2 : pc.staticY + pc.staticH / 2;
+                    const maxR = discSz * 0.75;
+                    const steps = CONFIG.OVERLAY.GLOW_ART_STEPS;
+                    const mult  = CONFIG.OVERLAY.GLOW_ART_MULT;
+                    const minStep = Math.ceil(1 / (op * mult));
+                    for (let i = minStep; i < steps; i++) {
+                        const progress = i / steps;
+                        const alpha = Math.floor(op * progress * mult);
+                        if (alpha <= 0) continue;
+                        const r = maxR * (1 - progress);
+                        g.FillEllipse(cx - r, cy - r, r * 2, r * 2, DiscSpin_SetAlpha(white, alpha));
+                    }
                 }
             }
 
@@ -1772,16 +1948,20 @@ const OverlayCache = {
                     ),
                     P.opPhosphor
                 );
-                for (let y = 0; y < h; y += spacing) {
+                for (let y = 1; y < h; y += spacing) {
                     g.FillSolidRect(0, y, w, 1, col);
                 }
             }
-
-            this.img.ReleaseGraphics(g);
         } catch (e) {
-            this.dispose();
-            this.valid = true;
+            // Swallow draw errors — overlay is cosmetic.
+        } finally {
+            // Always release graphics even if a draw call threw.
+            if (g && this.img) {
+                try { this.img.ReleaseGraphics(g); } catch (e2) {}
+            }
         }
+        // If an exception wiped this.img via dispose() called inside catch, valid stays true
+        // but img is null — paint code already guards for null img.
     }
 };
 
@@ -1803,10 +1983,11 @@ const Renderer = {
     },
 
     paintStatic(gr, pc) {
+        if (!State.img) return;
         gr.DrawImage(
             State.img,
             pc.staticX, pc.staticY, pc.staticW, pc.staticH,
-            0, 0, pc.imgWidth, pc.imgHeight
+            0, 0, State.img.Width, State.img.Height
         );
     },
 
@@ -1842,10 +2023,10 @@ const Renderer = {
         const borderColor = P.borderColor >>> 0;
 
         try {
-            gr.FillSolidRect(0, 0, w, borderSize, borderColor);                    // Top
-            gr.FillSolidRect(0, h - borderSize, w, borderSize, borderColor);      // Bottom
-            gr.FillSolidRect(0, borderSize, borderSize, h - borderSize * 2, borderColor);  // Left
-            gr.FillSolidRect(w - borderSize, borderSize, borderSize, h - borderSize * 2, borderColor);  // Right
+            gr.FillSolidRect(0, 0, w, borderSize, borderColor);
+            gr.FillSolidRect(0, h - borderSize, w, borderSize, borderColor);
+            gr.FillSolidRect(0, borderSize, borderSize, h - borderSize * 2, borderColor);
+            gr.FillSolidRect(w - borderSize, borderSize, borderSize, h - borderSize * 2, borderColor);
         } catch (e) {}
     }
 };
@@ -1894,12 +2075,9 @@ const PhosphorManager = {
 
 // ====================== PRESET MANAGER ======================
 const PresetManager = {
-    // Snapshot all current settings into a plain object for JSON serialisation.
     _capture() {
         return {
-            // Spin state
             spinningEnabled:     props.spinningEnabled.enabled,
-            // Image settings
             spinSpeed:           props.spinSpeed.value,
             useAlbumArtOnly:     props.useAlbumArtOnly.enabled,
             keepAspectRatio:     props.keepAspectRatio.enabled,
@@ -1907,9 +2085,8 @@ const PresetManager = {
             maxImageSize:        props.maxImageSize.value,
             maskType:            AssetManager.currentMaskType,
             userOverrideMask:    AssetManager.userOverrideMask,
-            // Overlay effects
             overlayAllOff:       props.overlayAllOff.enabled,
-            savedOverlay:        props.savedOverlay.value,   // restore state for "All Effects Off" toggle
+            savedOverlay:        props.savedOverlay.value,
             showReflection:      props.showReflection.enabled,
             opReflection:        props.opReflection.value,
             showGlow:            props.showGlow.enabled,
@@ -1920,11 +2097,9 @@ const PresetManager = {
             opPhosphor:          props.opPhosphor.value,
             phosphorTheme:       props.phosphorTheme.value,
             customPhosphorColor: props.customPhosphorColor.value,
-            // Border & Padding
             borderSize:          props.borderSize.value,
             borderColor:         props.borderColor.value,
             padding:             props.padding.value,
-            // Background
             backgroundEnabled:   props.backgroundEnabled.enabled,
             bgUseUIColor:        props.bgUseUIColor.enabled,
             blurRadius:          props.blurRadius.value,
@@ -1948,12 +2123,7 @@ const PresetManager = {
             if (!str) return;
             const d = JSON.parse(str);
 
-            // Spin state
-            if (_.isBoolean(d.spinningEnabled)) {
-                props.spinningEnabled.enabled = d.spinningEnabled;
-            }
-
-            // Image settings
+            if (_.isBoolean(d.spinningEnabled)) props.spinningEnabled.enabled = d.spinningEnabled;
             if (_.isNumber(d.spinSpeed))         props.spinSpeed.value         = _.clamp(d.spinSpeed, CONFIG.MIN_SPIN_SPEED, CONFIG.MAX_SPIN_SPEED);
             if (_.isBoolean(d.useAlbumArtOnly))  props.useAlbumArtOnly.enabled = d.useAlbumArtOnly;
             if (_.isBoolean(d.keepAspectRatio))  props.keepAspectRatio.enabled = d.keepAspectRatio;
@@ -1966,13 +2136,11 @@ const PresetManager = {
                 if (maskIdx !== AssetManager.currentMaskType) {
                     AssetManager.setMaskType(maskIdx, isOverride);
                 } else {
-                    // Same index — setMaskType would bail early, so update override directly.
                     AssetManager.userOverrideMask      = isOverride;
                     props.userOverrideMask.enabled     = isOverride;
                 }
             }
 
-            // Overlay effects
             if (_.isBoolean(d.overlayAllOff))    props.overlayAllOff.enabled   = d.overlayAllOff;
             if (_.isString(d.savedOverlay))      props.savedOverlay.value      = d.savedOverlay;
             if (_.isBoolean(d.showReflection))   props.showReflection.enabled  = d.showReflection;
@@ -1987,12 +2155,10 @@ const PresetManager = {
             if (_.isNumber(d.customPhosphorColor)) props.customPhosphorColor.value = d.customPhosphorColor >>> 0;
             PhosphorManager.invalidateCache();
 
-            // Border & Padding
             if (_.isNumber(d.borderSize))    props.borderSize.value = _.clamp(d.borderSize, 0, 50);
             if (_.isNumber(d.borderColor))   props.borderColor.value = d.borderColor >>> 0;
             if (_.isNumber(d.padding))       props.padding.value = _.clamp(d.padding, 0, 100);
 
-            // Background
             if (_.isBoolean(d.backgroundEnabled)) props.backgroundEnabled.enabled = d.backgroundEnabled;
             if (_.isBoolean(d.bgUseUIColor))      props.bgUseUIColor.enabled      = d.bgUseUIColor;
             if (_.isNumber(d.blurRadius))    props.blurRadius.value = _.clamp(d.blurRadius, 0, 254);
@@ -2000,13 +2166,13 @@ const PresetManager = {
             if (_.isNumber(d.darkenValue))   props.darkenValue.value = _.clamp(d.darkenValue, 0, 50);
             if (_.isNumber(d.customBackgroundColor)) props.customBackgroundColor.value = d.customBackgroundColor >>> 0;
 
-            // Reload image with new settings applied
             ImageLoader.cache.clear();
+            ImageLoader.clearCache();
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
             BackgroundCache.invalidate();
             OverlayInvalidator.request();
-            DiscComposite.invalidate();
+            DiscComposite.dispose();
             State.paintCache.valid = false;
             State.updateTimer();
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
@@ -2018,10 +2184,10 @@ const PresetManager = {
 // ====================== SLIDER STATE ======================
 const Slider = {
     active:  false,
-    target:  null,   // "Reflection" | "Glow" | "Scanlines" | "Phosphor"
+    target:  null,
 
     timers: {
-        overlayRebuild: null   // debounce for OverlayCache rebuild after wheel events
+        overlayRebuild: null
     },
 
     activate(target) {
@@ -2053,25 +2219,19 @@ const SliderRenderer = {
         return this._font;
     },
 
-    // Draw one horizontal bar + numeric label above it.
     drawBar(gr, value, max, barY) {
         const w    = window.Width;
         const barW = Math.max(SLIDER_MIN_WIDTH, Math.floor(w * SLIDER_WIDTH_RATIO));
         const barH = SLIDER_HEIGHT;
         const bx   = Math.floor((w - barW) / 2);
 
-        // Track (background)
-        gr.FillSolidRect(bx, barY, barW, barH,
-            DiscSpin_SetAlpha(DS_WHITE, 55));
+        gr.FillSolidRect(bx, barY, barW, barH, DiscSpin_SetAlpha(DS_WHITE, 55));
 
-        // Fill (progress)
         const fillW = Math.floor(barW * (value / max));
         if (fillW > 0) {
-            gr.FillSolidRect(bx, barY, fillW, barH,
-                DiscSpin_SetAlpha(DS_WHITE, 185));
+            gr.FillSolidRect(bx, barY, fillW, barH, DiscSpin_SetAlpha(DS_WHITE, 185));
         }
 
-        // Value label centred above the bar
         const font  = this.getFont();
         const label = value.toString();
         const sz    = gr.MeasureString(label, font, 0, 0, w, window.Height);
@@ -2081,12 +2241,10 @@ const SliderRenderer = {
             Math.ceil(sz.Width), Math.ceil(sz.Height));
     },
 
-    // Draw the effect name as a small title line above the value.
     drawTitle(gr, text, barY) {
         const w    = window.Width;
         const font = this.getFont();
         const sz   = gr.MeasureString(text, font, 0, 0, w, window.Height);
-        // two lines above barY: value label height + gap + title height
         const valSz  = gr.MeasureString('255', font, 0, 0, w, window.Height);
         const titleY = barY - Math.ceil(valSz.Height) - 4 - Math.ceil(sz.Height) - 4;
         gr.DrawString(text, font,
@@ -2096,7 +2254,6 @@ const SliderRenderer = {
             Math.ceil(sz.Width), Math.ceil(sz.Height));
     },
 
-    // Called from on_paint when slider is active.
     draw(gr) {
         if (!Slider.active || !Slider.target) return;
 
@@ -2155,26 +2312,25 @@ const MenuManager = {
 
         const grayed = props.overlayAllOff.enabled;
 
-        // --- Phosphor Theme (top of menu) ---
+        // --- Phosphor Theme ---
         const themeMenu = window.CreatePopupMenu();
         _.forEach(CONFIG.PHOSPHOR_THEMES, (theme, i) => {
             themeMenu.AppendMenuItem(0, 600 + i, theme.name);
             if (props.phosphorTheme.value === i) themeMenu.CheckMenuItem(600 + i, true);
         });
         themeMenu.AppendMenuSeparator();
-        themeMenu.AppendMenuItem(0, 610, 'Custom...');
-        if (props.phosphorTheme.value === DISC_CUSTOM_THEME_INDEX) themeMenu.CheckMenuItem(610, true);
+        const customMenuId = 600 + DISC_CUSTOM_THEME_INDEX;
+        themeMenu.AppendMenuItem(0, customMenuId, 'Custom...');
+        if (props.phosphorTheme.value === DISC_CUSTOM_THEME_INDEX) themeMenu.CheckMenuItem(customMenuId, true);
         themeMenu.AppendTo(overlay, (grayed || !props.showPhosphor.enabled) ? 1 : 0, "Phosphor Theme");
 
         overlay.AppendMenuSeparator();
 
-        // --- Master kill-switch ---
         overlay.AppendMenuItem(0, 199, "— All Effects Off");
         if (props.overlayAllOff.enabled) overlay.CheckMenuItem(199, true);
 
         overlay.AppendMenuSeparator();
 
-        // --- Effect toggles (all together) ---
         overlay.AppendMenuItem(grayed ? 1 : 0, 200, "Reflection");
         if (!grayed && props.showReflection.enabled) overlay.CheckMenuItem(200, true);
 
@@ -2189,7 +2345,6 @@ const MenuManager = {
 
         overlay.AppendMenuSeparator();
 
-        // --- Opacity submenu ---
         const opacityM = window.CreatePopupMenu();
 
         opacityM.AppendMenuItem((!grayed && props.showReflection.enabled) ? 0 : 1, 201,
@@ -2227,8 +2382,10 @@ const MenuManager = {
             speedMenu.AppendMenuItem(0, 10 + i, preset.name);
         });
 
-        const speedIdx = props.spinSpeed.value <= 1.0 ? 10 : (props.spinSpeed.value >= 3.0 ? 12 : 11);
-        speedMenu.CheckMenuRadioItem(10, 12, speedIdx);
+        const matchIdx = _.findIndex(CONFIG.SPEED_PRESETS, p => p.value === props.spinSpeed.value);
+        if (matchIdx !== -1) {
+            speedMenu.CheckMenuRadioItem(10, 10 + CONFIG.SPEED_PRESETS.length - 1, 10 + matchIdx);
+        }
 
         speedMenu.AppendTo(parent, 0, "Rotation Speed");
     },
@@ -2325,22 +2482,18 @@ const MenuManager = {
 
         const uiColorActive = props.bgUseUIColor.enabled;
 
-        // Use UI Color (top — supersedes all other background options)
         bgMenu.AppendMenuItem(0, 263, 'Use UI Color as Background');
         if (uiColorActive) bgMenu.CheckMenuItem(263, true);
 
         bgMenu.AppendMenuSeparator();
 
-        // Enable Background Art toggle (grayed when UI color mode is on)
         bgMenu.AppendMenuItem(uiColorActive ? 1 : 0, 260, 'Enable Background Art');
         if (!uiColorActive && props.backgroundEnabled.enabled) bgMenu.CheckMenuItem(260, true);
 
-        // Custom Background Color (grayed when UI color mode or art mode is on)
-        bgMenu.AppendMenuItem(uiColorActive || props.backgroundEnabled.enabled ? 1 : 0, 261, 'Custom Background Color...');
+        bgMenu.AppendMenuItem(uiColorActive ? 1 : 0, 261, 'Custom Background Color...');
 
         bgMenu.AppendMenuSeparator();
 
-        // Blur Settings submenu (grayed when UI color mode is on, or art is off)
         const blurEnabled = !uiColorActive && props.backgroundEnabled.enabled;
         const blurMenu = window.CreatePopupMenu();
         blurMenu.AppendMenuItem(0, 270, 'Enable Blur');
@@ -2355,7 +2508,6 @@ const MenuManager = {
         if (props.blurRadius.value === 254) blurMenu.CheckMenuItem(282, true);
         blurMenu.AppendTo(bgMenu, blurEnabled ? 0 : 1, 'Blur Settings');
 
-        // Darken Background submenu (grayed when UI color mode is on)
         const darkenMenu = window.CreatePopupMenu();
         _.times(6, (i) => {
             const value = i * 10;
@@ -2380,6 +2532,9 @@ const MenuManager = {
         if (toggles[idx]) {
             toggles[idx].prop.toggle();
             if (toggles[idx].reload && State.currentMetadb) {
+                ImageLoader.cache.clear();
+                ImageLoader.clearCache();
+                DiscComposite.dispose();
                 ImageLoader.loadForMetadb(State.currentMetadb, true);
             }
             if (toggles[idx].timer) State.updateTimer();
@@ -2399,31 +2554,41 @@ const MenuManager = {
         if (interpMode) {
             props.interpolationMode.value = interpMode.value;
             ImageLoader.cache.clear();
+            ImageLoader.clearCache();
+            DiscComposite.dispose();
             OverlayInvalidator.request();
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             changed = true;
         }
 
-        // Size presets (30-34)
         const sizePreset = _.find(CONFIG.DISC_SIZE_PRESETS, (p, i) => (i + 30) === idx);
         if (sizePreset) {
             props.maxImageSize.value = sizePreset.value;
             ImageLoader.cache.clear();
+            ImageLoader.clearCache();   // clear path cache — cached results hold old-size bitmaps
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
+            DiscComposite.dispose();    // dispose stale composite — do not just invalidate
             OverlayInvalidator.request();
+            State.paintCache.valid = false;
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             changed = true;
         }
 
         // Mask types (40-42)
         if (idx >= 40 && idx <= 42) {
-            if (AssetManager.setMaskType(idx - 40, true)) {
-                ImageLoader.cache.clear();
-                OverlayInvalidator.request();
-                if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-                changed = true;
-            }
+            const newMaskIdx = idx - 40;
+            const forceReload = (newMaskIdx === AssetManager.currentMaskType);
+            AssetManager.setMaskType(newMaskIdx, true, forceReload);
+            ImageLoader.cache.clear();
+            ImageLoader.clearCache();    // clear path cache — old results bypass re-processing
+            AssetManager.maskCache.clear();
+            AssetManager.rimCache.clear();
+            DiscComposite.dispose();     // old composite still has previous mask baked in
+            OverlayInvalidator.request();
+            State.paintCache.valid = false;
+            if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
+            changed = true;
         }
 
         // Custom folder operations
@@ -2431,27 +2596,35 @@ const MenuManager = {
             try {
                 const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
                 if (folder && CustomFolders.add(folder)) {
+                    ImageLoader.clearCache();
                     if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
                     changed = true;
                 }
             } catch (e) {}
         } else if (idx >= 60 && idx <= 64) {
             if (CustomFolders.remove(idx - 60)) {
+                ImageLoader.clearCache();
                 if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
                 changed = true;
             }
         } else if (idx === 70) {
             CustomFolders.clear();
+            ImageLoader.clearCache();
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             changed = true;
         }
 
         // Clear cache (900)
+
         if (idx === 900) {
             FileManager.clear();
             ImageLoader.cache.clear();
+            ImageLoader.clearCache();
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
+            BackgroundCache.invalidate();
+            DiscComposite.dispose();
+            State.paintCache.valid = false;
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
             changed = true;
         }
@@ -2509,12 +2682,14 @@ const MenuManager = {
             Slider.activate("Phosphor");
             return;
         }
-        if (_.inRange(idx, 600, 610)) {
+
+        if (_.inRange(idx, 600, 600 + DISC_CUSTOM_THEME_INDEX)) {
             props.phosphorTheme.value = idx - 600;
+            PhosphorManager.invalidateCache();
             OverlayInvalidator.request();
             changed = true;
         }
-        if (idx === 610) {
+        if (idx === 600 + DISC_CUSTOM_THEME_INDEX) {
             PhosphorManager.setCustomColor();
             return;  // setCustomColor handles its own repaint
         }
@@ -2526,8 +2701,8 @@ const MenuManager = {
             props.spinSpeed.value              = 2.0;
             props.useAlbumArtOnly.enabled      = false;
             props.keepAspectRatio.enabled      = true;
-            props.interpolationMode.value      = 1;
-            props.maxImageSize.value           = 250;
+            props.interpolationMode.value      = 0;
+            props.maxImageSize.value           = 500;
             AssetManager.setMaskType(0, false);   // CD mask, auto-detect re-enabled
 
             // Overlay effects
@@ -2535,7 +2710,7 @@ const MenuManager = {
             props.savedOverlay.value           = '';
             props.showReflection.enabled       = true;
             props.opReflection.value           = 30;
-            props.showGlow.enabled             = true;
+            props.showGlow.enabled             = false;
             props.opGlow.value                 = 40;
             props.showScanlines.enabled        = false;
             props.opScanlines.value            = 80;
@@ -2559,12 +2734,14 @@ const MenuManager = {
             props.customBackgroundColor.value  = 0xFF191919;
 
             // Invalidate all caches and reload
+
             ImageLoader.cache.clear();
+            ImageLoader.clearCache();
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
             BackgroundCache.invalidate();
             OverlayInvalidator.request();
-            DiscComposite.invalidate();
+            DiscComposite.dispose();
             State.paintCache.valid = false;
             State.updateTimer();
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
@@ -2638,15 +2815,12 @@ const MenuManager = {
             changed = true;
         }
 
-        // Blur Radius
+        // Blur Radius (271–281 = 0,20,40,...200; 282 = max 254)
         if (_.inRange(idx, 271, 282)) {
             props.blurRadius.value = (idx - 271) * 20;
             BackgroundCache.invalidate();
             changed = true;
-        }
-
-        // Blur Radius Max 254 (282)
-        if (idx === 282) {
+        } else if (idx === 282) {
             props.blurRadius.value = 254;
             BackgroundCache.invalidate();
             changed = true;
@@ -2683,7 +2857,7 @@ function on_paint(gr) {
     if (P.bgUseUIColor) {
         gr.FillSolidRect(0, 0, w, h, bgColor);
     } else {
-        gr.FillSolidRect(0, 0, w, h, P.customBackgroundColor);
+        gr.FillSolidRect(0, 0, w, h, P.customBackgroundColor >>> 0);
 
         // Draw background image (blurred if enabled, otherwise stretch to cover)
         const hasBgImage = P.backgroundEnabled && State.bgImg && State.bgImg.Width > 0 && State.bgImg.Height > 0;
@@ -2705,8 +2879,10 @@ function on_paint(gr) {
     }
 
     Renderer.paint(gr);
+	
+	 // Border drawn under overlay.
+    Renderer.drawBorder(gr);
 
-    // BUG-5 fix: invalidate overlay if dimensions are stale (resize before debounce fires)
     if (OverlayCache.valid && OverlayCache.img &&
         (OverlayCache.img.Width !== w || OverlayCache.img.Height !== h)) {
         OverlayCache.invalidate();
@@ -2714,13 +2890,13 @@ function on_paint(gr) {
     if (!OverlayCache.valid) {
         OverlayCache.build(w, h, State.paintCache);
     }
-    
-    Renderer.drawBorder(gr);  // Draw border BEFORE overlay so overlay appears on top
 
     if (OverlayCache.img) {
         const oi = OverlayCache.img;
         gr.DrawImage(oi, 0, 0, w, h, 0, 0, oi.Width, oi.Height);
     }
+
+   
 
     SliderRenderer.draw(gr);
 }
@@ -2729,10 +2905,20 @@ function on_size() {
     State.paintCache.valid = false;
     BackgroundCache.invalidate();
     OverlayInvalidator.request();
-    DiscComposite.invalidate();
+    // Fully dispose composite so paintDisc triggers a fresh build at the new size.
+    DiscComposite.dispose();
     AssetManager.maskCache.clear();
     AssetManager.rimCache.clear();
-    RepaintHelper.full();
+    // Clear processed image cache — cached bitmaps were sized for the old panel dimensions.
+    ImageLoader.cache.clear();
+    ImageLoader.clearCache();
+    State.stopTimer();
+    // Reload the current track at the new size if we have one.
+    if (isLive() && State.currentMetadb) {
+        ImageLoader.loadForMetadb(State.currentMetadb, false);
+    } else {
+        window.Repaint();
+    }
 }
 
 // ================= ARTWORK DISPATCHER =================
@@ -2746,11 +2932,13 @@ const ArtDispatcher = {
     request(reason, metadb) {
         const priority = this._priority[reason] || 0;
 
-        // If we have a pending request, only override if higher priority
+        // If we have a pending request, only override if higher or equal priority.
+        // Equal-priority requests replace the pending one (e.g. rapid track changes —
+        // the latest track always wins).  Lower-priority requests are dropped silently.
         if (this._pending) {
             const currentPriority = this._priority[this._pending.reason] || 0;
-            if (priority <= currentPriority) {
-                return; // Ignore lower/equal priority request
+            if (priority < currentPriority) {
+                return;
             }
         }
 
@@ -2768,6 +2956,7 @@ const ArtDispatcher = {
 
     _dispatch() {
         if (!this._pending) return;
+        if (!isLive()) { this._pending = null; this._timer = null; return; }
 
         const { reason, metadb } = this._pending;
         this._pending = null;
@@ -2775,7 +2964,7 @@ const ArtDispatcher = {
 
         switch (reason) {
             case 'track':
-                // BUG-6 fix: only skip load if image is already loaded for this metadb
+
                 if (metadb && State.currentMetadb && State.img &&
                     State.currentMetadb.Compare(metadb)) {
                     return;
@@ -2785,7 +2974,8 @@ const ArtDispatcher = {
                 }
                 break;
             case 'stop':
-                if (metadb !== 2) {
+   
+                if (metadb === 0) {
                     State.angle = 0;
                 }
                 State.updateTimer();
@@ -2811,6 +3001,7 @@ function on_playback_new_track(metadb) {
 
 // Refresh display when tags are edited while a track is playing.
 function on_metadb_changed(metadb_list, fromhook) {
+    if (!isLive()) return;
     if (!fb.IsPlaying && !fb.IsPaused) return;
     const nowPlaying = fb.GetNowPlaying();
     if (!nowPlaying) return;
@@ -2832,18 +3023,23 @@ function on_metadb_changed(metadb_list, fromhook) {
 }
 
 function on_playback_pause() {
+    if (!isLive()) return;
     State.updateTimer();
 }
 
 function on_playback_stop(reason) {
+    // Pass reason code as the second argument — ArtDispatcher uses it to
+    // distinguish user-stop (0), EoF auto-advance (1), and shutdown (2).
     ArtDispatcher.request('stop', reason);
 }
 
 function on_playback_starting() {
+    if (!isLive()) return;
     State.updateTimer();
 }
 
 function on_playback_seek() {
+    if (!isLive()) return;
     State.updateTimer();
 }
 
@@ -2851,8 +3047,8 @@ function on_selection_changed() {
     if (fb.IsPlaying || fb.IsPaused) return;
 
     const sel = fb.GetSelection();
-    if (sel && sel.Count > 0) {
-        ArtDispatcher.request('selection', sel.Item(0));
+    if (sel) {
+        ArtDispatcher.request('selection', sel);
     }
 }
 
@@ -2869,6 +3065,7 @@ function on_playlist_items_removed(playlist_index) {
 }
 
 function on_get_album_art_done(metadb, art_id, image, image_path) {
+    if (!isLive()) { Utils.safeDispose(image); return; }
     ImageLoader.handleAlbumArt(metadb, image, image_path);
 }
 
@@ -2880,11 +3077,19 @@ function on_mouse_lbtn_down(x, y) {
     if (window.SetFocus) window.SetFocus();
 }
 
+// Required to honour grab_focus: true — without this SMP won't route key events here.
+function on_key_down(vkey) {
+    // Reserved for future keyboard shortcuts.
+}
+
 function on_mouse_lbtn_up(x, y) {
     if (Slider.active) {
         Slider.deactivate();
-        return true;
     }
+}
+
+function on_mouse_move(x, y) {
+    // Nothing interactive to hover over currently; extend here if buttons are added.
 }
 
 function on_mouse_wheel(delta) {
@@ -2901,16 +3106,19 @@ function on_mouse_wheel(delta) {
     if (!prop) return;
 
     prop.value = _.clamp(prop.value + delta * SLIDER_STEP, 0, 255);
-    RepaintHelper.full();
+    RepaintHelper.full();   // immediate repaint — shows slider with updated value
 
     if (Slider.timers.overlayRebuild) window.ClearTimeout(Slider.timers.overlayRebuild);
     Slider.timers.overlayRebuild = window.SetTimeout(() => {
         Slider.timers.overlayRebuild = null;
-        OverlayInvalidator.request();
+        OverlayCache.invalidate();
+        window.Repaint();   // triggers lazy rebuild in on_paint
     }, 100);
 }
 
 function on_script_unload() {
+    phase = Phase.SHUTDOWN;
+    
     if (ArtDispatcher._timer) {
         window.ClearTimeout(ArtDispatcher._timer);
         ArtDispatcher._timer = null;
@@ -2939,8 +3147,9 @@ function on_script_unload() {
     // helpers.js defines its own on_script_unload for these — we must replicate
     // that teardown here since our definition supersedes theirs.
     _tt('');
-    if (_bmp && _gr) {
-        try { _bmp.ReleaseGraphics(_gr); } catch (e) {}
+
+    if (_gr) {
+        try { if (_bmp) _bmp.ReleaseGraphics(_gr); } catch (e) {}
     }
     _gr  = null;
     _bmp = null;
@@ -2962,17 +3171,73 @@ function init() {
             if (imageType === CONFIG.IMAGE_TYPE.DEFAULT_DISC) {
                 ImageLoader.loadDefaultDisc();
             } else {
-                const img = ImageLoader.loadCached(props.savedPath.value, imageType);
-                if (img) {
-                    const raw = gdi.Image(props.savedPath.value);
-                    const original = raw ? raw.Clone(0, 0, raw.Width, raw.Height) : img;
-                    Utils.safeDispose(raw);
-                    State.setImage(img, props.savedIsDisc.enabled, imageType, original);
-                }
+
+                try {
+                    const savedPath = props.savedPath.value;
+                    const raw = gdi.Image(savedPath);
+                    if (raw) {
+
+                        let original = null;
+                        try {
+                            original = raw.Clone(0, 0, raw.Width, raw.Height);
+                        } catch (cloneErr) {
+                            // Clone failed — proceed without a background source;
+                            // raw is still alive and will be handled below.
+                        }
+                        const targetSize = Utils.getPanelDiscSize();
+                        const isDisc = props.savedIsDisc.enabled;
+                        let displayImg;
+                        if (isDisc) {
+                            displayImg = ImageProcessor.processForDisc(
+                                raw, targetSize, imageType, P.interpolationMode
+                            );
+                            // processForDisc takes full ownership of raw on both
+                            // success and failure — do NOT call safeDispose(raw).
+                        } else {
+                            displayImg = ImageProcessor.scaleProportional(
+                                raw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode
+                            );
+
+                            if (!displayImg) Utils.safeDispose(raw);
+                        }
+                        if (displayImg) {
+                            State.setImage(displayImg, isDisc, imageType, original);
+                        } else {
+                            Utils.safeDispose(original);
+                        }
+                    }
+                } catch (e2) {}
             }
             // NOTE: nowPlaying is null in this branch so fb.GetAlbumArtAsync
             // would have nothing to act on — no async request is needed here.
         } catch (e) {}
+    } else {
+        // Fallback: check shared folder property from PlayList
+        const sharedFolder = window.GetProperty('RP.SavedFolder', '');
+        if (sharedFolder && FileManager.isDirectory(sharedFolder)) {
+            const coverPath = ImageLoader.searchForCover(null, sharedFolder);
+            if (coverPath) {
+                try {
+                    const imageType = Utils.getImageType(coverPath);
+
+                    const raw = gdi.Image(coverPath);
+                    if (raw) {
+                        const original = raw.Clone(0, 0, raw.Width, raw.Height);
+                        const targetSize = Utils.getPanelDiscSize();
+                        const displayImg = ImageProcessor.processForDisc(
+                            raw, targetSize, imageType, P.interpolationMode
+                        );
+                        Utils.safeDispose(raw);
+                        if (displayImg) {
+                            State.setImage(displayImg, false, imageType, original);
+                            props.savedPath.value = coverPath;
+                        } else {
+                            Utils.safeDispose(original);
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
     }
 
     State.updateTimer();
@@ -2983,7 +3248,15 @@ function init() {
     window.MinWidth  = 75;
     if (window.Width > 0 && window.Height > 0) {
         init();
+        phase = Phase.LIVE;
     } else {
-        readyTimer = window.SetTimeout(waitForReady, 50);
+        readyTimer = window.SetTimeout(function retry() {
+            if (window.Width > 0 && window.Height > 0) {
+                init();
+                phase = Phase.LIVE;
+            } else {
+                readyTimer = window.SetTimeout(retry, 50);
+            }
+        }, 50);
     }
 })();
