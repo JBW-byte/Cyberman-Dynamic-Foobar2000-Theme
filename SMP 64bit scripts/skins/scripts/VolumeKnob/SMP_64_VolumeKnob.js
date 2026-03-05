@@ -6,6 +6,8 @@
  // ===================*** Foobar2000 64bit ***================== \\
 // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 
+window.DrawMode = 1; // 0 - default GDI+ mode. 1 - D2D
+
 window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
@@ -13,6 +15,9 @@ window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.', options: { g
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
+
+include(fb.ProfilePath + 'skins\\js_cache\\UltraCache.js');
+include(fb.ProfilePath + 'skins\\js_cache\\RenderCache.js');
 
 // Panel for DUI/CUI background
 const panel = new _panel(false);
