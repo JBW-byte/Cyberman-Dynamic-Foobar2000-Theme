@@ -3,7 +3,7 @@ Install [SMP 64bit](https://github.com/marc2k3/spider-monkey-panel-x64/releases)
 * Disc Spin: **Updated* 4 Mar 26(Maintanance Bugs), requires my mask's and art files for the CD etc. Mask's automaticly. Generates a Disc from album art if you have no disc art, falls back to default disc if non, Seperate Vinyl mask if your art is called vinyl(option to change default mask type in right click menu if its not called vinyl). Fixed custom file paths, working fairly well, probably. Right click options, Quit extensive now for what it is. A lot of customization options added, requires album art to look its best<br><br>
 Performance ok now on larger panels, added image quality settings for scaling mode and image resolution, nearest neighbour best for large panels.<br><br>
 
-* VolumeKnob: **Updated* 27 Feb 26,, Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control. Could probably be adapted to any type of Knob.<br>
+* VolumeKnob: **Updated* 27 Feb 26, Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control. Could probably be adapted to any type of Knob.<br>
 
 * PanelArt: **Updated* 4 Mar 26(Maintanance Bugs), Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization. Dbl click for a random image or right click for a slide show, if you have set up an image folder for .jps .png ect.. 
 Fixed custom file paths, working fairly well, probably. Requires album art to look its best<br><br>
