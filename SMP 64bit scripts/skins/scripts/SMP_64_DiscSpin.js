@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 			  // -============ AUTHOR L.E.D. ===========- \\
 			 // -====== SMP 64bit Disc Spin V3.1.1 ======- \\
 			// -====== Spins Disc + Artwork + Cover ======- \\
@@ -9,13 +9,15 @@
  // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
 // ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
 
+window.DrawMode = 1; // 0 - default GDI+ mode. 1 - D2D
+
 window.DefineScript('SMP 64bit Disc Spin V3.1.1', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 
-// _fbSanitise —
+// _fbSanitise â€”
     function _fbSanitise(str) {
         if (!str) return '';
         return utils.ReplaceIllegalChars(str, true);
@@ -24,7 +26,7 @@ include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 // Lifecycle state machine - guards operations during shutdown
 const Phase = {
     BOOT:     0,
-    // 1 intentionally unused — reserved gap so LIVE and SHUTDOWN
+    // 1 intentionally unused â€” reserved gap so LIVE and SHUTDOWN
     // are never confused with a falsy 0 in accidental numeric comparisons.
     LIVE:     2,
     SHUTDOWN: 3
@@ -407,7 +409,7 @@ class LRUCache {
 }
 
 // ====================== FILE MANAGER ======================
-// Single FSO instance — creating ActiveXObject on every subfolder scan is costly.
+// Single FSO instance â€” creating ActiveXObject on every subfolder scan is costly.
 const _fso = (function() {
     try { return new ActiveXObject('Scripting.FileSystemObject'); } catch (e) { return null; }
 })();
@@ -604,7 +606,7 @@ const FileManager = {
     }
 };
 
-// Title-case helper — hoisted to avoid re-creating on each searchCustomFolders call.
+// Title-case helper â€” hoisted to avoid re-creating on each searchCustomFolders call.
 function _toTitleCase(str) {
     return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
 }
@@ -789,12 +791,12 @@ const ImageProcessor = {
         const w = raw.Width;
         const h = raw.Height;
 
-        // Dimensions already match — return a clone so callers can safely dispose the return value
+        // Dimensions already match â€” return a clone so callers can safely dispose the return value
         // without risk of double-disposing the original.
         if (w === targetSize && h === targetSize) {
             try {
                 const cloned = raw.Clone(0, 0, w, h);
-                // raw was loaded by the caller solely for processing — dispose it now
+                // raw was loaded by the caller solely for processing â€” dispose it now
                 // that we have an independent clone, so it doesn't leak.
                 Utils.safeDispose(raw);
                 return cloned;
@@ -828,7 +830,7 @@ const ImageProcessor = {
             Utils.safeDispose(raw);
             return newImg;
         } catch (e) {
-            // Do NOT dispose raw here — caller still owns it and must handle cleanup.
+            // Do NOT dispose raw here â€” caller still owns it and must handle cleanup.
             return null;
         }
     },
@@ -869,7 +871,7 @@ const ImageProcessor = {
             Utils.safeDispose(raw);
             return newImg;
         } catch (e) {
-            // Do NOT dispose raw here — caller still owns it.
+            // Do NOT dispose raw here â€” caller still owns it.
             return null;
         }
     },
@@ -897,7 +899,7 @@ const ImageProcessor = {
 
         let processed = this.scaleToSquare(raw, targetSize, interpolationMode, imageType);
         // scaleToSquare either consumed raw (success) or left raw untouched (failure/null).
-        // On failure raw is still valid — dispose it so we don't leak.
+        // On failure raw is still valid â€” dispose it so we don't leak.
         if (!processed) {
             Utils.safeDispose(raw);
             return null;
@@ -968,7 +970,7 @@ const State = {
         if (oldImg && oldImg !== newImg && oldImg !== originalImg) {
             Utils.safeDispose(oldImg);
         }
-        // oldBgImg may equal oldImg — only dispose it if it's a distinct object
+        // oldBgImg may equal oldImg â€” only dispose it if it's a distinct object
         // that isn't being reused, and wasn't already disposed above.
         if (oldBgImg &&
             oldBgImg !== oldImg &&
@@ -1043,7 +1045,7 @@ const State = {
 
             pc.valid = true;
         } else {
-            // No image — reset computed dimensions so stale values are never used.
+            // No image â€” reset computed dimensions so stale values are never used.
             pc.imgWidth  = 0;
             pc.imgHeight = 0;
             pc.discSize  = 0;
@@ -1118,7 +1120,7 @@ const ImageLoader = {
             try {
                 return cached.Clone(0, 0, cached.Width, cached.Height);
             } catch (e) {
-                // Stale / already-disposed entry — fall through and reload from disk.
+                // Stale / already-disposed entry â€” fall through and reload from disk.
             }
         }
 
@@ -1360,7 +1362,7 @@ const ImageLoader = {
         const cacheKey = 'disc:' + baseFolder;
         if (this._pathCache.has(cacheKey)) {
             const cached = this._pathCache.get(cacheKey);
-            if (!cached) return null;   // explicitly-cached miss — no disc art for this folder
+            if (!cached) return null;   // explicitly-cached miss â€” no disc art for this folder
             return this._loadDiscResult(cached.path);
         }
 
@@ -1527,7 +1529,7 @@ const ImageLoader = {
                             State.updateTimer();
                             return;
                         }
-                        // scaleProportional failed — coverRaw still alive, dispose it.
+                        // scaleProportional failed â€” coverRaw still alive, dispose it.
                         Utils.safeDispose(coverRaw);
                         Utils.safeDispose(bgOriginal);
                     } else {
@@ -1550,7 +1552,7 @@ const ImageLoader = {
                 }
             }
 
-            // PHASE 3: Fallback — async album art
+            // PHASE 3: Fallback â€” async album art
             State.pendingArtToken = State.loadToken;
             utils.GetAlbumArtAsync(window.ID, metadb, 0);
         };
@@ -1623,7 +1625,7 @@ const ImageLoader = {
                     }
                 }
 
-                RepaintHelper.background();  // always repaint — covers both "new art" and "art replaced previous" cases
+                RepaintHelper.background();  // always repaint â€” covers both "new art" and "art replaced previous" cases
                 State.updateTimer();
                 return;
             } catch (e) {
@@ -1655,7 +1657,7 @@ const ImageLoader = {
             );
 
             if (scaled) {
-                // Pass null for original — don't use default disc as background
+                // Pass null for original â€” don't use default disc as background
                 State.setImage(scaled, true, CONFIG.IMAGE_TYPE.DEFAULT_DISC, null);
                 props.savedPath.value = CONFIG.PATHS.DEFAULT_DISC;
                 props.savedIsDisc.enabled = true;
@@ -1704,7 +1706,7 @@ const DiscComposite = {
             try {
                 this.img = discImg.Clone(0, 0, discImg.Width, discImg.Height);
             } catch (e) {
-                // Clone failed (stale bitmap handle) — fall through without composite
+                // Clone failed (stale bitmap handle) â€” fall through without composite
             }
             this.valid = true;
             return;
@@ -1722,7 +1724,7 @@ const DiscComposite = {
                 g.DrawImage(rim, 0, 0, size, size, 0, 0, rim.Width, rim.Height);
             }
         } catch (e) {
-            // Draw failed — dispose the partial bitmap.
+            // Draw failed â€” dispose the partial bitmap.
             if (!gReleased && g && this.img) {
                 try { this.img.ReleaseGraphics(g); gReleased = true; } catch (e2) {}
             }
@@ -1789,15 +1791,15 @@ const BackgroundCache = {
             g = newImg.GetGraphics();
             g.DrawImage(src, 0, 0, w, h, 0, 0, src.Width, src.Height);
             newImg.ReleaseGraphics(g);
-            gReleased = true;               // released — don't release again in finally
+            gReleased = true;               // released â€” don't release again in finally
             newImg.StackBlur(P.blurRadius);
 
             this._lru.set(key, newImg);
-            newImg = null;                  // ownership transferred to LRU — don't dispose in finally
+            newImg = null;                  // ownership transferred to LRU â€” don't dispose in finally
             this._activeKey = key;
             this.img = this._lru.get(key);
         } catch (e) {
-            // Build failed — leave img null so on_paint falls back to flat colour.
+            // Build failed â€” leave img null so on_paint falls back to flat colour.
             this._activeKey = key;
             this.img = null;
         } finally {
@@ -1953,7 +1955,7 @@ const OverlayCache = {
                 }
             }
         } catch (e) {
-            // Swallow draw errors — overlay is cosmetic.
+            // Swallow draw errors â€” overlay is cosmetic.
         } finally {
             // Always release graphics even if a draw call threw.
             if (g && this.img) {
@@ -1961,7 +1963,7 @@ const OverlayCache = {
             }
         }
         // If an exception wiped this.img via dispose() called inside catch, valid stays true
-        // but img is null — paint code already guards for null img.
+        // but img is null â€” paint code already guards for null img.
     }
 };
 
@@ -2326,7 +2328,7 @@ const MenuManager = {
 
         overlay.AppendMenuSeparator();
 
-        overlay.AppendMenuItem(0, 199, "— All Effects Off");
+        overlay.AppendMenuItem(0, 199, "â€” All Effects Off");
         if (props.overlayAllOff.enabled) overlay.CheckMenuItem(199, true);
 
         overlay.AppendMenuSeparator();
@@ -2565,10 +2567,10 @@ const MenuManager = {
         if (sizePreset) {
             props.maxImageSize.value = sizePreset.value;
             ImageLoader.cache.clear();
-            ImageLoader.clearCache();   // clear path cache — cached results hold old-size bitmaps
+            ImageLoader.clearCache();   // clear path cache â€” cached results hold old-size bitmaps
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
-            DiscComposite.dispose();    // dispose stale composite — do not just invalidate
+            DiscComposite.dispose();    // dispose stale composite â€” do not just invalidate
             OverlayInvalidator.request();
             State.paintCache.valid = false;
             if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
@@ -2581,7 +2583,7 @@ const MenuManager = {
             const forceReload = (newMaskIdx === AssetManager.currentMaskType);
             AssetManager.setMaskType(newMaskIdx, true, forceReload);
             ImageLoader.cache.clear();
-            ImageLoader.clearCache();    // clear path cache — old results bypass re-processing
+            ImageLoader.clearCache();    // clear path cache â€” old results bypass re-processing
             AssetManager.maskCache.clear();
             AssetManager.rimCache.clear();
             DiscComposite.dispose();     // old composite still has previous mask baked in
@@ -2752,7 +2754,7 @@ const MenuManager = {
 
         // Set Border Size (250)
         if (idx === 250) {
-            const v = utils.InputBox(window.ID, 'Border Size', 'Enter size (0–50):', props.borderSize.value.toString(), false);
+            const v = utils.InputBox(window.ID, 'Border Size', 'Enter size (0â€“50):', props.borderSize.value.toString(), false);
             const n = parseInt(v, 10);
             if (!isNaN(n)) {
                 props.borderSize.value = _.clamp(n, 0, 50);
@@ -2773,7 +2775,7 @@ const MenuManager = {
 
         // Set Padding (252)
         if (idx === 252) {
-            const v = utils.InputBox(window.ID, 'Padding', 'Enter size (0–100):', props.padding.value.toString(), false);
+            const v = utils.InputBox(window.ID, 'Padding', 'Enter size (0â€“100):', props.padding.value.toString(), false);
             const n = parseInt(v, 10);
             if (!isNaN(n)) {
                 props.padding.value = _.clamp(n, 0, 100);
@@ -2815,7 +2817,7 @@ const MenuManager = {
             changed = true;
         }
 
-        // Blur Radius (271–281 = 0,20,40,...200; 282 = max 254)
+        // Blur Radius (271â€“281 = 0,20,40,...200; 282 = max 254)
         if (_.inRange(idx, 271, 282)) {
             props.blurRadius.value = (idx - 271) * 20;
             BackgroundCache.invalidate();
@@ -2909,7 +2911,7 @@ function on_size() {
     DiscComposite.dispose();
     AssetManager.maskCache.clear();
     AssetManager.rimCache.clear();
-    // Clear processed image cache — cached bitmaps were sized for the old panel dimensions.
+    // Clear processed image cache â€” cached bitmaps were sized for the old panel dimensions.
     ImageLoader.cache.clear();
     ImageLoader.clearCache();
     State.stopTimer();
@@ -2933,7 +2935,7 @@ const ArtDispatcher = {
         const priority = this._priority[reason] || 0;
 
         // If we have a pending request, only override if higher or equal priority.
-        // Equal-priority requests replace the pending one (e.g. rapid track changes —
+        // Equal-priority requests replace the pending one (e.g. rapid track changes â€”
         // the latest track always wins).  Lower-priority requests are dropped silently.
         if (this._pending) {
             const currentPriority = this._priority[this._pending.reason] || 0;
@@ -3028,7 +3030,7 @@ function on_playback_pause() {
 }
 
 function on_playback_stop(reason) {
-    // Pass reason code as the second argument — ArtDispatcher uses it to
+    // Pass reason code as the second argument â€” ArtDispatcher uses it to
     // distinguish user-stop (0), EoF auto-advance (1), and shutdown (2).
     ArtDispatcher.request('stop', reason);
 }
@@ -3077,7 +3079,7 @@ function on_mouse_lbtn_down(x, y) {
     if (window.SetFocus) window.SetFocus();
 }
 
-// Required to honour grab_focus: true — without this SMP won't route key events here.
+// Required to honour grab_focus: true â€” without this SMP won't route key events here.
 function on_key_down(vkey) {
     // Reserved for future keyboard shortcuts.
 }
@@ -3106,7 +3108,7 @@ function on_mouse_wheel(delta) {
     if (!prop) return;
 
     prop.value = _.clamp(prop.value + delta * SLIDER_STEP, 0, 255);
-    RepaintHelper.full();   // immediate repaint — shows slider with updated value
+    RepaintHelper.full();   // immediate repaint â€” shows slider with updated value
 
     if (Slider.timers.overlayRebuild) window.ClearTimeout(Slider.timers.overlayRebuild);
     Slider.timers.overlayRebuild = window.SetTimeout(() => {
@@ -3144,7 +3146,7 @@ function on_script_unload() {
     FileManager.clear();
 
     // Clean up global GDI measurement objects created by helpers.js.
-    // helpers.js defines its own on_script_unload for these — we must replicate
+    // helpers.js defines its own on_script_unload for these â€” we must replicate
     // that teardown here since our definition supersedes theirs.
     _tt('');
 
@@ -3181,7 +3183,7 @@ function init() {
                         try {
                             original = raw.Clone(0, 0, raw.Width, raw.Height);
                         } catch (cloneErr) {
-                            // Clone failed — proceed without a background source;
+                            // Clone failed â€” proceed without a background source;
                             // raw is still alive and will be handled below.
                         }
                         const targetSize = Utils.getPanelDiscSize();
@@ -3192,7 +3194,7 @@ function init() {
                                 raw, targetSize, imageType, P.interpolationMode
                             );
                             // processForDisc takes full ownership of raw on both
-                            // success and failure — do NOT call safeDispose(raw).
+                            // success and failure â€” do NOT call safeDispose(raw).
                         } else {
                             displayImg = ImageProcessor.scaleProportional(
                                 raw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode
@@ -3209,7 +3211,7 @@ function init() {
                 } catch (e2) {}
             }
             // NOTE: nowPlaying is null in this branch so fb.GetAlbumArtAsync
-            // would have nothing to act on — no async request is needed here.
+            // would have nothing to act on â€” no async request is needed here.
         } catch (e) {}
     } else {
         // Fallback: check shared folder property from PlayList

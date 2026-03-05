@@ -7,6 +7,8 @@
  // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 // === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
 
+window.DrawMode = 1; // 0 - default GDI+ mode. 1 - D2D
+
 window.DefineScript("SMP 64bit PanelArt V3.1.1", { author: "L.E.D.", options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
