@@ -820,6 +820,8 @@ const Regions = {
 const ArtController = {
     // Handle new track - load art and text
     onPlaybackNewTrack(metadb) {
+        TextHeightCache.clear(); // Always clear text cache on new track
+        TextManager.update(metadb);
         ImageManager.loadAlbumArt(metadb);
         runGlitchEffect();
     },
@@ -3216,7 +3218,10 @@ function on_font_changed() {
 
 function runGlitchEffect() {
     const cfg = StateManager.get();
-    if (!cfg.glitchEnabled) return;
+    if (!cfg.glitchEnabled) {
+        RepaintHelper.full(); // Always repaint on track change
+        return;
+    }
     
     if (PanelArt.timers.glitch) { window.ClearInterval(PanelArt.timers.glitch); }
     let glitchCount = 0;
