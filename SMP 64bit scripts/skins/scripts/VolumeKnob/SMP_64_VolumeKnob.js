@@ -16,9 +16,6 @@ include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\panel.js');
 
-include(fb.ProfilePath + 'skins\\js_cache\\UltraCache.js');
-include(fb.ProfilePath + 'skins\\js_cache\\RenderCache.js');
-
 // Panel for DUI/CUI background
 const panel = new _panel(false);
 
