@@ -21,8 +21,8 @@ Foobar2000 64Bit/
         │   └── VolumeKnob/
         │   │   └── VoloumeKnob.js
         │   ├── SMP_64_DiscSpin.js
-        │   ├── SMP_64_PanelArt
-        │   └── SMP_simplyart_archived.js
+        │   └── SMP_64_PanelArt
+        │  
         ├── mask.png
         ├── vinyl_mask.png
         ├── center_album_rim.png
