@@ -7,9 +7,8 @@ Performance ok now on larger panels, added image quality settings for scaling mo
 
 * PanelArt: **Updated* 7 Mar 26(Text Bug), Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization. Dbl click for a random image or right click for a slide show, if you have set up an image folder for .jps .png ect.. 
 Fixed custom file paths, working fairly well, probably. Requires album art to look its best<br><br>
-<img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/VolumeKnob.png">
-<img align="right" width="100" height="100" src="https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/screenshots/DiscSpin.png">
-<img align="right" width="400" height="100" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/foo%20setup.png">
+<img align="right" width="500" height="200" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/hifi.png">
+
 
  Coming Soon™ LCD TimerPro<br>
 <br>
