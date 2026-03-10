@@ -5,7 +5,7 @@ Performance ok now on larger panels, added image quality settings for scaling mo
 
 * VolumeKnob: **Updated* 27 Feb 26, Simple functionality, Hold left mouse and drap up or down to change volume, double click mute, right click themes, non-linear volume control. Could probably be adapted to any type of Knob.<br>
 
-* PanelArt: **Updated* 7 Mar 26(Text Bug), Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization. Dbl click for a random image or right click for a slide show, if you have set up an image folder for .jps .png ect.. 
+* PanelArt: **Updated* 10 Mar 26(Text Bug), Simple Track display and album art background blur/darkness. Multiple Layouts vert./hori. several options in right click menu. A lot of customization. Dbl click for a random image or right click for a slide show, if you have set up an image folder for .jps .png ect.. 
 Fixed custom file paths, working fairly well, probably. Requires album art to look its best<br><br>
 <img align="right" width="500" height="200" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/hifi_foobar2000.png">
 
