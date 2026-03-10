@@ -9,6 +9,8 @@ Performance ok now on larger panels, added image quality settings for scaling mo
 Fixed custom file paths, working fairly well, probably. Requires album art to look its best<br><br>
 <img align="right" width="500" height="200" src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/hifi_foobar2000.png">
 
+*Opacity and slider settings controlled by mouse scroll wheel
+
 
  Coming Soon™ LCD TimerPro<br>
 <br>
