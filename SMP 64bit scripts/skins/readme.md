@@ -99,7 +99,7 @@ Bug Fix's.
 | Random Image | Double-click for random background |
 | Customization | Multiple settings via right-click menu |
 
-**Note:** Album art required for best results.
+**Note:** custom images folder for random images, or make a folder in skins called "images" and place in there. Album art required for best results.
 
 ---
 
@@ -107,11 +107,16 @@ Bug Fix's.
 
 | Control | Function |
 |------|------|
-| Mouse Scroll | Adjust opacity and slider values |
-| Right Click | Panel configuration options |
 | Double Click | Random artwork / actions |
 
 </details>
+
+# Interface Controls
+
+| Control | Function |
+|------|------|
+| Mouse Scroll | Adjust opacity and slider values |
+| Right Click | Panel configuration options |
 
 ---
 
