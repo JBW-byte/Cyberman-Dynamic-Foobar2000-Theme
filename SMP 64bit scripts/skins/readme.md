@@ -13,7 +13,7 @@ Custom **Spider Monkey Panel / JSplitter scripts** designed for **Foobar2000 v2 
 
 <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/hifi_foobar2000.png" width="800">
 
-Using **[Nowbar](https://github.com/jame25/foo_nowbar)** as a Demo for a clean layout.  Coming Soon™ LCD TimerPro<br>
+Using **[Nowbar](https://github.com/jame25/foo_nowbar)** as an example for a clean layout.  Coming Soon™ LCD TimerPro<br>
 
 ---
 
