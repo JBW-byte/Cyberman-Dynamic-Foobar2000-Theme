@@ -101,9 +101,7 @@ Bug Fix's.
 
 **Note:** custom images folder for random images, or make a folder in skins called "images" and place in there. Album art required for best results.
 
----
-
-# Interface Controls
+## Interface Controls
 
 | Control | Function |
 |------|------|
@@ -111,7 +109,9 @@ Bug Fix's.
 
 </details>
 
-# Interface Controls
+---
+
+## Interface Controls
 
 | Control | Function |
 |------|------|
