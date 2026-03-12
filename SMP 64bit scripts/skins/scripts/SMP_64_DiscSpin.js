@@ -1197,49 +1197,66 @@ const ImageLoader = {
 			}
 		}
 
-		// Pass 2: walk one and two levels of subfolders, matching folder names to metadata.
-		for (const customFolder of customFolders) {
-			if (!FileManager.isDirectory(customFolder)) continue;
-			const level1 = FileManager.getSubfolders(customFolder);
-			for (const sub1 of level1) {
-				const sub1Name = _.last(sub1.split('\\')).toLowerCase();
-				const match1   = folderMatchNames.some(n =>
-					sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
-					sub1Name.replace(/\s+/g, '-') === n ||
-					sub1Name.replace(/\s+/g, '_') === n
-				);
-				if (match1) {
-					const img = this.searchInFolder(sub1, patterns, metadata, true)
-					         || this.searchInFolderAnyFile(sub1, patterns);
-					if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
-					// Look one level deeper inside a matched folder.
-					const sub1Folders = FileManager.getSubfolders(sub1);
-					for (const subSub of sub1Folders) {
-						const sImg = this.searchInFolder(subSub, patterns, metadata, true)
-						          || this.searchInFolderAnyFile(subSub, patterns);
-						if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
+	// Pass 2: walk up to three levels of subfolders, matching folder names to metadata.
+	for (const customFolder of customFolders) {
+		if (!FileManager.isDirectory(customFolder)) continue;
+		const level1 = FileManager.getSubfolders(customFolder);
+		for (const sub1 of level1) {
+			const sub1Name = _.last(sub1.split('\\')).toLowerCase();
+			const match1   = folderMatchNames.some(n =>
+				sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
+				sub1Name.replace(/\s+/g, '-') === n ||
+				sub1Name.replace(/\s+/g, '_') === n
+			);
+			if (match1) {
+				// Level 1 match: search in sub1 and its subfolders (level 2)
+				const img = this.searchInFolder(sub1, patterns, metadata, true)
+				         || this.searchInFolderAnyFile(sub1, patterns);
+				if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
+				
+				const sub1Folders = FileManager.getSubfolders(sub1);
+				for (const sub2 of sub1Folders) {
+					const sImg = this.searchInFolder(sub2, patterns, metadata, true)
+					          || this.searchInFolderAnyFile(sub2, patterns);
+					if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
+					
+					// Level 3 search inside level 2 matched folder
+					const sub2Folders = FileManager.getSubfolders(sub2);
+					for (const sub3 of sub2Folders) {
+						const s3Img = this.searchInFolder(sub3, patterns, metadata, true)
+						             || this.searchInFolderAnyFile(sub3, patterns);
+						if (s3Img) return isDiscSearch ? this._loadDiscResult(s3Img) : s3Img;
 					}
-					continue;
 				}
-				// No name match at level1 — try level2 subfolders.
-				const level2 = FileManager.getSubfolders(sub1);
-				for (const sub2 of level2) {
-					const sub2Name = _.last(sub2.split('\\')).toLowerCase();
-					const match2   = folderMatchNames.some(n =>
-						sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
-						sub2Name.replace(/\s+/g, '-') === n ||
-						sub2Name.replace(/\s+/g, '_') === n
-					);
-					if (match2) {
-						const img = this.searchInFolder(sub2, patterns, metadata, true)
-						         || this.searchInFolderAnyFile(sub2, patterns);
-						if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
+				continue;
+			}
+			// No name match at level1 — try level2 subfolders
+			const level2 = FileManager.getSubfolders(sub1);
+			for (const sub2 of level2) {
+				const sub2Name = _.last(sub2.split('\\')).toLowerCase();
+				const match2   = folderMatchNames.some(n =>
+					sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
+					sub2Name.replace(/\s+/g, '-') === n ||
+					sub2Name.replace(/\s+/g, '_') === n
+				);
+				if (match2) {
+					// Level 2 match: search in sub2 and its subfolders (level 3)
+					const img = this.searchInFolder(sub2, patterns, metadata, true)
+					         || this.searchInFolderAnyFile(sub2, patterns);
+					if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
+					
+					const sub2Folders = FileManager.getSubfolders(sub2);
+					for (const sub3 of sub2Folders) {
+						const sImg = this.searchInFolder(sub3, patterns, metadata, true)
+						          || this.searchInFolderAnyFile(sub3, patterns);
+						if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
 					}
 				}
 			}
 		}
-		return null;
-	},
+	}
+	return null;
+},
 
 	// Load a disc-result object { img, path, type, original } from a known file path.
 	// Returns null on any failure so callers can fall through to the next source.

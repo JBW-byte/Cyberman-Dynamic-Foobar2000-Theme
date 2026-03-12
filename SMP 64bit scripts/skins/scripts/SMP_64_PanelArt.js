@@ -771,13 +771,22 @@ const ImageSearch = {
                     sub1Name.replace(/\s+/g, '-') === n || sub1Name.replace(/\s+/g, '_') === n
                 );
                 if (match1) {
+                    // Level 1 match: search in sub1 and its subfolders (level 2)
                     const img = this.searchInFolder(sub1, COVER_PATTERNS, metadata, true)
                              || this.searchInFolderAnyFile(sub1, COVER_PATTERNS);
                     if (img) { this._pathCache.set(baseFolder, img); return img; }
-                    for (const subSub of FileManager.getSubfolders(sub1)) {
-                        const sImg = this.searchInFolder(subSub, COVER_PATTERNS, metadata, true)
-                                  || this.searchInFolderAnyFile(subSub, COVER_PATTERNS);
+                    
+                    for (const sub2 of FileManager.getSubfolders(sub1)) {
+                        const sImg = this.searchInFolder(sub2, COVER_PATTERNS, metadata, true)
+                                  || this.searchInFolderAnyFile(sub2, COVER_PATTERNS);
                         if (sImg) { this._pathCache.set(baseFolder, sImg); return sImg; }
+                        
+                        // Level 3 search inside level 2 matched folder
+                        for (const sub3 of FileManager.getSubfolders(sub2)) {
+                            const s3Img = this.searchInFolder(sub3, COVER_PATTERNS, metadata, true)
+                                        || this.searchInFolderAnyFile(sub3, COVER_PATTERNS);
+                            if (s3Img) { this._pathCache.set(baseFolder, s3Img); return s3Img; }
+                        }
                     }
                     continue;
                 }
@@ -788,9 +797,16 @@ const ImageSearch = {
                         sub2Name.replace(/\s+/g, '-') === n || sub2Name.replace(/\s+/g, '_') === n
                     );
                     if (match2) {
+                        // Level 2 match: search in sub2 and its subfolders (level 3)
                         const img = this.searchInFolder(sub2, COVER_PATTERNS, metadata, true)
                                  || this.searchInFolderAnyFile(sub2, COVER_PATTERNS);
                         if (img) { this._pathCache.set(baseFolder, img); return img; }
+                        
+                        for (const sub3 of FileManager.getSubfolders(sub2)) {
+                            const sImg = this.searchInFolder(sub3, COVER_PATTERNS, metadata, true)
+                                      || this.searchInFolderAnyFile(sub3, COVER_PATTERNS);
+                            if (sImg) { this._pathCache.set(baseFolder, sImg); return sImg; }
+                        }
                     }
                 }
             }
