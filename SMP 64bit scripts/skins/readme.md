@@ -18,7 +18,8 @@ Using **[Nowbar](https://github.com/jame25/foo_nowbar)** as an example for a cle
 ---
 
 # Installation
-
+<br>
+Make a folder called skins and place it in the correct location, download my files and place them in skins keeping any folder structures.<br>
 For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable mode they go in C:\Users\your user name\AppData\Roaming\foobar2000-v2\skins\ <br><br>
 
 1. Add a **[SMP 64bit](https://github.com/marc2k3/spider-monkey-panel-x64/releases).** or **[Jsplitter(D2D Supported)](https://foobar2000.club/forum/viewtopic.php?t=6378)** panel
