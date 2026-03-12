@@ -1,5 +1,10 @@
 # Cyberman-Dynamic Skin Theme for Foobar2000 2.0+ (64-bit)
 
+![Foobar2000](https://img.shields.io/badge/Foobar2000-v2.x-blue)
+![Component](https://img.shields.io/badge/Spider%20Monkey%20Panel-x64-green)
+![License](https://img.shields.io/badge/License-Personal%20Use-lightgrey)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
+
 **Cyberman-Dynamic** is a clean, modern Foobar2000 skin built on the **Default User Interface (DUI)** for **Foobar2000 2.0+ 64-bit**, designed for **portable mode**.
 
 It features a **dynamic colour scheme based on album artwork**, custom playback controls, multiple VU meter skins, and configurable spectrum and layout presets.
