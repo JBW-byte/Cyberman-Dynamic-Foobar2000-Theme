@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -====== SMP 64bit Disc Spin V3.2 ======- \\
+		     // -====== SMP 64bit Disc Spin V3.3 ======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.2', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.3', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -26,7 +26,7 @@ function _fbSanitise(str) {
 
 // ====================== LIFECYCLE PHASE GUARD ======================
 // Prevents callbacks from firing before init() completes or after unload begins.
-const Phase = { BOOT: 0, LIVE: 2, SHUTDOWN: 3 };
+const Phase = { BOOT: 0, LIVE: 1, SHUTDOWN: 2 };
 let phase = Phase.BOOT;
 function isLive() { return phase === Phase.LIVE; }
 
@@ -43,7 +43,7 @@ const props = {
 	savedIsDisc:            new _p('RP.SavedIsDisc', false),
 	maskType:               new _p('RP.MaskType', 0),
 	userOverrideMask:       new _p('RP.UserOverrideMask', false),
-	rotationStep:           new _p('RP.RotationStep', 2),
+	rotationStep:           new _p('RP.RotationStep', 3),
 
 	showReflection:         new _p('Disc.ShowReflection', true),
 	opReflection:           new _p('Disc.OpReflection', 30),
@@ -106,6 +106,7 @@ const CONFIG = Object.freeze({
 	MAX_MASK_CACHE:      10,
 	MAX_RIM_CACHE:       10,
 	MAX_FILE_CACHE:      200,   // Max entries in the file-existence cache
+	MAX_FILE_LIST_CACHE: 30,    // Max folder entries in the image-file-list cache
 	MAX_SUBFOLDER_CACHE: 50,
 	MAX_BG_CACHE:        4,     // LRU slots for blurred background bitmaps
 
@@ -320,12 +321,6 @@ const Utils = {
 
 	// Check whether a path exists on-disk (delegates to the SMP utils object).
 	exists(p)  { return utils.FileTest(p, "e"); },
-	lower(s)   { return s ? s.toLowerCase() : ""; },
-
-	// Strip characters that are unsafe in metadata comparisons but keep common punctuation.
-	cleanMeta(s) {
-		return (s || "").replace(/[^\w\s\-&'+]/g, " ").replace(/\s+/g, " ").trim();
-	},
 
 	// Determine whether a file path belongs to a real disc scan, album art, or the default disc.
 	getImageType(path) {
@@ -345,7 +340,7 @@ const Utils = {
 	detectMaskFromPath(path) {
 		if (!path) return null;
 		const lp = path.toLowerCase();
-		if (lp.includes("vinyl")) return 1;
+		if (/(^|[\\/._-])(vinyl)([\\/._-]|$)/.test(lp)) return 1;
 		if (/(^|[\\/._-])(disc|cd)([\\/._-]|$)/.test(lp)) return 0;
 		return null; // No strong signal — leave the current mask unchanged.
 	},
@@ -423,6 +418,7 @@ const _fso = (function() {
 const FileManager = {
 	cache:          new Map(), // file-path → boolean (exists?)
 	subfolderCache: new Map(), // folder-path → string[] (subfolders)
+	fileListCache: new Map(), // folder-path → string[] (image files)
 
 	// Cached wrapper around _isFile(); evicts the oldest entry once the cache is full.
 	exists(path) {
@@ -434,6 +430,35 @@ const FileManager = {
 			this.cache.delete(this.cache.keys().next().value);
 		}
 		return exists;
+	},
+
+	// Get list of image files in folder (cached)
+	getImageFiles(folder) {
+		if (!folder) return [];
+		if (this.fileListCache.has(folder)) return this.fileListCache.get(folder);
+		
+		const files = [];
+		try {
+			if (_fso && _fso.FolderExists(folder)) {
+				const f = _fso.GetFolder(folder);
+				const en = new Enumerator(f.Files);
+				for (; !en.atEnd(); en.moveNext()) {
+					try {
+						const file = en.item();
+						const ext = file.Path.toLowerCase().match(/\.[^.]+$/);
+						if (ext && CONFIG.EXTENSIONS.includes(ext[0])) {
+							files.push(file.Path);
+						}
+					} catch (_) {}
+				}
+			}
+		} catch (e) {}
+		
+		this.fileListCache.set(folder, files);
+		if (this.fileListCache.size > CONFIG.MAX_FILE_LIST_CACHE) {
+			this.fileListCache.delete(this.fileListCache.keys().next().value);
+		}
+		return files;
 	},
 
 	isDirectory(path) { return path ? _isFolder(path) : false; },
@@ -487,7 +512,7 @@ const FileManager = {
 		}
 
 		this.subfolderCache.set(folder, subfolders);
-		if (this.subfolderCache.size >= CONFIG.MAX_SUBFOLDER_CACHE) {
+		if (this.subfolderCache.size > CONFIG.MAX_SUBFOLDER_CACHE) {
 			this.subfolderCache.delete(this.subfolderCache.keys().next().value);
 		}
 		return subfolders;
@@ -569,6 +594,7 @@ const FileManager = {
 	clear() {
 		this.cache.clear();
 		this.subfolderCache.clear();
+		this.fileListCache.clear();
 	}
 };
 
@@ -666,8 +692,7 @@ const AssetManager = {
 		ImageLoader.clearCache();
 		this.maskCache.clear();
 		this.rimCache.clear();
-		DiscComposite.dispose();
-		RotationCache.clear();
+		DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
 		State.lastFrame         = -1;
 		State.paintCache.valid  = false;
 		Utils.safeDispose(State.img);
@@ -751,8 +776,9 @@ const ImageProcessor = {
 			} catch (e) { return _tagImg(raw); }
 		}
 
+		let newImg = null;
 		try {
-			const newImg = gdi.CreateImage(targetSize, targetSize);
+			newImg = gdi.CreateImage(targetSize, targetSize);
 			let g = null;
 			let released = false;
 			try {
@@ -778,6 +804,8 @@ const ImageProcessor = {
 			Utils.safeDispose(raw);
 			return _tagImg(newImg);
 		} catch (e) {
+			Utils.safeDispose(newImg);
+			Utils.safeDispose(raw);
 			return null;
 		}
 	},
@@ -798,11 +826,12 @@ const ImageProcessor = {
 			} catch (e) { return _tagImg(raw); }
 		}
 
+		const scale  = maxSize / maxDim;
+		const nw     = Math.floor(w * scale);
+		const nh     = Math.floor(h * scale);
+		let newImg = null;
 		try {
-			const scale  = maxSize / maxDim;
-			const nw     = Math.floor(w * scale);
-			const nh     = Math.floor(h * scale);
-			const newImg = gdi.CreateImage(nw, nh);
+			newImg = gdi.CreateImage(nw, nh);
 			let g = null;
 			let released = false;
 			try {
@@ -818,6 +847,8 @@ const ImageProcessor = {
 			Utils.safeDispose(raw);
 			return _tagImg(newImg);
 		} catch (e) {
+			Utils.safeDispose(newImg);
+			Utils.safeDispose(raw);
 			return null;
 		}
 	},
@@ -826,23 +857,27 @@ const ImageProcessor = {
 	// The original image is disposed; a masked clone is returned.
 	applyMask(image, size) {
 		if (!image) return null;
+		let clone = null;
 		try {
-			const clone = image.Clone(0, 0, image.Width, image.Height);
-			const mask  = AssetManager.getMask(size);
+			clone = image.Clone(0, 0, image.Width, image.Height);
+			const mask = AssetManager.getMask(size);
 			if (mask) clone.ApplyMask(mask);
 			Utils.safeDispose(image);
 			return _tagImg(clone);
-		} catch (e) { return _tagImg(image); }
+		} catch (e) {
+			// ApplyMask failed — dispose the partial clone and return the original untouched.
+			Utils.safeDispose(clone);
+			return _tagImg(image);
+		}
 	},
 
 	// Full pipeline for disc images: scale to square then apply the active mask.
 	processForDisc(raw, targetSize, imageType, interpolationMode) {
 		if (!raw) return null;
 		let processed = this.scaleToSquare(raw, targetSize, interpolationMode, imageType);
-		if (!processed) {
-			Utils.safeDispose(raw);
-			return null;
-		}
+		// scaleToSquare always disposes raw internally (on success and in catch);
+		// no need to dispose raw here — it is already gone if processed is null.
+		if (!processed) return null;
 		// Apply the circular mask for both real disc scans and album-art-as-disc.
 		const shouldMask = AssetManager.hasMask() &&
 			(imageType === CONFIG.IMAGE_TYPE.REAL_DISC || imageType === CONFIG.IMAGE_TYPE.ALBUM_ART);
@@ -866,6 +901,7 @@ const State = {
 	pendingArtToken: 0,
 	spinTimer:     null,
 	loadTimer:     null,
+	phaseBTimer:   null,  // Handle for the deferred image-I/O tick (Phase B of loadForMetadb)
 
 	// Paint-layout cache: recalculated only when the panel size or image changes.
 	paintCache: {
@@ -920,11 +956,11 @@ const State = {
 
 		if (discState && newImg) {
 			const size = Utils.getPanelDiscSize();
-
-			DiscComposite.dispose();
+			// build() calls this.dispose() internally — no need to dispose twice.
 			DiscComposite.build(newImg, size, imgType);
-
-			RotationCache.build(DiscComposite.img || newImg);
+			// Schedule RotationCache build asynchronously so the first paint is never blocked.
+			// The slow-path (live rotation) handles the disc until the cache is ready.
+			if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || newImg);
 		} else {
 			DiscComposite.dispose(); // Clears RotationCache via its own dispose chain.
 		}
@@ -1001,6 +1037,10 @@ const State = {
 			window.ClearTimeout(this.loadTimer);
 			this.loadTimer = null;
 		}
+		if (this.phaseBTimer) {
+			window.ClearTimeout(this.phaseBTimer);
+			this.phaseBTimer = null;
+		}
 		const img   = this.img;
 		const bgImg = this.bgImg;
 		this.img             = null;
@@ -1047,12 +1087,13 @@ const State = {
 // Orchestrates all image searches (disc, cover, async album art) and
 // wires results into State.setImage().
 const ImageLoader = {
-	_pathCache: new Map(), // disc:/cover: + folder → cached image path string (or null)
-	tf_path:    fb.TitleFormat("$directory_path(%path%)"),
-	tf_folder:  fb.TitleFormat("$directory(%path%)"),
-	tf_artist:  fb.TitleFormat("%artist%"),
-	tf_album:   fb.TitleFormat("%album%"),
-	tf_title:   fb.TitleFormat("%title%"),
+	_pathCache:    new Map(), // disc:/cover: + folder → cached image path string (or null)
+	tf_path:       fb.TitleFormat("$directory_path(%path%)"),
+	tf_folder:     fb.TitleFormat("$directory(%path%)"),
+	tf_artist:     fb.TitleFormat("%artist%"),
+	tf_album:      fb.TitleFormat("%album%"),
+	tf_title:      fb.TitleFormat("%title%"),
+	tf_discnumber: fb.TitleFormat("%discnumber%"),
 
 	clearCache() { this._pathCache.clear(); },
 
@@ -1075,8 +1116,8 @@ const ImageLoader = {
 	// Search a single folder for an image matching any of the given patterns or
 	// derived metadata name variants.
 	searchInFolder(folder, patterns, metadata, useVariations = false) {
-		const artistTitle      = (metadata.artist && metadata.title)
-			? metadata.artist + ' - ' + metadata.title : '';
+		// albumTitle and artistAlbumTitle are extra combinations not in the pre-built metadata object.
+		// metadata.artistTitle already covers 'artist - title'; no local duplicate needed.
 		const albumTitle       = (metadata.album && metadata.title)
 			? metadata.album + ' - ' + metadata.title : '';
 		const artistAlbumTitle = (metadata.artist && metadata.album && metadata.title)
@@ -1084,7 +1125,7 @@ const ImageLoader = {
 		const metadataNames = _.compact([
 			metadata.album, metadata.title, metadata.artist,
 			metadata.folder, metadata.artistTitle, metadata.artistAlbum,
-			artistTitle, albumTitle, artistAlbumTitle
+			albumTitle, artistAlbumTitle
 		]);
 		const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames, useVariations);
 		return FileManager.findImageInPaths(paths);
@@ -1092,8 +1133,18 @@ const ImageLoader = {
 
 	// Search a single folder without metadata context — pattern-only filename matching.
 	searchInFolderAnyFile(folder, patterns) {
-		const paths = FileManager.buildSearchPaths(folder, patterns, []);
-		return FileManager.findImageInPaths(paths);
+		// Use cached file list for performance
+		const files = FileManager.getImageFiles(folder);
+		const lowerPatterns = patterns.map(p => p.toLowerCase());
+		for (const filePath of files) {
+			const fileName = filePath.toLowerCase().split('\\').pop();
+			for (const pattern of lowerPatterns) {
+				if (fileName.includes(pattern)) {
+					return filePath;
+				}
+			}
+		}
+		return null;
 	},
 
 	// Recursively search a folder tree up to maxLevels deep.
@@ -1270,7 +1321,7 @@ const ImageLoader = {
 		}
 
 		// --- Step 3: Recurse two subfolder levels ---
-		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, 2, true, metadata);
+		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, CONFIG.MAX_SUBFOLDER_DEPTH, true, metadata);
 		if (trackSubMatch) {
 			this._pathCache.set(cacheKey, { path: trackSubMatch.path, type: trackSubMatch.type });
 			return trackSubMatch;
@@ -1312,7 +1363,7 @@ const ImageLoader = {
 		const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.COVER_PATTERNS);
 		if (trackAnyMatch)  { this._pathCache.set(cacheKey, trackAnyMatch);  return trackAnyMatch; }
 
-		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, 2, false, metadata);
+		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, CONFIG.MAX_SUBFOLDER_DEPTH, false, metadata);
 		if (trackSubMatch)  { this._pathCache.set(cacheKey, trackSubMatch);  return trackSubMatch; }
 
 		const customResult = this.searchCustomFolders(metadata, CONFIG.COVER_PATTERNS, false);
@@ -1343,84 +1394,93 @@ const ImageLoader = {
 
 		const doLoad = () => {
 			State.currentMetadb = metadb;
-			State.loadToken++;
+			const myToken = ++State.loadToken;
 
-			// Pre-load a cover image as the background blur source even when a disc image will be shown.
-			let bgOriginal = null;
-			let coverRaw   = null;
+			// ── Phase A: path searches only (fast — uses FileManager cache, no gdi.Image).
+			// Running this synchronously is acceptable because FileManager.exists() is cached
+			// after the first lookup and returns near-instantly on subsequent calls.
 			const coverPath = this.searchForCover(metadb, folderPath);
-			if (coverPath) {
-				try {
-					const rawCover = gdi.Image(coverPath);
-					if (rawCover) {
-						bgOriginal = rawCover.Clone(0, 0, rawCover.Width, rawCover.Height);
-						_tagImg(bgOriginal);
-						coverRaw = rawCover;
-					}
-				} catch (e) {}
-			}
 
-			// --- Priority 1: Real disc scan ---
-			if (!P.useAlbumArtOnly) {
-				const result = this.searchForDisc(metadb, folderPath);
-				if (result) {
-					Utils.safeDispose(coverRaw);
-					const bgSrc = bgOriginal || result.original;
-					if (bgOriginal) Utils.safeDispose(result.original);
-					State.setImage(result.img, true, result.type, bgSrc);
-					props.savedPath.value    = result.path;
-					props.savedIsDisc.enabled = true;
-					State.updateTimer();
-					// If no cover was found for the background, fall back to async album art.
-					if (!bgSrc) {
-						State.pendingArtToken = State.loadToken;
-						utils.GetAlbumArtAsync(window.ID, metadb, 0);
-					}
-					return;
-				}
-			}
+			// ── Phase B: image I/O deferred to next event-loop tick.
+			// Giving the JS engine a tick to process queued paint and timer callbacks
+			// means the disc keeps rotating visibly while we load/process the new image.
+			State.phaseBTimer = window.SetTimeout(() => {
+				State.phaseBTimer = null;
+				if (State.loadToken !== myToken) return; // Superseded by a newer load
 
-			// --- Priority 2: Cover art found on disk ---
-			if (coverRaw) {
-				try {
-					const targetSize = Utils.getPanelDiscSize();
-					if (P.useAlbumArtOnly) {
-						// Display cover art statically without a circular mask.
-						const scaled = ImageProcessor.scaleProportional(
-							coverRaw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode
-						);
-						if (scaled) {
-							State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, bgOriginal);
-							props.savedPath.value    = coverPath;
-							props.savedIsDisc.enabled = false;
-							State.updateTimer();
-							return;
+				// Pre-load cover as background blur source.
+				let bgOriginal = null;
+				let coverRaw   = null;
+				if (coverPath) {
+					try {
+						const rawCover = gdi.Image(coverPath);
+						if (rawCover) {
+							bgOriginal = rawCover.Clone(0, 0, rawCover.Width, rawCover.Height);
+							_tagImg(bgOriginal);
+							coverRaw = rawCover;
 						}
+					} catch (e) {}
+				}
+
+				// --- Priority 1: Real disc scan ---
+				if (!P.useAlbumArtOnly) {
+					const result = this.searchForDisc(metadb, folderPath);
+					if (result) {
+						Utils.safeDispose(coverRaw);
+						const bgSrc = bgOriginal || result.original;
+						if (bgOriginal) Utils.safeDispose(result.original);
+						State.setImage(result.img, true, result.type, bgSrc);
+						props.savedPath.value     = result.path;
+						props.savedIsDisc.enabled = true;
+						State.updateTimer();
+						if (!bgSrc) {
+							State.pendingArtToken = myToken;
+							utils.GetAlbumArtAsync(window.ID, metadb, 0);
+						}
+						return;
+					}
+				}
+
+				// --- Priority 2: Cover art found on disk ---
+				if (coverRaw) {
+					try {
+						const targetSize = Utils.getPanelDiscSize();
+						if (P.useAlbumArtOnly) {
+							const scaled = ImageProcessor.scaleProportional(
+								coverRaw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode
+							);
+							if (scaled) {
+								State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, bgOriginal);
+								props.savedPath.value     = coverPath;
+								props.savedIsDisc.enabled = false;
+								State.updateTimer();
+								return;
+							}
+							Utils.safeDispose(coverRaw);
+							Utils.safeDispose(bgOriginal);
+						} else {
+							const processed = ImageProcessor.processForDisc(
+								coverRaw, targetSize, CONFIG.IMAGE_TYPE.ALBUM_ART, P.interpolationMode
+							);
+							if (processed) {
+								State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART, bgOriginal);
+								props.savedPath.value     = coverPath;
+								props.savedIsDisc.enabled = true;
+								State.updateTimer();
+								return;
+							}
+							Utils.safeDispose(bgOriginal);
+						}
+					} catch (e) {
 						Utils.safeDispose(coverRaw);
 						Utils.safeDispose(bgOriginal);
-					} else {
-						// Render cover art as a disc by applying the circular mask.
-						const processed = ImageProcessor.processForDisc(
-							coverRaw, targetSize, CONFIG.IMAGE_TYPE.ALBUM_ART, P.interpolationMode
-						);
-						if (processed) {
-							State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART, bgOriginal);
-							props.savedPath.value    = coverPath;
-							props.savedIsDisc.enabled = true;
-							State.updateTimer();
-							return;
-						}
-						Utils.safeDispose(bgOriginal);
 					}
-				} catch (e) {
-					Utils.safeDispose(coverRaw);
-					Utils.safeDispose(bgOriginal);
 				}
-			}
 
-			// --- Priority 3: Async album art via foobar's built-in provider ---
-			State.pendingArtToken = State.loadToken;
-			utils.GetAlbumArtAsync(window.ID, metadb, 0);
+				// --- Priority 3: Async album art via foobar's built-in provider ---
+				State.pendingArtToken = myToken;
+				utils.GetAlbumArtAsync(window.ID, metadb, 0);
+			}, 0);
 		};
 
 		if (immediate) doLoad();
@@ -1440,10 +1500,10 @@ const ImageLoader = {
 		}
 
 		if (!metadb) {
-			// Null metadb with a valid image is unusual — treat as load failure.
+			// Null metadb — treat as load failure (token already verified above).
 			if (image) {
 				Utils.safeDispose(image);
-			} else if (State.pendingArtToken === State.loadToken && State.currentMetadb) {
+			} else if (State.currentMetadb) {
 				this.loadDefaultDisc();
 				State.updateTimer();
 			}
@@ -1469,7 +1529,7 @@ const ImageLoader = {
 						State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
 						if (image_path) props.savedPath.value = image_path;
 					} else {
-						Utils.safeDispose(image);
+						// scaleProportional already disposes image (raw) in its catch; only original needs cleanup.
 						Utils.safeDispose(original);
 					}
 				} else {
@@ -1515,9 +1575,8 @@ const ImageLoader = {
 				props.savedPath.value    = CONFIG.PATHS.DEFAULT_DISC;
 				props.savedIsDisc.enabled = true;
 				State.updateTimer();
-			} else {
-				Utils.safeDispose(raw);
 			}
+			// scaleToSquare already disposes raw in its catch; no explicit dispose needed here.
 		} catch (e) {}
 	},
 
@@ -1528,80 +1587,128 @@ const ImageLoader = {
 // Pre-renders every rotation step into individual bitmaps so each paint call
 // only needs a DrawImage copy rather than an on-the-fly rotation.
 const RotationCache = {
-	frames:         [],
-	MAX_FRAME_SIZE: 1000,  // Downscale the source before rotating if it exceeds this
+	frames:         [],   // Live frames — always valid; served during a build
+	MAX_FRAME_SIZE: 1000, // Downscale source before rotating if it exceeds this
 	_sourceKey:     '',
+	_buildTimer:    null, // SetTimeout handle for the current batch step
+	_pendingFrames: null, // New frames being built; null when idle
+	_pendingScaled: null, // Downscaled source bitmap for the in-progress build
+	_pendingAngle:  0,    // Next angle to render in the current build
+	_pendingKey:    '',   // Key for the in-progress build
+	BATCH_SIZE:     8,    // Frames per tick (~5–10 ms per batch at 500px)
 
 	get step() { return P.rotationStep; },
 
+	// Cancel any in-flight build and dispose its resources.
+	_cancelBuild() {
+		if (this._buildTimer !== null) { window.ClearTimeout(this._buildTimer); this._buildTimer = null; }
+		if (this._pendingFrames) { this._pendingFrames.forEach(f => Utils.safeDispose(f)); this._pendingFrames = null; }
+		Utils.safeDispose(this._pendingScaled); this._pendingScaled = null;
+		this._pendingAngle = 0;
+		this._pendingKey   = '';
+	},
+
+	// Wipe live frames and cancel any pending build.
 	clear() {
+		this._cancelBuild();
 		this.frames.forEach(f => { try { f.Dispose(); } catch (_) {} });
 		this.frames     = [];
 		this._sourceKey = '';
 	},
 
-	// Build (or skip if already current) the full 360° frame sequence.
-	// cache is always rebuilt for the new content.
-	build(img) {
+	// Schedule an incremental, non-blocking frame-cache build.
+	//
+	// Old frames in this.frames remain live and are served by getFrame() throughout
+	// the build — the disc never falls back to the slow DrawImage path during track
+	// changes. New frames are built BATCH_SIZE per event-loop tick into
+	// _pendingFrames; when the full set is ready they are atomically swapped in.
+	scheduleAsyncBuild(img) {
 		if (!img) return;
 
-		const step = this.step;
-		const srcW = Math.min(img.Width,  this.MAX_FRAME_SIZE);
-		const srcH = Math.min(img.Height, this.MAX_FRAME_SIZE);
-		// Unique key: content identity via _uid, source dimensions, and rotation step.
-		const key  = (img._uid !== undefined ? img._uid : (img._path || 'img')) +
-		             '|' + srcW + '|' + srcH + '|' + step;
-		if (this._sourceKey === key && this.frames.length > 0) return; // Already current
-		this.clear();
-		this._sourceKey = key;
+		// Re-resolve source: composite takes priority over the raw disc image.
+		const composite = (DiscComposite.valid && DiscComposite.img) ? DiscComposite.img : img;
+		const step      = this.step;
+		const srcW      = Math.min(composite.Width,  this.MAX_FRAME_SIZE);
+		const srcH      = Math.min(composite.Height, this.MAX_FRAME_SIZE);
+		const key       = (composite._uid !== undefined ? composite._uid : 'img') +
+		                  '|' + srcW + '|' + srcH + '|' + step;
 
-		// Optionally downscale the source once; rotating a smaller image is faster.
-		let src    = img;
-		let scaled = null;
-		if (srcW < img.Width || srcH < img.Height) {
+		// Skip if live frames already match this source.
+		if (this._sourceKey === key && this.frames.length > 0) return;
+		// Skip if a build for the same source is already in progress.
+		if (this._pendingKey === key && this._pendingFrames !== null) return;
+
+		this._cancelBuild();
+		this._pendingFrames = [];
+		this._pendingAngle  = 0;
+		this._pendingKey    = key;
+
+		// Downscale once up-front so each batch uses the smaller bitmap.
+		let src = composite;
+		if (srcW < composite.Width || srcH < composite.Height) {
 			try {
-				scaled = gdi.CreateImage(srcW, srcH);
-				let gs = null, gsReleased = false;
+				const down = gdi.CreateImage(srcW, srcH);
+				let gs = null, gsR = false;
 				try {
-					gs = scaled.GetGraphics();
+					gs = down.GetGraphics();
 					gs.SetInterpolationMode(P.interpolationMode);
-					gs.DrawImage(img, 0, 0, srcW, srcH, 0, 0, img.Width, img.Height);
-					scaled.ReleaseGraphics(gs);
-					gsReleased = true;
-					gs = null;
+					gs.DrawImage(composite, 0, 0, srcW, srcH, 0, 0, composite.Width, composite.Height);
+					down.ReleaseGraphics(gs); gsR = true; gs = null;
 				} finally {
-					if (!gsReleased && gs) { try { scaled.ReleaseGraphics(gs); } catch (_) {} }
+					if (!gsR && gs) { try { down.ReleaseGraphics(gs); } catch (_) {} }
 				}
-				src = scaled;
-			} catch (e) {
-				Utils.safeDispose(scaled);
-				scaled = null;
-				src = img; // Fall back to original size
-			}
+				this._pendingScaled = down;
+				src = down;
+			} catch (e) { /* fall back to full-size */ }
 		}
 
-		// Render one frame per rotation step across the full 360°.
-		for (let a = 0; a < 360; a += step) {
-			try {
-				const frame = gdi.CreateImage(src.Width, src.Height);
-				let g = null, released = false;
+		const buildBatch = () => {
+			this._buildTimer = null;
+			if (!this._pendingFrames || this._pendingKey !== key) return; // Superseded
+
+			// Render up to BATCH_SIZE frames per tick.
+			const end = Math.min(this._pendingAngle + this.BATCH_SIZE * step, 360);
+			for (let a = this._pendingAngle; a < end; a += step) {
 				try {
-					g = frame.GetGraphics();
-					g.DrawImage(src, 0, 0, src.Width, src.Height, 0, 0, src.Width, src.Height, a, 255);
-					frame.ReleaseGraphics(g);
-					released = true;
-					g = null;
-				} finally {
-					if (!released && g) { try { frame.ReleaseGraphics(g); } catch (_) {} }
-				}
-				this.frames.push(frame);
-			} catch (e) {} // A single bad frame is skipped; rotation continues
-		}
+					const frame = gdi.CreateImage(src.Width, src.Height);
+					let g = null, rel = false;
+					try {
+						g = frame.GetGraphics();
+						g.DrawImage(src, 0, 0, src.Width, src.Height, 0, 0, src.Width, src.Height, a, 255);
+						frame.ReleaseGraphics(g); rel = true; g = null;
+					} finally {
+						if (!rel && g) { try { frame.ReleaseGraphics(g); } catch (_) {} }
+					}
+					this._pendingFrames.push(frame);
+				} catch (e) {} // Skip bad frame; build continues
+			}
+			this._pendingAngle = end;
 
-		Utils.safeDispose(scaled); // The downscaled copy is no longer needed
+			if (this._pendingAngle < 360) {
+				// More batches remain — yield and continue.
+				this._buildTimer = window.SetTimeout(buildBatch, 0);
+			} else {
+				// ── Atomic swap ──────────────────────────────────────────────────
+				// Old frames are still being served by getFrame() right up to this
+				// point. We swap in one operation so there is never a gap.
+				const oldFrames    = this.frames;
+				this.frames        = this._pendingFrames;
+				this._sourceKey    = key;
+				this._pendingFrames = null;
+				Utils.safeDispose(this._pendingScaled); this._pendingScaled = null;
+				this._pendingAngle = 0;
+				this._pendingKey   = '';
+				oldFrames.forEach(f => { try { f.Dispose(); } catch (_) {} });
+				if (isLive()) window.Repaint();
+			}
+		};
+
+		// First batch fires next tick — old frames still serve any paint that fires first.
+		this._buildTimer = window.SetTimeout(buildBatch, 0);
 	},
 
-	// Look up the pre-rendered frame closest to the given angle.
+	// Return the pre-rendered frame closest to the given angle.
+	// During an incremental build this still returns from the old (live) frames.
 	getFrame(angle) {
 		if (this.frames.length === 0) return null;
 		const idx = Math.floor(angle / this.step) % this.frames.length;
@@ -1996,7 +2103,8 @@ const Renderer = {
 		// On normal load this branch is never reached because State.setImage pre-builds both.
 		if (!DiscComposite.valid && State.img) {
 			DiscComposite.build(State.img, Math.floor(size), State.imageType);
-			RotationCache.build(DiscComposite.img || State.img);
+			// Also schedule the frame cache rebuild so resize doesn't permanently lose fast-path.
+			if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || State.img);
 		}
 
 		const composite = DiscComposite.valid && DiscComposite.img ? DiscComposite.img : State.img;
@@ -2006,7 +2114,8 @@ const Renderer = {
 				// Fast path: copy the pre-rendered rotated frame directly.
 				gr.DrawImage(frame, x, y, size, size, 0, 0, frame.Width, frame.Height);
 			} else {
-				// Slow path (should rarely occur): rotate on-the-fly without a cached frame.
+				// Slow path: live rotation while the async frame cache is building.
+				// Keeps the disc spinning without stalling the paint thread.
 				gr.DrawImage(composite, x, y, size, size, 0, 0,
 					composite.Width, composite.Height, State.angle, 255);
 			}
@@ -2411,7 +2520,7 @@ const MenuManager = {
 	// Kept separate so users on other panel hosts are not confused by an irrelevant option.
 	addJSplitterMenu(parent) {
 		const jsMenu          = window.CreatePopupMenu();
-		const currentDrawMode = window.GetProperty('RP.DrawMode', 1);
+		const currentDrawMode = window.GetProperty('RP.DrawMode', 0);
 		jsMenu.AppendMenuItem(0, 950,
 			'Renderer: ' + (currentDrawMode === 1
 				? 'D2D  ✓  →  Switch to GDI+'
@@ -2479,8 +2588,7 @@ const MenuManager = {
 			toggles[idx].prop.toggle();
 			if (toggles[idx].reload && State.currentMetadb) {
 				ImageLoader.clearCache();
-				DiscComposite.dispose();
-				RotationCache.clear();
+				DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
 				State.lastFrame = -1;
 				ImageLoader.loadForMetadb(State.currentMetadb, true);
 			}
@@ -2498,8 +2606,7 @@ const MenuManager = {
 		if (interpMode) {
 			props.interpolationMode.value = interpMode.value;
 			ImageLoader.clearCache();
-			DiscComposite.dispose();
-			RotationCache.clear();
+			DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
 			OverlayInvalidator.request();
 			State.lastFrame        = -1;
 			State.paintCache.valid = false;
@@ -2517,8 +2624,7 @@ const MenuManager = {
 			ImageLoader.clearCache();
 			AssetManager.maskCache.clear();
 			AssetManager.rimCache.clear();
-			DiscComposite.dispose();
-			RotationCache.clear();
+			DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
 			OverlayInvalidator.request();
 			State.paintCache.valid = false;
 			State.lastFrame        = -1;
@@ -2541,14 +2647,9 @@ const MenuManager = {
 			const newStep    = stepValues[idx];
 			if (newStep !== props.rotationStep.value) {
 				props.rotationStep.value = newStep;
-				// Rebuild rotation frames at the new angular resolution.
+				// Clear rotation frames - will rebuild lazily on next paint
 				DiscComposite.dispose();
 				State.lastFrame = -1;
-				if (State.img) {
-					const size = Utils.getPanelDiscSize();
-					DiscComposite.build(State.img, size, State.imageType);
-					RotationCache.build(DiscComposite.img || State.img);
-				}
 				changed = true;
 			}
 		}
@@ -2742,7 +2843,7 @@ const MenuManager = {
 
 		// --- Renderer toggle (ID 950): persist new draw mode and reload the panel ---
 		if (idx === 950) {
-			const next = window.GetProperty('RP.DrawMode', 1) === 1 ? 0 : 1;
+			const next = window.GetProperty('RP.DrawMode', 0) === 1 ? 0 : 1;
 			window.SetProperty('RP.DrawMode', next);
 			window.Reload();
 			return;
@@ -2785,6 +2886,30 @@ const ArtDispatcher = {
 				// Skip reload if the new track's art is already displayed.
 				if (metadb && State.currentMetadb && State.img &&
 				    State.currentMetadb.Compare(metadb)) return;
+				// Skip rebuild when the new track resolves to the same artwork.
+				// Primary check: same containing folder → same image files on disk.
+				// Secondary check: same album + disc number covers multi-disc albums
+				// whose tracks live in separate subfolders but share one artwork root.
+				if (metadb && State.currentMetadb && State.img) {
+					const newFolder = ImageLoader.tf_path.EvalWithMetadb(metadb);
+					const curFolder = ImageLoader.tf_path.EvalWithMetadb(State.currentMetadb);
+					if (newFolder === curFolder) {
+						State.currentMetadb = metadb;
+						return;
+					}
+					const newAlbum  = ImageLoader.tf_album.EvalWithMetadb(metadb);
+					const curAlbum  = ImageLoader.tf_album.EvalWithMetadb(State.currentMetadb);
+					const newArtist = ImageLoader.tf_artist.EvalWithMetadb(metadb);
+					const curArtist = ImageLoader.tf_artist.EvalWithMetadb(State.currentMetadb);
+					const newDisc   = ImageLoader.tf_discnumber.EvalWithMetadb(metadb);
+					const curDisc   = ImageLoader.tf_discnumber.EvalWithMetadb(State.currentMetadb);
+					if (newAlbum && newAlbum === curAlbum &&
+					    newArtist === curArtist &&
+					    newDisc   === curDisc) {
+						State.currentMetadb = metadb;
+						return;
+					}
+				}
 				if (metadb) ImageLoader.loadForMetadb(metadb, true);
 				break;
 
@@ -2799,7 +2924,9 @@ const ArtDispatcher = {
 
 			case 'selection':
 				// Only act when nothing is playing; the playing track takes priority.
-				if (metadb) ImageLoader.loadForMetadb(metadb, false);
+				// Guard is re-checked here because dispatch is deferred 50ms — playback
+				// may have started in that window after on_selection_changed queued this.
+				if (!fb.IsPlaying && !fb.IsPaused && metadb) ImageLoader.loadForMetadb(metadb, false);
 				break;
 
 			case 'playlist':
@@ -2996,6 +3123,7 @@ function on_script_unload() {
 	ArtDispatcher._pending = null;
 	if (State.loadTimer) { window.ClearTimeout(State.loadTimer); State.loadTimer = null; }
 	if (readyTimer)      { window.ClearTimeout(readyTimer);      readyTimer      = null; }
+	RotationCache._cancelBuild(); // Cancels timer + disposes _pendingFrames/_pendingScaled
 
 	OverlayInvalidator.cancel();
 	if (SliderRenderer._font) { try { SliderRenderer._font.Dispose(); } catch (e) {} SliderRenderer._font = null; }

@@ -1,6 +1,6 @@
 'use strict';
            // ============== AUTHOR L.E.D. ============== \\
-          // ==== Panel Artwork and Trackinfo v3.2  ==== \\
+          // ==== Panel Artwork and Trackinfo v3.3  ==== \\
          // ========== Blur Artwork + Trackinfo =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -10,7 +10,7 @@
 window.DrawMode = 0; // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript("SMP 64bit PanelArt V3.2", { author: "L.E.D.", grab_focus: true });
+window.DefineScript("SMP 64bit PanelArt V3.3", { author: "L.E.D.", grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -89,7 +89,9 @@ const PA_GREY180      = _RGB(180, 180, 180);
 const PA_BORDER_LIGHT = _RGB(80, 80, 80);
 const PA_BORDER_DARK  = _RGB(20, 20, 20);
 const PA_MODE_BG      = _RGB(5, 5, 5);      // image/slide mode background fill
-const PA_GLITCH_BASE  = _RGB(5, 5, 15);     // glitch overlay base tint
+const PA_GLITCH_BASE  = _RGB(5, 5, 15);       // glitch overlay base tint
+const PA_GLITCH_CHROMA = _RGB(220, 225, 230); // glitch chromatic-aberration tint
+const PA_GLITCH_FLASH  = _RGB(200, 210, 230); // glitch high-intensity flash tint
 
 const GLITCH_SHIFT_COLORS = [
     _RGB(100,200,255),_RGB(180,200,230),_RGB(150,255,150),
@@ -205,15 +207,17 @@ const Validator = {
         v.artistFontName = v.artistFontName || def.artistFontName;
         v.extraFontName  = v.extraFontName  || def.extraFontName;
         v.albumArtFloat  = _.includes(["left","right","top","bottom"], v.albumArtFloat) ? v.albumArtFloat : def.albumArtFloat;
+        // Validate packed ARGB colour fields — coerce to unsigned 32-bit, fall back to default on NaN.
+        v.borderColor           = (!_.isNumber(v.borderColor)           || isNaN(v.borderColor))           ? def.borderColor           : v.borderColor           >>> 0;
+        v.customBackgroundColor = (!_.isNumber(v.customBackgroundColor) || isNaN(v.customBackgroundColor)) ? def.customBackgroundColor : v.customBackgroundColor >>> 0;
+        v.customPhosphorColor   = (!_.isNumber(v.customPhosphorColor)   || isNaN(v.customPhosphorColor))   ? def.customPhosphorColor   : v.customPhosphorColor   >>> 0;
         v.imageMode  = !!v.imageMode;
         v.slideMode  = !!v.slideMode;
+        // slideMode and imageMode are mutually exclusive; a corrupted save or preset
+        // could have both true.  Clear imageMode so only slideMode activates on load.
+        if (v.imageMode && v.slideMode) v.imageMode = false;
         v.slideIndex = _.clamp(v.slideIndex ?? def.slideIndex, 0, 9999);
         return v;
-    },
-
-    validateColor(color, defaultColor) {
-        if (!_.isNumber(color) || isNaN(color)) return defaultColor;
-        return color >>> 0;
     }
 };
 
@@ -251,7 +255,8 @@ const FileManager = {
             c.replace(/\s+/g, '-'),
             c.replace(/\s+/g, '_'),
             _.toLower(c),
-            _.toLower(c.replace(/\s+/g, '-'))
+            _.toLower(c.replace(/\s+/g, '-')),
+            _.toLower(c.replace(/\s+/g, '_'))
         ]).filter(v => v && v.length > 0);
     },
 
@@ -301,22 +306,6 @@ const FileManager = {
     },
 
     findImageInPaths(paths) { return _.find(paths, p => this.exists(p)) || null; },
-
-    matchesFolderName(folderPath, searchNames) {
-        if (!folderPath || _.isEmpty(searchNames)) return false;
-        const folderName       = _.last(folderPath.split('\\'));
-        const lowerFolderName  = folderName.toLowerCase();
-        const folderDash       = lowerFolderName.replace(/\s+/g, '-');
-        const folderUnderscore = lowerFolderName.replace(/\s+/g, '_');
-        return _.some(searchNames, name => {
-            if (!name) return false;
-            const n = name.toLowerCase();
-            if (lowerFolderName === n || folderDash === n || folderUnderscore === n) return true;
-            if (lowerFolderName.includes(n) || n.includes(lowerFolderName) ||
-                folderDash.includes(n)      || n.includes(folderDash))       return true;
-            return false;
-        });
-    },
 
     clear() { this.cache.clear(); }
 };
@@ -393,7 +382,7 @@ const PanelArt = {
         folder: fb.TitleFormat("$directory(%path%)")
     },
 
-    timers: { blurRebuild: null, overlayRebuild: null, imageAnim: null, glitch: null },
+    timers: { blurRebuild: null, overlayRebuild: null, glitch: null },
 
     imageMode:    false, imageImage:  null,
     glitchFrame:  0,     // >0 means a glitch animation frame is in progress
@@ -421,7 +410,7 @@ const ArtCache = {
         if (entry) { entry.refCount++; return entry.image; }
         let scaled = null;
         try { scaled = srcImg.Resize(targetW, targetH); } catch (e) { return null; }
-        this._scaledCache.set(key, { image: scaled, refCount: 1 });
+        this._scaledCache.set(key, { image: scaled, refCount: 2 }); // refCount 2: immune to first eviction pass
         if (this._scaledCache.size > 20) {
             let evicted = false;
             for (const [k, v] of this._scaledCache) {
@@ -493,9 +482,9 @@ const RepaintHelper = {
         this.region(b, b, d.width - b * 2, d.height - b * 2);
     },
     text() {
-        const d = PanelArt.dimensions, b = StateManager.get().borderSize || 0;
-        const artW = Math.floor(d.width * 0.4);
-        this.region(artW, b, d.width - artW - b, d.height - b * 2);
+        // albumArtFloat can be left/right/top/bottom; the text area position differs
+        // for each, so a full repaint is the only safe option here.
+        window.Repaint();
     }
 };
 
@@ -671,7 +660,6 @@ const ImageSearch = {
         const folder = tf.folder.EvalWithMetadb(metadb);
         return {
             artist, album, title, folder,
-            artistTitle: (artist && title) ? `${artist} - ${title}` : "",
             artistAlbum: (artist && album) ? `${artist} - ${album}` : ""
         };
     },
@@ -750,13 +738,12 @@ const ImageSearch = {
         const trackAny = this.searchInFolderAnyFile(baseFolder, COVER_PATTERNS);
         if (trackAny)   { this._pathCache.set(baseFolder, trackAny);   return trackAny; }
 
-        const trackSub = this._searchFolderTree(baseFolder, COVER_PATTERNS, 2);
+        const trackSub = this._searchFolderTree(baseFolder, COVER_PATTERNS, MAX_SUBFOLDER_DEPTH);
         if (trackSub)   { this._pathCache.set(baseFolder, trackSub);   return trackSub; }
 
         // Custom folder search
-        const artistAlbumDash  = (metadata.artist && metadata.album) ? metadata.artist + ' - ' + metadata.album : '';
         const artistAlbumSpace = (metadata.artist && metadata.album) ? metadata.artist + ' ' + metadata.album   : '';
-        const simpleNames = _.compact([metadata.title, metadata.artist, metadata.album, artistAlbumDash, artistAlbumSpace]);
+        const simpleNames = _.compact([metadata.title, metadata.artist, metadata.album, metadata.artistAlbum, artistAlbumSpace]);
         const nameVariations = [];
         _.forEach(simpleNames, name => {
             const lower = name.toLowerCase();
@@ -1079,9 +1066,12 @@ const GlitchRenderer = {
             const col2 = GLITCH_SHIFT_COLORS[Math.floor(Math.random() * GLITCH_SHIFT_COLORS.length)];
             const sx1  = gx + shift * shiftDir,   rw1 = gw - shift;
             const sx2  = gx + shift * -shiftDir,  rw2 = gw - shift;
-            if (sx1 >= gx && rw1 > 0) gr.FillSolidRect(sx1, gy, rw1, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));
-            gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(220, 225, 230), 3));
-            if (sx2 >= gx && rw2 > 0) gr.FillSolidRect(sx2, gy, rw2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));
+            // Clip both strips to the glitch region — without Math.max the strip whose
+            // origin falls left of gx is silently skipped, leaving the chromatic-aberration
+            // effect half-missing on every other frame (whichever shiftDir is picked).
+            if (rw1 > 0) gr.FillSolidRect(Math.max(sx1, gx), gy, rw1, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));
+            gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(PA_GLITCH_CHROMA, 3));
+            if (rw2 > 0) gr.FillSolidRect(Math.max(sx2, gx), gy, rw2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));
         }
 
         const numSlices = Math.floor(intensity * 6) + 2;
@@ -1129,7 +1119,7 @@ const GlitchRenderer = {
             gr.FillSolidRect(nx, ny, ns, ns, _RGB(nr, ng, nb));
         }
 
-        if (intensity > 0.75) gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(_RGB(200, 210, 230), 50));
+        if (intensity > 0.75) gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(PA_GLITCH_FLASH, 50));
 
         if (intensity > 0.4) {
             const tx = gx + Math.floor(Math.random() * gw * 0.6);
@@ -1276,7 +1266,7 @@ const Renderer = {
                 textH = dim.height - borderPad * 2 - artH - overlayPad + (actualPad * 0.5);
             }
         }
-        return { textX, textY, textW, textH };
+        return { textX, textY, textW: Math.max(0, textW), textH: Math.max(0, textH) };
     },
 
     drawText(gr, textArea) {
@@ -1423,6 +1413,12 @@ const StateManager = {
         PanelArt.slider.active = false; PanelArt.slider.paddingActive = false; PanelArt.slider.target = null;
         TextHeightCache.clear();
         ImageSearch.clearCache();
+        // Stop active image/slide modes BEFORE applying the fresh default config.
+        // Without this, the runtime PanelArt.slideMode / PanelArt.imageMode flags
+        // stay true after reset, the slide interval timer keeps firing, and on_paint
+        // continues rendering slide/image content instead of the normal album-art view.
+        if (PanelArt.slideMode) SlideManager.stopSlideMode();
+        if (PanelArt.imageMode) ImageModeManager.stopImageMode();
         this.apply(this._config, true);
         this.save();
         PanelArt.images.folderPath = '';
@@ -1465,6 +1461,15 @@ const PresetManager = {
             StateManager.save();
             // Sync runtime image-mode flags with the loaded config.
             // glitchEnabled is read directly from cfg everywhere — no runtime mirror needed.
+            // Capture current runtime mode state BEFORE overwriting it.
+            // startSlideMode/startImageMode guard against the opposing mode by
+            // reading PanelArt.imageMode / PanelArt.slideMode, so we must stop
+            // the old mode before overwriting those flags — otherwise the guards
+            // find the flags already cleared and skip cleanup (imageImage leak).
+            const wasSlide = PanelArt.slideMode;
+            const wasImage = PanelArt.imageMode;
+            if (wasSlide && !validated.slideMode) SlideManager.stopSlideMode();
+            if (wasImage && !validated.imageMode) ImageModeManager.stopImageMode();
             PanelArt.imageMode    = validated.imageMode;
             PanelArt.slideMode    = validated.slideMode;
             PanelArt.slideIndex   = validated.slideIndex || 0;
@@ -1784,8 +1789,12 @@ const MenuManager = {
         else if (id === 951) { ImageModeManager.toggleImageMode(); }
         else if (id === 952) { SlideManager.toggleSlideMode(); }
         else if (id === 545) {
-            // glitchEnabled lives only in cfg; no runtime mirror needed.
-            update(c => { c.glitchEnabled = !c.glitchEnabled; });
+            // glitchEnabled is a paint-time flag only; no overlay, blur, or font
+            // rebuild is needed — bypass the general update() helper to avoid the
+            // spurious OverlayCache.invalidate() that update() always triggers.
+            cfg.glitchEnabled = !cfg.glitchEnabled;
+            StateManager.saveDebounced();
+            RepaintHelper.full();
         }
     }
 };
@@ -1831,11 +1840,14 @@ const ArtController = {
                 PanelArt.timers.overlayRebuild = null;
                 OverlayCache.invalidate();
                 RepaintHelper.full();
+                StateManager.saveDebounced();
             }, 100);
         }
         if (PanelArt.slider.paddingActive) {
             cfg.albumArtPadding = _.clamp(cfg.albumArtPadding + delta * SLIDER_STEP, 0, 100);
-            StateManager.apply(cfg, false, false, true);
+            // skipOverlayRebuild=true: padding changes do not affect overlay content.
+            StateManager.apply(cfg, false, true, true);
+            StateManager.saveDebounced();
             RepaintHelper.full();
         }
     },
@@ -1854,7 +1866,6 @@ const ArtController = {
     onUnload() {
         PanelArt.timers.blurRebuild    = Utils.clearTimer(PanelArt.timers.blurRebuild);
         PanelArt.timers.overlayRebuild = Utils.clearTimer(PanelArt.timers.overlayRebuild);
-        PanelArt.timers.imageAnim      = Utils.clearInterval(PanelArt.timers.imageAnim);
         if (PanelArt.timers.glitch) { window.ClearInterval(PanelArt.timers.glitch); PanelArt.timers.glitch = null; }
         if (PanelArt.slideTimer)    { window.ClearInterval(PanelArt.slideTimer);     PanelArt.slideTimer    = null; }
         if (PanelArt.slideImage)    { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
@@ -1959,6 +1970,7 @@ const ImageModeManager = {
         PanelArt.imageMode = true;
         StateManager.get().imageMode = true;
         StateManager.saveDebounced();
+        OverlayCache.invalidate(); // art-position glow in previous cache is stale in image mode
         ArtQueue.enqueue(done => {
             if (PanelArt.imageImage) { try { PanelArt.imageImage.Dispose(); } catch (e) {} }
             try { PanelArt.imageImage = gdi.Image(imagePath); } catch (e) { PanelArt.imageImage = null; }
@@ -1968,10 +1980,10 @@ const ImageModeManager = {
     },
 
     stopImageMode() {
-        if (PanelArt.timers.imageAnim) { window.ClearInterval(PanelArt.timers.imageAnim); PanelArt.timers.imageAnim = null; }
         PanelArt.imageMode = false;
         StateManager.get().imageMode = false;
         StateManager.saveDebounced();
+        OverlayCache.invalidate(); // rebuild overlay for normal mode art/text positions
         if (PanelArt.imageImage) { try { PanelArt.imageImage.Dispose(); } catch (e) {} PanelArt.imageImage = null; }
         RepaintHelper.full();
     },
@@ -1988,15 +2000,11 @@ const SlideManager = {
         PanelArt.slideMode   = true;
         PanelArt.slideImages = images;
 
-        if (!useSavedIndex) {
-            for (let i = images.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [images[i], images[j]] = [images[j], images[i]];
-            }
-        }
-
+        // Pick a random starting index when not restoring a saved session.
+        // The interval callback also picks randomly each tick, so pre-shuffling
+        // the array would have no effect on the playback order.
         if (useSavedIndex && PanelArt.slideIndex >= 0 && PanelArt.slideIndex < images.length) {
-            // keep current index
+            // keep saved index
         } else {
             PanelArt.slideIndex = Math.floor(Math.random() * images.length);
         }
@@ -2004,6 +2012,7 @@ const SlideManager = {
         StateManager.get().slideMode  = true;
         StateManager.get().slideIndex = PanelArt.slideIndex;
         StateManager.saveDebounced();
+        OverlayCache.invalidate(); // art-position glow in previous cache is stale in slide mode
 
         ArtQueue.enqueue(done => {
             if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch (e) {} }
@@ -2037,6 +2046,7 @@ const SlideManager = {
         StateManager.get().slideMode  = false;
         StateManager.get().slideIndex = 0;
         StateManager.saveDebounced();
+        OverlayCache.invalidate(); // rebuild overlay for normal mode art/text positions
         if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
         RepaintHelper.full();
     },
@@ -2059,7 +2069,7 @@ function on_paint(gr) {
             const borderPad = cfg.borderSize || 0, imagePad = borderPad + 3;
             const dx = imagePad, dy = imagePad, dw = w - imagePad * 2, dh = h - imagePad * 2;
             gr.FillSolidRect(0, 0, w, h, PA_MODE_BG);
-            if (modeImg.Width > 0 && modeImg.Height > 0) {
+            if (modeImg.Width > 0 && modeImg.Height > 0 && dw > 0 && dh > 0) {
                 gr.FillSolidRect(dx - 1, dy - 1, dw + 2, dh + 2, PA_BORDER_LIGHT);
                 gr.FillSolidRect(dx + 1, dy + 1, dw - 2, dh - 2, PA_BORDER_DARK);
                 const si = ArtCache.getScaledImage(modeImg, dw, dh);
@@ -2178,7 +2188,7 @@ function on_mouse_wheel(delta)             { if (!isLive()) return; ArtControlle
 function on_mouse_lbtn_down(x, y)         { if (!isLive()) return; if (window.SetFocus) window.SetFocus(); }
 function on_mouse_lbtn_up(x, y)           { if (!isLive()) return; return ArtController.onMouseLbtnUp(); }
 function on_mouse_lbtn_dblclk(x, y)       { if (!isLive()) return; if (window.SetFocus) window.SetFocus(); ImageModeManager.toggleImageMode(); }
-function on_mouse_rbtn_up(x, y)           { if (!isLive()) return true; const m = MenuManager.createMainMenu(); const id = m.TrackPopupMenu(x, y); if (id > 0) MenuManager.handleSelection(id); return true; }
+function on_mouse_rbtn_up(x, y)           { if (!isLive()) return false; const m = MenuManager.createMainMenu(); const id = m.TrackPopupMenu(x, y); if (id > 0) MenuManager.handleSelection(id); return true; }
 
 function on_selection_changed() {
     if (!isLive()) return;
