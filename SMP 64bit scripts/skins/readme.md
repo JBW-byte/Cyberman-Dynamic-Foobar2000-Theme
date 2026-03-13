@@ -110,6 +110,33 @@ Bug Fix's.
 
 </details>
 
+<details>
+<summary><strong>LCD TimerPro... ish</strong> — Updated 13 Mar 2026</summary>
+
+### Update Overview
+release.
+
+### Features
+
+| Feature | Description |
+|------|------|
+| Time Display | Shows track time |
+| Themes | Adjustable Themes |
+| Layout Modes | position elements |
+| Customization | Multiple settings via right-click menu |
+
+**Note:** its a llitle cluncky menu, but it is what it is
+
+## Interface Controls
+
+| Control | Function |
+|------|------|
+| Scroll Wheel | Display Mode |
+| Left Click | Time Mode |
+| Dbl Click | Turn Off Panel |
+
+</details>
+
 ---
 
 ## Interface Controls
