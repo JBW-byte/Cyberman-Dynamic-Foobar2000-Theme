@@ -62,10 +62,10 @@ Recommended settings for large panels:
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 27 Feb 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 13 Mar 2026</summary>
 
-### Overview
-Simple rotary volume control panel.
+### Update Overview
+Small fixs, hits marker on scroll or up/down keys.
 
 ### Controls
 
