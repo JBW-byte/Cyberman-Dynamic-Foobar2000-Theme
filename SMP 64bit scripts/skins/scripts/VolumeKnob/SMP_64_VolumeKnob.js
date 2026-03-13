@@ -1,14 +1,14 @@
 'use strict';
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V2.0  ========\\
+		 // ========  SMP 64bit Volume Knob V2.1  ========\\
 		// =========== Simple Function + Themes ===========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
 // ======= For Spider Monekey Panel 64bit, author: marc2003 ====== \\
 
-window.DrawMode = 1; // 0 - default GDI+ mode. 1 - D2D
+window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit Volume Knob V2', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit Volume Knob V2.1', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 // Lodash first (needed for helpers.js if it uses _)
@@ -28,7 +28,7 @@ const props = { currentTheme: new _p('VolumeKnob.Theme', 0) };
 // ====================== CONFIG ======================
 const CONFIG = Object.freeze({
     DRAG_SCALE: 0.5,
-    WHEEL_STEP: 2,
+    WHEEL_STEP_DEG: (420 - 120) / (21 - 1) / 2, // half a marker: SWEEP_TOTAL/(TICK_COUNT-1)/2 = 7.5°
     SNAP_ENABLED: true,
     SNAP_TOLERANCE_DB: 0.5,
     PADDING: 20,
@@ -207,6 +207,13 @@ const VolumeConverter = {
             return CONFIG.ANGLE_MIN + (v / CONFIG.VOL_BREAKPOINT_2) * SWEEP_HALF;
         return CONFIG.ANGLE_MIN + SWEEP_HALF + ((v - CONFIG.VOL_BREAKPOINT_2) / VOL_RANGE_2) * SWEEP_HALF;
     },
+    // Inverse of uiToAngle — needed by handleWheel to step in degree-space
+    angleToUi(angle) {
+        const mid = CONFIG.ANGLE_MIN + SWEEP_HALF;
+        if (angle <= mid)
+            return (angle - CONFIG.ANGLE_MIN) / SWEEP_HALF * CONFIG.VOL_BREAKPOINT_2;
+        return CONFIG.VOL_BREAKPOINT_2 + (angle - mid) / SWEEP_HALF * VOL_RANGE_2;
+    },
     applySnap(db){ if(!CONFIG.SNAP_ENABLED||State.dragging) return db; if(Math.abs(db)<=CONFIG.SNAP_TOLERANCE_DB) return 0; if(Math.abs(db+10)<=CONFIG.SNAP_TOLERANCE_DB) return -10; return db; }
 };
 
@@ -221,9 +228,10 @@ const VolumeSync = {
             State.requestRepaint();
         }catch(e){ console.log("Error syncing from foobar:",e); }
     },
-    setFoobarVolume(uiVol){
+    setFoobarVolume(uiVol, skipSnap){
         try{
-            const newDb=VolumeConverter.applySnap(VolumeConverter.uiToDb(uiVol));
+            const db = VolumeConverter.uiToDb(uiVol);
+            const newDb = skipSnap ? db : VolumeConverter.applySnap(db);
             if(Math.abs(newDb-fb.Volume)>=0.1) fb.Volume=newDb;
         }catch(e){ console.log("Error setting foobar volume:",e); }
     }
@@ -308,11 +316,18 @@ const InputHandler = {
         State.lastY=y; return true;
     },
     handleWheel(step){
-        let v=State.uiVolume+step*CONFIG.WHEEL_STEP;
-        v=Utils.clamp(Utils.roundTo(v,1),0,100);
-        if(Math.abs(v-State.uiVolume)>=0.1){
-            State.uiVolume=v; State.dragTargetAngle=State.targetAngle=VolumeConverter.uiToAngle(v);
-            VolumeSync.setFoobarVolume(v); State.requestRepaint();
+        // Step in angle-space, then snap to the half-marker grid so the knob
+        // visually aligns with tick marks. Snapping BEFORE converting to UI volume
+        // avoids the round-trip rounding error (angle→vol→roundTo(1dp)→angle) that
+        // was producing a small but visible mis-alignment.
+        const rawAngle  = VolumeConverter.uiToAngle(State.uiVolume) + step * CONFIG.WHEEL_STEP_DEG;
+        const snapped   = Math.round((rawAngle - CONFIG.ANGLE_MIN) / CONFIG.WHEEL_STEP_DEG)
+                          * CONFIG.WHEEL_STEP_DEG + CONFIG.ANGLE_MIN;
+        const newAngle  = Utils.clamp(snapped, CONFIG.ANGLE_MIN, CONFIG.ANGLE_MAX);
+        const v         = Utils.clamp(VolumeConverter.angleToUi(newAngle), 0, 100);
+        if(Math.abs(v-State.uiVolume)>=0.01){
+            State.uiVolume=v; State.dragTargetAngle=State.targetAngle=newAngle;
+            VolumeSync.setFoobarVolume(v, true); State.requestRepaint(); // skipSnap=true: grid steps must not be overridden by the snap tolerance
         }
         return true;
     },
@@ -384,3 +399,7 @@ function on_mouse_wheel(step){ return InputHandler.handleWheel(step); }
 function on_mouse_lbtn_dblclk(x,y){ if (window.SetFocus) window.SetFocus(); return InputHandler.handleDoubleClick(x,y); }
 function on_mouse_rbtn_up(x,y){ return MenuManager.show(x,y); }
 function on_script_unload(){ State.cleanup(); }
+
+window.MinHeight = 200;
+window.MinWidth  = 100;
+  
