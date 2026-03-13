@@ -1,15 +1,15 @@
 'use strict';
-// ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-// ======= SMP 64bit LCD TimerPro Script ======= \\
-// ====== LCD Timer Various Custom Effects  ====== \\
+		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
+		  // ======== SMP 64bit LCD TimerPro 1.0 ========= \\
+	     // ====== LCD Timer Various Custom Effects  ====== \\
 
-// ===================*** Foobar2000 64bit ***================== \\
-// ======= For Spider Monkey Panel 64bit, author: marc2003 ====== \\
-// ========= Right click menu full Customization and Layout ========== \\
+  // ===================*** Foobar2000 64bit ***================== \\
+ // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
+// ======== Right click menu full Customization and Layout ========= \\
 
 window.DrawMode = 1; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit LCD TimerPro', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit LCD TimerPro 1.0', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ===================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
