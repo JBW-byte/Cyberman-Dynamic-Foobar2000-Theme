@@ -125,7 +125,7 @@ release.
 | Layout Modes | position elements |
 | Customization | Multiple settings via right-click menu |
 
-**Note:** its a llitle cluncky menu, but it is what it is
+**Note:** its a llitle cluncky menu, but it is what it is. Recommend Digital-7 Mono font or similar
 
 ## Interface Controls
 
