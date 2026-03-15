@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/License-Personal%20Use-lightgrey)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 
-Custom **Spider Monkey Panel / JSplitter scripts** designed for **Foobar2000 v2 64bit** providing animated visuals, album-art driven UI elements, and interactive controls.
+Custom **Spider Monkey Panel / JSplitter scripts** designed for **Foobar2000 v2 64bit** providing animated visuals, album-art driven UI elements, and interactive controls.(AI coded)
 
 ---
 
