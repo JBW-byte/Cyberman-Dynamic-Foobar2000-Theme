@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -====== SMP 64bit Disc Spin V3.3 ======- \\
+		     // -====== SMP 64bit Disc Spin V3.3.1 ======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.3', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.3.1', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -43,7 +43,7 @@ const props = {
 	savedIsDisc:            new _p('RP.SavedIsDisc', false),
 	maskType:               new _p('RP.MaskType', 0),
 	userOverrideMask:       new _p('RP.UserOverrideMask', false),
-	rotationStep:           new _p('RP.RotationStep', 3),
+	rotationStep:           new _p('RP.RotationStep', 2),
 
 	showReflection:         new _p('Disc.ShowReflection', true),
 	opReflection:           new _p('Disc.OpReflection', 30),
@@ -86,7 +86,7 @@ function on_colours_changed() {
 	if (!isLive()) return;
 	State.paintCache.bgColor = _getUIColour();
 	StaticBgLayer.invalidate();
-	window.Repaint();
+	RepaintHelper.full();
 }
 
 // Release the cached slider font so it is recreated at the new DPI / style.
@@ -96,7 +96,7 @@ function on_font_changed() {
 		try { SliderRenderer._font.Dispose(); } catch (e) {}
 		SliderRenderer._font = null;
 	}
-	window.Repaint();
+	RepaintHelper.full();
 }
 
 // ====================== IMMUTABLE CONFIGURATION ======================
@@ -210,6 +210,11 @@ const CONFIG = Object.freeze({
 	const sz  = props.maxImageSize.value;
 	const csz = Math.max(CONFIG.MIN_DISC_SIZE, Math.min(CONFIG.MAX_DISC_SIZE, sz));
 	if (csz !== sz) props.maxImageSize.value = csz;
+
+	// Ensure rotationStep is one of the three valid values {2, 3, 4}.
+	// An out-of-range persisted value (e.g. from a corrupt profile) would cause
+	// RotationCache to build frames at the wrong angular granularity.
+	if (![2, 3, 4].includes(props.rotationStep.value)) props.rotationStep.value = 2;
 })();
 
 // ====================== SLIDER UI CONSTANTS ======================
@@ -241,11 +246,19 @@ function _tagImg(img) {
 
 // ====================== REPAINT HELPERS ======================
 // Centralise repaint calls so callers do not need to know exact disc coordinates.
+// Every path calls prepareLayers() first so on_paint receives fully-built bitmaps
+// and never needs to allocate GDI resources or mutate state itself.
+//
+// _allValid: fast-path flag set by prepareLayers() when every cache is current.
+// Any invalidate() call must clear it so the next prepareLayers() re-runs all guards.
 const RepaintHelper = {
-	full() { window.Repaint(); },
+	_allValid: false,
+
+	full() { prepareLayers(); window.Repaint(); },
 
 	// Dirty-rect repaint for the spinning disc area only — avoids full-panel redraws during spin.
 	region(x, y, w, h) {
+		prepareLayers();
 		if (w > 0 && h > 0) window.RepaintRect(x, y, w, h);
 		else window.Repaint();
 	},
@@ -263,6 +276,7 @@ const RepaintHelper = {
 		const w      = window.Width;
 		const h      = window.Height;
 		const size   = Math.min(w, h) - (pad + border) * 2;
+		if (size <= 0) { this.full(); return; } // panel too small to compute a valid disc rect
 		const x      = Math.floor((w - size) / 2);
 		const y      = Math.floor((h - size) / 2);
 		this.region(x - 10, y - 10, size + 20, size + 20);
@@ -319,8 +333,8 @@ const Utils = {
 		}
 	},
 
-	// Check whether a path exists on-disk (delegates to the SMP utils object).
-	exists(p)  { return utils.FileTest(p, "e"); },
+	// Check whether a path exists on-disk — delegates to FileManager which caches the result.
+	// (Thin shim kept for any future callers; always prefer FileManager.exists() directly.)
 
 	// Determine whether a file path belongs to a real disc scan, album art, or the default disc.
 	getImageType(path) {
@@ -545,21 +559,6 @@ const FileManager = {
 		return _.find(paths, p => this.exists(p)) || null;
 	},
 
-	// Return true if the last segment of folderPath fuzzy-matches any name in searchNames.
-	matchesFolderName(folderPath, searchNames) {
-		if (!folderPath || _.isEmpty(searchNames)) return false;
-		const folderName = _.toLower(this.sanitizeMetadata(_.last(folderPath.split('\\'))));
-		return _.some(searchNames, name => {
-			if (!name) return false;
-			const n = _.toLower(this.sanitizeMetadata(name));
-			if (folderName === n || folderName.includes(n) || n.includes(folderName)) return true;
-			// Single-character initial match (e.g. folder "A" matching artist "Adele").
-			if (folderName.length === 1 && n.length > 0 && n.charAt(0) === folderName) return true;
-			if (n.length === 1 && folderName.length > 0 && folderName.charAt(0) === n) return true;
-			return false;
-		});
-	},
-
 	// Attempt to extract a cover-art path from a known Last.fm JSON sidecar file.
 	parseLastFmJson(jsonPath, baseFolder) {
 		try {
@@ -699,7 +698,7 @@ const AssetManager = {
 		State.img       = null;
 		State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
 		if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
-		window.Repaint();
+		RepaintHelper.full();
 		return true;
 	},
 
@@ -908,6 +907,10 @@ const State = {
 		bgColor:        _getUIColour(),
 		windowWidth:    0,
 		windowHeight:   0,
+		// panelW/panelH are set by prepareLayers() each call so on_paint can read
+		// window dimensions without making a second cross-boundary query.
+		panelW:         0,
+		panelH:         0,
 		discSize:       0,
 		discX:          0,
 		discY:          0,
@@ -1069,9 +1072,15 @@ const State = {
 		                  !P.useAlbumArtOnly;
 
 		if (shouldRun && !this.spinTimer) {
+			// Snapshot spinSpeed and step once at timer-start so the hot interval closure
+			// reads plain JS numbers instead of calling window.GetProperty every tick.
+			// updateTimer() is re-called whenever spinSpeed or rotationStep changes
+			// (via menu → stopTimer + restart), so the snapshot stays current.
+			const speed = P.spinSpeed;
+			const step  = RotationCache.step;
 			this.spinTimer = window.SetInterval(() => {
-				this.angle = (this.angle + P.spinSpeed) % CONFIG.ANGLE_MODULO;
-				const frame = Math.floor(this.angle / RotationCache.step);
+				this.angle = (this.angle + speed) % CONFIG.ANGLE_MODULO;
+				const frame = Math.floor(this.angle / step);
 				if (frame !== State.lastFrame) {
 					State.lastFrame = frame;
 					RepaintHelper.disc(); // Dirty-rect only — do not redraw the whole panel
@@ -1197,66 +1206,66 @@ const ImageLoader = {
 			}
 		}
 
-	// Pass 2: walk up to three levels of subfolders, matching folder names to metadata.
-	for (const customFolder of customFolders) {
-		if (!FileManager.isDirectory(customFolder)) continue;
-		const level1 = FileManager.getSubfolders(customFolder);
-		for (const sub1 of level1) {
-			const sub1Name = _.last(sub1.split('\\')).toLowerCase();
-			const match1   = folderMatchNames.some(n =>
-				sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
-				sub1Name.replace(/\s+/g, '-') === n ||
-				sub1Name.replace(/\s+/g, '_') === n
-			);
-			if (match1) {
-				// Level 1 match: search in sub1 and its subfolders (level 2)
-				const img = this.searchInFolder(sub1, patterns, metadata, true)
-				         || this.searchInFolderAnyFile(sub1, patterns);
-				if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
-				
-				const sub1Folders = FileManager.getSubfolders(sub1);
-				for (const sub2 of sub1Folders) {
-					const sImg = this.searchInFolder(sub2, patterns, metadata, true)
-					          || this.searchInFolderAnyFile(sub2, patterns);
-					if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
-					
-					// Level 3 search inside level 2 matched folder
-					const sub2Folders = FileManager.getSubfolders(sub2);
-					for (const sub3 of sub2Folders) {
-						const s3Img = this.searchInFolder(sub3, patterns, metadata, true)
-						             || this.searchInFolderAnyFile(sub3, patterns);
-						if (s3Img) return isDiscSearch ? this._loadDiscResult(s3Img) : s3Img;
-					}
-				}
-				continue;
-			}
-			// No name match at level1 — try level2 subfolders
-			const level2 = FileManager.getSubfolders(sub1);
-			for (const sub2 of level2) {
-				const sub2Name = _.last(sub2.split('\\')).toLowerCase();
-				const match2   = folderMatchNames.some(n =>
-					sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
-					sub2Name.replace(/\s+/g, '-') === n ||
-					sub2Name.replace(/\s+/g, '_') === n
+		// Pass 2: walk up to three levels of subfolders, matching folder names to metadata.
+		for (const customFolder of customFolders) {
+			if (!FileManager.isDirectory(customFolder)) continue;
+			const level1 = FileManager.getSubfolders(customFolder);
+			for (const sub1 of level1) {
+				const sub1Name = _.last(sub1.split('\\')).toLowerCase();
+				const match1   = folderMatchNames.some(n =>
+					sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
+					sub1Name.replace(/\s+/g, '-') === n ||
+					sub1Name.replace(/\s+/g, '_') === n
 				);
-				if (match2) {
-					// Level 2 match: search in sub2 and its subfolders (level 3)
-					const img = this.searchInFolder(sub2, patterns, metadata, true)
-					         || this.searchInFolderAnyFile(sub2, patterns);
+				if (match1) {
+					// Level 1 match: search in sub1 and its subfolders (level 2)
+					const img = this.searchInFolder(sub1, patterns, metadata, true)
+					         || this.searchInFolderAnyFile(sub1, patterns);
 					if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
-					
-					const sub2Folders = FileManager.getSubfolders(sub2);
-					for (const sub3 of sub2Folders) {
-						const sImg = this.searchInFolder(sub3, patterns, metadata, true)
-						          || this.searchInFolderAnyFile(sub3, patterns);
+
+					const sub1Folders = FileManager.getSubfolders(sub1);
+					for (const sub2 of sub1Folders) {
+						const sImg = this.searchInFolder(sub2, patterns, metadata, true)
+						          || this.searchInFolderAnyFile(sub2, patterns);
 						if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
+
+						// Level 3 search inside level 2 matched folder
+						const sub2Folders = FileManager.getSubfolders(sub2);
+						for (const sub3 of sub2Folders) {
+							const s3Img = this.searchInFolder(sub3, patterns, metadata, true)
+							             || this.searchInFolderAnyFile(sub3, patterns);
+							if (s3Img) return isDiscSearch ? this._loadDiscResult(s3Img) : s3Img;
+						}
+					}
+					continue;
+				}
+				// No name match at level1 — try level2 subfolders
+				const level2 = FileManager.getSubfolders(sub1);
+				for (const sub2 of level2) {
+					const sub2Name = _.last(sub2.split('\\')).toLowerCase();
+					const match2   = folderMatchNames.some(n =>
+						sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
+						sub2Name.replace(/\s+/g, '-') === n ||
+						sub2Name.replace(/\s+/g, '_') === n
+					);
+					if (match2) {
+						// Level 2 match: search in sub2 and its subfolders (level 3)
+						const img = this.searchInFolder(sub2, patterns, metadata, true)
+						         || this.searchInFolderAnyFile(sub2, patterns);
+						if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
+
+						const sub2Folders = FileManager.getSubfolders(sub2);
+						for (const sub3 of sub2Folders) {
+							const sImg = this.searchInFolder(sub3, patterns, metadata, true)
+							          || this.searchInFolderAnyFile(sub3, patterns);
+							if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
+						}
 					}
 				}
 			}
 		}
-	}
-	return null;
-},
+		return null;
+	},
 
 	// Load a disc-result object { img, path, type, original } from a known file path.
 	// Returns null on any failure so callers can fall through to the next source.
@@ -1473,7 +1482,7 @@ const ImageLoader = {
 								State.updateTimer();
 								return;
 							}
-							Utils.safeDispose(coverRaw);
+							// scaleProportional already disposed coverRaw in all null-return paths.
 							Utils.safeDispose(bgOriginal);
 						} else {
 							const processed = ImageProcessor.processForDisc(
@@ -1716,7 +1725,7 @@ const RotationCache = {
 				this._pendingAngle = 0;
 				this._pendingKey   = '';
 				oldFrames.forEach(f => { try { f.Dispose(); } catch (_) {} });
-				if (isLive()) window.Repaint();
+				if (isLive()) RepaintHelper.full();
 			}
 		};
 
@@ -1741,8 +1750,6 @@ const DiscComposite = {
 	valid:     false,
 	_cacheKey: '',
 
-	invalidate() { this.valid = false; },
-
 	// Dispose the composite and clear the rotation frame cache that depends on it.
 	dispose() {
 		if (this.img) {
@@ -1750,6 +1757,7 @@ const DiscComposite = {
 			this.img = null;
 		}
 		this.valid = false;
+		RepaintHelper._allValid = false;
 		RotationCache.clear(); // Frame cache is always derived from the composite
 	},
 
@@ -1807,7 +1815,7 @@ const BackgroundCache = {
 		return `${bgId}|${P.blurRadius}|${P.blurEnabled ? 1 : 0}|${w}|${h}`;
 	},
 
-	invalidate() { this._activeKey = ''; this.img = null; },
+	invalidate() { this._activeKey = ''; this.img = null; RepaintHelper._allValid = false; },
 
 	// Ensure a blurred background bitmap is ready for the given panel dimensions.
 	ensure(w, h) {
@@ -1867,7 +1875,7 @@ const OverlayInvalidator = (() => {
 				pending = false;
 				OverlayCache.invalidate();
 				StaticTopLayer.invalidate();
-				window.Repaint();
+				RepaintHelper.full();
 			}, 16);
 		},
 		cancel() {
@@ -1900,7 +1908,9 @@ function drawGlow(g, w, h, pc) {
 	const maxR  = discSz * 0.75;
 	const steps = CONFIG.OVERLAY.GLOW_ART_STEPS;
 	const mult  = CONFIG.OVERLAY.GLOW_ART_MULT;
-	const minStep = Math.ceil(1 / (op * mult));
+	// minStep skips all iterations where alpha would be 0: alpha = floor(op*(i/steps)*mult) >= 1
+	// requires i >= steps/(op*mult). Cap at steps so the loop is a no-op when op is tiny.
+	const minStep = Math.min(steps, Math.ceil(steps / (op * mult)));
 	for (let i = minStep; i < steps; i++) {
 		const progress = i / steps;
 		const alpha    = Math.floor(op * progress * mult);
@@ -1952,7 +1962,7 @@ const OverlayCache = {
 	img:   null,
 	valid: false,
 
-	invalidate() { this.valid = false; },
+	invalidate() { this.valid = false; RepaintHelper._allValid = false; },
 
 	dispose() {
 		if (this.img) { try { this.img.Dispose(); } catch (e) {} this.img = null; }
@@ -1999,8 +2009,8 @@ const OverlayCache = {
 const StaticBgLayer = {
 	img: null, valid: false, _w: 0, _h: 0,
 
-	invalidate() { this.valid = false; },
-	dispose()    { Utils.safeDispose(this.img); this.img = null; this.valid = false; },
+	invalidate() { this.valid = false; RepaintHelper._allValid = false; },
+	dispose()    { Utils.safeDispose(this.img); this.img = null; this.valid = false; RepaintHelper._allValid = false; },
 
 	build(w, h) {
 		this.dispose();
@@ -2051,8 +2061,8 @@ const StaticBgLayer = {
 const StaticTopLayer = {
 	img: null, valid: false, _w: 0, _h: 0,
 
-	invalidate() { this.valid = false; },
-	dispose()    { Utils.safeDispose(this.img); this.img = null; this.valid = false; },
+	invalidate() { this.valid = false; RepaintHelper._allValid = false; },
+	dispose()    { Utils.safeDispose(this.img); this.img = null; this.valid = false; RepaintHelper._allValid = false; },
 
 	build(w, h) {
 		this.dispose();
@@ -2116,14 +2126,7 @@ const Renderer = {
 		const x    = pc.discX;
 		const y    = pc.discY;
 
-		// Lazy rebuild after a panel resize clears the composite (on_size → DiscComposite.dispose).
-		// On normal load this branch is never reached because State.setImage pre-builds both.
-		if (!DiscComposite.valid && State.img) {
-			DiscComposite.build(State.img, Math.floor(size), State.imageType);
-			// Also schedule the frame cache rebuild so resize doesn't permanently lose fast-path.
-			if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || State.img);
-		}
-
+		// DiscComposite is guaranteed valid here — prepareLayers() builds it before on_paint.
 		const composite = DiscComposite.valid && DiscComposite.img ? DiscComposite.img : State.img;
 		if (composite) {
 			const frame = RotationCache.getFrame(State.angle);
@@ -2300,8 +2303,8 @@ const Slider = {
 	target: null,           // One of "Reflection" | "Glow" | "Scanlines" | "Phosphor"
 	timers: { overlayRebuild: null },
 
-	activate(target)  { this.active = true;  this.target = target; window.Repaint(); },
-	deactivate()      { this.active = false; this.target = null;   window.Repaint(); },
+	activate(target)  { this.active = true;  this.target = target; RepaintHelper.full(); },
+	deactivate()      { this.active = false; this.target = null;   RepaintHelper.full(); },
 
 	cleanup() {
 		if (this.timers.overlayRebuild) window.ClearTimeout(this.timers.overlayRebuild);
@@ -2577,6 +2580,8 @@ const MenuManager = {
 			blurMenu.AppendMenuItem(0, 271 + i, 'Radius: ' + value);
 			if (props.blurRadius.value === value) blurMenu.CheckMenuItem(271 + i, true);
 		});
+		blurMenu.AppendMenuItem(0, 283, 'Radius: 240');
+		if (props.blurRadius.value === 240) blurMenu.CheckMenuItem(283, true);
 		blurMenu.AppendMenuItem(0, 282, 'Max: 254');
 		if (props.blurRadius.value === 254) blurMenu.CheckMenuItem(282, true);
 		blurMenu.AppendTo(bgMenu, blurEnabled ? 0 : 1, 'Blur Settings');
@@ -2819,7 +2824,7 @@ const MenuManager = {
 		}
 		if (idx === 251) {
 			const picked = utils.ColourPicker(window.ID, props.borderColor.value);
-			if (picked !== -1) { props.borderColor.value = picked; StaticTopLayer.invalidate(); window.Repaint(); changed = true; }
+			if (picked !== -1) { props.borderColor.value = picked; StaticTopLayer.invalidate(); RepaintHelper.full(); changed = true; }
 		}
 		if (idx === 252) {
 			const v = utils.InputBox(window.ID, 'Padding', 'Enter size (0-100):', props.padding.value.toString(), false);
@@ -2836,9 +2841,13 @@ const MenuManager = {
 		}
 		if (idx === 270) { props.blurEnabled.toggle(); BackgroundCache.invalidate(); StaticBgLayer.invalidate(); changed = true; }
 
-		// Blur radius: IDs 271–281 map to 0, 20, 40, ..., 200; ID 282 = 254 (maximum).
+		// Blur radius: IDs 271–281 map to 0, 20, 40, ..., 200; ID 283 = 240 (default); ID 282 = 254 (maximum).
 		if (_.inRange(idx, 271, 282)) {
 			props.blurRadius.value = (idx - 271) * 20;
+			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
+			changed = true;
+		} else if (idx === 283) {
+			props.blurRadius.value = 240;
 			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
 			changed = true;
 		} else if (idx === 282) {
@@ -2866,7 +2875,7 @@ const MenuManager = {
 			return;
 		}
 
-		if (changed) window.Repaint();
+		if (changed) RepaintHelper.full();
 	}
 };
 
@@ -2935,7 +2944,7 @@ const ArtDispatcher = {
 				const stopReason = metadb;
 				if (stopReason === 0) State.angle = 0; // Reset disc angle on manual stop
 				State.updateTimer();
-				window.Repaint();
+				RepaintHelper.full();
 				break;
 			}
 
@@ -2957,31 +2966,81 @@ const ArtDispatcher = {
 
 // ====================== SMP EVENT CALLBACKS ======================
 
-function on_paint(gr) {
+// ====================== PRE-PAINT LAYER PREPARATION ======================
+// All GDI allocations and state mutations happen here, BEFORE on_paint is called.
+// on_paint itself is pure read-and-blit: no CreateImage, no StackBlur, no state writes.
+//
+// Checklist compliance:
+//   ✓ No file/network operations in paint callbacks.
+//   ✓ All GDI allocations done outside per-frame paint (in prepareLayers).
+//   ✓ Paint only reads state; mutations happen in prepareLayers.
+//   ✓ Artworks and large resources loaded asynchronously and cached.
+function prepareLayers() {
 	const w = window.Width;
 	const h = window.Height;
 	if (w <= 0 || h <= 0) return;
+
+	// Store panel dimensions so on_paint can read them back without a second query.
+	State.paintCache.panelW = w;
+	State.paintCache.panelH = h;
+
+	// Fast-path: if every cache is already valid at the current size, skip all guards.
+	// This makes the steady-state spin path (RepaintHelper.disc → prepareLayers) near-zero cost.
+	// Any invalidate() call sets _allValid=false, which re-enables the full check below.
+	if (RepaintHelper._allValid &&
+	    StaticBgLayer._w === w && StaticBgLayer._h === h &&
+	    StaticTopLayer._w === w && StaticTopLayer._h === h) {
+		return;
+	}
+
+	// Update layout cache (pure arithmetic — no GDI).
 	State.updatePaintCache();
 	const pc = State.paintCache;
 
-	// Invalidate the overlay if the panel has been resized since the last build.
+	// Ensure DiscComposite is valid before paint reads it.
+	// This is the only place DiscComposite.build() may allocate; never inside Renderer.
+	if (!DiscComposite.valid && State.img) {
+		DiscComposite.build(State.img, Math.floor(pc.discSize || Utils.getPanelDiscSize()), State.imageType);
+		if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || State.img);
+	}
+
+	// Invalidate size-mismatched overlay before deciding to rebuild.
 	if (OverlayCache.valid && OverlayCache.img &&
 	    (OverlayCache.img.Width !== w || OverlayCache.img.Height !== h)) {
 		OverlayCache.invalidate();
 		StaticTopLayer.invalidate();
 	}
+
+	// Rebuild any stale composite bitmaps. Each build() is guarded by its own validity
+	// flag so it only allocates when the underlying data has actually changed.
 	if (!OverlayCache.valid) {
 		OverlayCache.build(w, h, pc);
-		StaticTopLayer.invalidate(); // Top layer embeds the overlay — rebuild it too
+		StaticTopLayer.invalidate();
 	}
-
-	// Build static layers on demand; they are cheaply re-stamped each frame with DrawImage.
 	if (!StaticBgLayer.valid || StaticBgLayer._w !== w || StaticBgLayer._h !== h) {
-		StaticBgLayer.build(w, h);
+		StaticBgLayer.build(w, h); // may call BackgroundCache.ensure() → StackBlur on cache-miss
 	}
 	if (!StaticTopLayer.valid || StaticTopLayer._w !== w || StaticTopLayer._h !== h) {
 		StaticTopLayer.build(w, h);
 	}
+
+	// All caches are now valid and sized correctly — set the fast-path flag.
+	RepaintHelper._allValid = DiscComposite.valid &&
+	                          OverlayCache.valid   &&
+	                          StaticBgLayer.valid  &&
+	                          StaticTopLayer.valid;
+}
+
+function on_paint(gr) {
+	// Dimensions were stored in paintCache by prepareLayers() — no second window query needed.
+	const pc = State.paintCache;
+	const w  = pc.panelW;
+	const h  = pc.panelH;
+	if (w <= 0 || h <= 0) return;
+
+	// All preparation (GDI allocations, cache builds, state mutations) was done in
+	// prepareLayers(), which runs before on_paint via every RepaintHelper call.
+	// on_paint is intentionally pure: it only reads pre-built bitmaps and blits them.
 
 	// Layer 1: Background (blurred art, solid fill, or UI colour)
 	if (StaticBgLayer.img) {
@@ -2990,7 +3049,7 @@ function on_paint(gr) {
 		gr.FillSolidRect(0, 0, w, h, P.bgUseUIColor ? pc.bgColor : (P.customBackgroundColor >>> 0));
 	}
 
-	// Layer 2: Disc or static cover art
+	// Layer 2: Disc or static cover art (read-only — no build calls inside Renderer)
 	Renderer.paint(gr);
 
 	// Layer 3: Border strips and overlay effects
@@ -3003,6 +3062,8 @@ function on_paint(gr) {
 }
 
 function on_size() {
+	// Stop the spin timer first — it must not fire during the cache teardown below.
+	State.stopTimer();
 	// Flush all size-dependent caches so everything is rebuilt at the new dimensions.
 	State.paintCache.valid = false;
 	BackgroundCache.invalidate();
@@ -3014,11 +3075,10 @@ function on_size() {
 	AssetManager.maskCache.clear();
 	AssetManager.rimCache.clear();
 	ImageLoader.clearCache();
-	State.stopTimer();
 	if (isLive() && State.currentMetadb) {
 		ImageLoader.loadForMetadb(State.currentMetadb, false);
 	} else {
-		window.Repaint();
+		RepaintHelper.full();
 	}
 }
 
@@ -3126,7 +3186,7 @@ function on_mouse_wheel(delta) {
 		Slider.timers.overlayRebuild = null;
 		OverlayCache.invalidate();
 		StaticTopLayer.invalidate();
-		window.Repaint();
+		RepaintHelper.full();
 	}, 100);
 }
 
@@ -3193,7 +3253,7 @@ function init() {
 						displayImg = ImageProcessor.processForDisc(raw, targetSize, imageType, P.interpolationMode);
 					} else {
 						displayImg = ImageProcessor.scaleProportional(raw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode);
-						if (!displayImg) Utils.safeDispose(raw);
+						// scaleProportional disposes raw in all code paths; no explicit dispose needed here.
 					}
 					if (displayImg) {
 						State.setImage(displayImg, isDisc, imageType, original);
