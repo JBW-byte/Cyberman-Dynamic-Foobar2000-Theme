@@ -263,10 +263,14 @@ const FileManager = {
     exists(path) {
         if (!path) return false;
         if (this.cache.has(path)) return this.cache.get(path);
-        const exists = _isFile(path);
-        this.cache.set(path, exists);
-        if (this.cache.size > MAX_FILE_CACHE) this.cache.delete(this.cache.keys().next().value);
-        return exists;
+        const result = _isFile(path);
+        // Only cache positive (true) results — caching false would permanently hide
+        // artwork files that are added or downloaded after the initial scan.
+        if (result) {
+            this.cache.set(path, true);
+            if (this.cache.size > MAX_FILE_CACHE) this.cache.delete(this.cache.keys().next().value);
+        }
+        return result;
     },
 
     isDirectory: _isFolder,
@@ -553,11 +557,33 @@ const FontManager = {
             fl.artist = gdi.Font("Segoe UI", 28, 0);
             fl.extra  = gdi.Font("Segoe UI", 20, 0);
         }
+        // Font objects have changed — scaleAndClip cache is stale.
+        TextManager.invalidateCache();
     }
 };
 
 // ====================== TEXT MANAGER ======================
 const TextManager = {
+    // Cached output of scaleAndClip — only recomputed when any input changes.
+    _scaledCache: null,
+    _scaledKey:   null,
+
+    invalidateCache() { this._scaledCache = null; this._scaledKey = null; },
+
+    _buildScaledKey(maxWidth, maxHeight) {
+        const t = PanelArt.text, f = PanelArt.fonts;
+        // Use \x00 between every component to prevent collisions where a font name
+        // ending in a digit could concatenate ambiguously with the size/style numbers.
+        // e.g. name="Font1" size=2 style=0 must not equal name="Font" size=12 style=0.
+        return [
+            maxWidth, maxHeight,
+            t.title, t.artist, t.extra,
+            f.title  ? f.title.Name  + '\x00' + f.title.Size  + '\x00' + f.title.Style  : '',
+            f.artist ? f.artist.Name + '\x00' + f.artist.Size + '\x00' + f.artist.Style : '',
+            f.extra  ? f.extra.Name  + '\x00' + f.extra.Size  + '\x00' + f.extra.Style  : ''
+        ].join('\x00');
+    },
+
     update(metadb) {
         if (metadb === undefined) return;
         if (!metadb) {
@@ -565,6 +591,7 @@ const TextManager = {
             PanelArt.text.artist = '';
             PanelArt.text.extra  = '';
             TextHeightCache.clear();
+            this.invalidateCache();
             return;
         }
         const tf        = PanelArt.titleFormats;
@@ -582,9 +609,13 @@ const TextManager = {
             ]);
             PanelArt.text.extra = parts.join(' | ');
         }
+        this.invalidateCache();
     },
 
     scaleAndClip(gr, maxWidth, maxHeight) {
+        const key = this._buildScaledKey(maxWidth, maxHeight);
+        if (this._scaledCache && key === this._scaledKey) return this._scaledCache;
+
         const text  = PanelArt.text;
         const fonts = PanelArt.fonts;
 
@@ -621,12 +652,15 @@ const TextManager = {
             if (extraFont && extraFont.Size > MIN_FONT_SIZE) extraFont = FontManager.getFont(extraFont.Name, extraFont.Size - 1, extraFont.Style);
         }
 
-        return {
+        const result = {
             titleFont, artistFont, extraFont,
             titleText:  this.clipText(gr, text.title,  titleFont,  maxWidth),
             artistText: this.clipText(gr, text.artist, artistFont, maxWidth),
             extraText:  extraFont ? this.clipText(gr, text.extra, extraFont, maxWidth) : null
         };
+        this._scaledCache = result;
+        this._scaledKey   = key;
+        return result;
     },
 
     clipText(gr, content, font, maxWidth) {
@@ -723,6 +757,35 @@ const ImageSearch = {
         return null;
     },
 
+    // Recursive custom-folder tree search.
+    // Walks up to maxLevels deep.  At each level it tries an exact name match
+    // against folderMatchNames; on a hit it searches that subtree fully.
+    // Previously this was three hand-unrolled nested loops that (a) duplicated
+    // the same match+search block three times and (b) silently skipped level-3
+    // subfolders of non-matched level-1 folders entirely.
+    _searchCustomFolderTree(folder, patterns, metadata, folderMatchNames, levelsLeft) {
+        if (levelsLeft <= 0 || !FileManager.isDirectory(folder)) return null;
+        const subfolders = FileManager.getSubfolders(folder);
+        for (const sub of subfolders) {
+            const subName = _.last(sub.split('\\')).toLowerCase();
+            const matched = folderMatchNames.some(n =>
+                subName === n || subName.includes(n) || n.includes(subName) ||
+                subName.replace(/\s+/g, '-') === n || subName.replace(/\s+/g, '_') === n
+            );
+            if (matched) {
+                // Matched — do a full deep search inside this subtree.
+                const img = this.searchInFolder(sub, patterns, metadata, true)
+                         || this._searchFolderTree(sub, patterns, levelsLeft - 1);
+                if (img) return img;
+            } else {
+                // Not matched at this level — keep descending.
+                const img = this._searchCustomFolderTree(sub, patterns, metadata, folderMatchNames, levelsLeft - 1);
+                if (img) return img;
+            }
+        }
+        return null;
+    },
+
     searchForCover(metadb, baseFolder) {
         if (this._pathCache.has(baseFolder)) {
             const cached = this._pathCache.get(baseFolder);
@@ -756,60 +819,19 @@ const ImageSearch = {
         const customFolders = CustomFolders.getAll();
         if (customFolders.length === 0) { this._pathCache.set(baseFolder, null); return null; }
 
+        // First pass: search each custom folder root directly (flat, with metadata variations).
         for (const cf of customFolders) {
             if (!FileManager.isDirectory(cf)) continue;
             const hit = this.searchInFolder(cf, COVER_PATTERNS, metadata, true);
             if (hit) { this._pathCache.set(baseFolder, hit); return hit; }
         }
 
+        // Second pass: walk each custom folder tree recursively, matching subfolder names
+        // against known artist/album/title variations (up to MAX_SUBFOLDER_DEPTH levels).
         for (const cf of customFolders) {
             if (!FileManager.isDirectory(cf)) continue;
-            for (const sub1 of FileManager.getSubfolders(cf)) {
-                const sub1Name = _.last(sub1.split('\\')).toLowerCase();
-                const match1   = folderMatchNames.some(n =>
-                    sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
-                    sub1Name.replace(/\s+/g, '-') === n || sub1Name.replace(/\s+/g, '_') === n
-                );
-                if (match1) {
-                    // Level 1 match: search in sub1 and its subfolders (level 2)
-                    const img = this.searchInFolder(sub1, COVER_PATTERNS, metadata, true)
-                             || this.searchInFolderAnyFile(sub1, COVER_PATTERNS);
-                    if (img) { this._pathCache.set(baseFolder, img); return img; }
-                    
-                    for (const sub2 of FileManager.getSubfolders(sub1)) {
-                        const sImg = this.searchInFolder(sub2, COVER_PATTERNS, metadata, true)
-                                  || this.searchInFolderAnyFile(sub2, COVER_PATTERNS);
-                        if (sImg) { this._pathCache.set(baseFolder, sImg); return sImg; }
-                        
-                        // Level 3 search inside level 2 matched folder
-                        for (const sub3 of FileManager.getSubfolders(sub2)) {
-                            const s3Img = this.searchInFolder(sub3, COVER_PATTERNS, metadata, true)
-                                        || this.searchInFolderAnyFile(sub3, COVER_PATTERNS);
-                            if (s3Img) { this._pathCache.set(baseFolder, s3Img); return s3Img; }
-                        }
-                    }
-                    continue;
-                }
-                for (const sub2 of FileManager.getSubfolders(sub1)) {
-                    const sub2Name = _.last(sub2.split('\\')).toLowerCase();
-                    const match2   = folderMatchNames.some(n =>
-                        sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
-                        sub2Name.replace(/\s+/g, '-') === n || sub2Name.replace(/\s+/g, '_') === n
-                    );
-                    if (match2) {
-                        // Level 2 match: search in sub2 and its subfolders (level 3)
-                        const img = this.searchInFolder(sub2, COVER_PATTERNS, metadata, true)
-                                 || this.searchInFolderAnyFile(sub2, COVER_PATTERNS);
-                        if (img) { this._pathCache.set(baseFolder, img); return img; }
-                        
-                        for (const sub3 of FileManager.getSubfolders(sub2)) {
-                            const sImg = this.searchInFolder(sub3, COVER_PATTERNS, metadata, true)
-                                      || this.searchInFolderAnyFile(sub3, COVER_PATTERNS);
-                            if (sImg) { this._pathCache.set(baseFolder, sImg); return sImg; }
-                        }
-                    }
-                }
-            }
+            const hit = this._searchCustomFolderTree(cf, COVER_PATTERNS, metadata, folderMatchNames, MAX_SUBFOLDER_DEPTH);
+            if (hit) { this._pathCache.set(baseFolder, hit); return hit; }
         }
 
         this._pathCache.set(baseFolder, null);
@@ -829,16 +851,21 @@ const BlurCache = {
     // Return a blurred bitmap for the given source, dimensions, and radius.
     // Creates and caches one if not already present (LRU, capped at MAX_BG_CACHE).
     // StackBlur is slow — the cache avoids re-running it on every repaint.
+    // A sentinel value ('null') is cached on build failure so we don't retry
+    // every frame while the system is under memory pressure.
     getOrBuild(w, h, src, radius) {
         if (!src || radius <= 0 || w <= 0 || h <= 0) return null;
         const key = this._makeKey(src, w, h, radius);
         if (this._cache.has(key)) {
-            const c = this._cache.get(key); this._cache.delete(key); this._cache.set(key, c); return c;
+            const c = this._cache.get(key);
+            this._cache.delete(key);
+            this._cache.set(key, c);
+            return c === 'null' ? null : c;   // 'null' sentinel → failed last time
         }
         if (this._cache.size >= MAX_BG_CACHE) {
             const oldKey = this._cache.keys().next().value;
             const old    = this._cache.get(oldKey);
-            if (old && typeof old.Dispose === 'function') { try { old.Dispose(); } catch (e) {} }
+            if (old && old !== 'null' && typeof old.Dispose === 'function') { try { old.Dispose(); } catch (e) {} }
             this._cache.delete(oldKey);
         }
         let g = null, newImg = null;
@@ -852,6 +879,8 @@ const BlurCache = {
             newImg = null;
             return this._cache.get(key);
         } catch (e) {
+            // Cache the failure as a sentinel so we don't retry every repaint.
+            this._cache.set(key, 'null');
             return null;
         } finally {
             if (g && newImg) { try { newImg.ReleaseGraphics(g); } catch (e2) {} }
@@ -860,7 +889,9 @@ const BlurCache = {
     },
 
     dispose() {
-        this._cache.forEach(bmp => { if (bmp && typeof bmp.Dispose === 'function') { try { bmp.Dispose(); } catch (e) {} } });
+        this._cache.forEach(bmp => {
+            if (bmp && bmp !== 'null' && typeof bmp.Dispose === 'function') { try { bmp.Dispose(); } catch (e) {} }
+        });
         this._cache.clear();
     }
 };
@@ -967,7 +998,7 @@ const OverlayCache = {
         this.valid = true;
         if (!needsAny || w <= 0 || h <= 0) return;
 
-        let g = null, newImg = null, released = false;
+        let g = null, newImg = null;
         try {
             newImg = gdi.CreateImage(w, h);
             g      = newImg.GetGraphics();
@@ -1033,12 +1064,14 @@ const OverlayCache = {
                 for (let y = 1; y < h; y += SCANLINE_SPACING) g.FillSolidRect(0, y, w, 1, phosphorCol);
             }
 
-            newImg.ReleaseGraphics(g); released = true; g = null;
+            // Always release graphics before handing off the bitmap.
+            newImg.ReleaseGraphics(g); g = null;
             this.img = newImg; newImg = null;
         } catch (e) {
-            // Overlay is cosmetic — swallow draw errors
+            // Overlay is cosmetic — swallow draw errors, but clean up resources.
         } finally {
-            if (!released && g && newImg) { try { newImg.ReleaseGraphics(g); } catch (e2) {} }
+            // If g is still set the try body threw before ReleaseGraphics — release now.
+            if (g) { try { newImg.ReleaseGraphics(g); } catch (e2) {} g = null; }
             if (newImg) Utils.disposeImage(newImg);
         }
     }
@@ -1111,7 +1144,7 @@ const GlitchRenderer = {
             gr.FillSolidRect(bx, by, bw, bh,
                 _RGB(Math.floor(((col >>> 16) & 0xFF) * 0.90),
                      Math.floor(((col >>>  8) & 0xFF) * 0.90),
-                     col & 0xFF));
+                     Math.floor((col & 0xFF) * 0.90)));
         }
 
         const numInterference = Math.floor(intensity * 10) + 3;
@@ -1122,7 +1155,10 @@ const GlitchRenderer = {
                                   Math.floor(Math.random() * 50) + 40));
         }
 
-        const numNoise = Math.floor(intensity * 400) + 200;
+        // Capped at 200: at full intensity the original formula yields 600 single-pixel
+        // draw calls per glitch frame (400*1+200), each going through the full GDI+ path.
+        // 200 is still visually noisy and keeps the per-frame cost bounded.
+        const numNoise = Math.min(Math.floor(intensity * 200) + 100, 200);
         for (let i = 0; i < numNoise; i++) {
             const nx  = gx + Math.floor(Math.random() * gw);
             const ny  = gy + Math.floor(Math.random() * gh);
@@ -1194,6 +1230,9 @@ const Renderer = {
     drawAlbumArt(gr) {
         const img = PanelArt.images.source, cfg = StateManager.get(), dim = PanelArt.dimensions;
         if (!img || !cfg.albumArtEnabled) return { artX: 0, artY: 0, artW: 0, artH: 0 };
+        // Guard against corrupted or 1×0 / 0×1 images — division by zero would
+        // produce NaN/Infinity for the scale factor and crash the GDI+ draw call.
+        if (img.Width <= 0 || img.Height <= 0) return { artX: 0, artY: 0, artW: 0, artH: 0 };
 
         const basePad = cfg.albumArtPadding ?? 0;
         const availW  = dim.width, availH = dim.height;
@@ -1307,7 +1346,11 @@ const Renderer = {
         const ty    = startY;
         const ay    = ty + titleH + GAP_TITLE_ARTIST;
         const ey    = ay + artistH + (extraFont ? GAP_ARTIST_EXTRA : 0);
-        const flags = DT_CENTER | DT_WORDBREAK;
+        // DT_WORDBREAK intentionally omitted: text is pre-clipped by scaleAndClip/clipText,
+        // so wrapping is never needed. Combining DT_WORDBREAK with GDI (GdiDrawText) while
+        // measuring heights via GDI+ (CalcTextHeight) risks wrapping due to the slight
+        // rendering-engine measurement differences, which clips lines at the bottom.
+        const flags = DT_CENTER;
 
         if (cfg.textShadowEnabled) {
             const shadow = PanelArt_SetAlpha(PA_BLACK, 136), off = TEXT_SHADOW_OFFSET;
@@ -1413,15 +1456,15 @@ const StateManager = {
     // Apply a new config and trigger the relevant subsystem rebuilds.
     //   rebuildBlur        – schedule a blurred background rebuild
     //   skipOverlayRebuild – skip overlay cache invalidation
-    //   skipFontRebuild    – skip font rebuild and text update
+    //   skipFontRebuild    – skip font rebuild, text update, and scaleAndClip cache flush
     apply(config, rebuildBlur = false, skipOverlayRebuild = false, skipFontRebuild = false) {
         this._config = config;
-        if (!skipOverlayRebuild)  OverlayCache.invalidate();
-        if (!skipFontRebuild)     FontManager.rebuildFonts();
-        if (rebuildBlur)          ImageManager.scheduleBlurRebuild();
+        if (!skipOverlayRebuild) OverlayCache.invalidate();
         if (!skipFontRebuild) {
+            FontManager.rebuildFonts();   // also calls TextManager.invalidateCache()
             TextManager.update(fb.IsPlaying ? fb.GetNowPlaying() : null);
         }
+        if (rebuildBlur) ImageManager.scheduleBlurRebuild();
     },
 
     reset() {
@@ -1747,7 +1790,10 @@ const MenuManager = {
         }
         else if (_.inRange(id, 560, 563)) { update(c => c.layout = id - 560); }
         else if (id === 570) { update(c => c.textShadowEnabled = !c.textShadowEnabled); }
-        else if (id === 571) { update(c => c.extraInfoEnabled  = !c.extraInfoEnabled); }
+        // rebuildFonts=true forces TextManager.update() via StateManager.apply(skipFontRebuild=false).
+        // Without it, text.extra stays stale (showing old value after disable, empty after enable)
+        // and the scaleAndClip cache is not invalidated — extra info keeps rendering or fails to appear.
+        else if (id === 571) { update(c => c.extraInfoEnabled = !c.extraInfoEnabled, false, true); }
         else if (id === 800) { update(c => c.albumArtEnabled   = !c.albumArtEnabled); }
         else if (_.inRange(id, 801, 805)) {
             const floats = ["left","right","top","bottom"];
@@ -1825,7 +1871,11 @@ const ArtController = {
     },
 
     onPlaybackStop(reason) {
-        if (reason === 0) {
+        // reason 0 = user stop, 1 = end-of-queue, 2 = error.
+        // For user-stop and error we clear all stale art and text.
+        // For end-of-queue (1) foobar2000 will immediately fire on_playback_new_track
+        // for the next item, so clearing here would cause a visible flash.
+        if (reason === 0 || reason === 2) {
             ImageManager.cleanup();
             ArtCache.clearScaledCache();
             TextManager.update(null);
@@ -2113,11 +2163,9 @@ function on_paint(gr) {
 }
 
 function on_size() {
-    if (!isLive()) {
-        PanelArt.dimensions.width  = window.Width;
-        PanelArt.dimensions.height = window.Height;
-        return;
-    }
+    PanelArt.dimensions.width  = window.Width;
+    PanelArt.dimensions.height = window.Height;
+    if (!isLive()) return;
     ArtController.onSize();
 }
 
@@ -2202,7 +2250,10 @@ function on_playlist_items_added(idx)      { if (!isLive()) return; ArtDispatche
 function on_playlist_items_removed(idx)    { if (!isLive()) return; ArtDispatcher.request('playlist', null); }
 function on_mouse_wheel(delta)             { if (!isLive()) return; ArtController.onMouseWheel(delta); }
 function on_mouse_lbtn_down(x, y)         { if (!isLive()) return; if (window.SetFocus) window.SetFocus(); }
-function on_mouse_lbtn_up(x, y)           { if (!isLive()) return; return ArtController.onMouseLbtnUp(); }
+function on_mouse_lbtn_up(x, y) {
+    if (!isLive()) return;
+    ArtController.onMouseLbtnUp();
+}
 function on_mouse_lbtn_dblclk(x, y)       { if (!isLive()) return; if (window.SetFocus) window.SetFocus(); ImageModeManager.toggleImageMode(); }
 function on_mouse_rbtn_up(x, y)           { if (!isLive()) return false; const m = MenuManager.createMainMenu(); const id = m.TrackPopupMenu(x, y); if (id > 0) MenuManager.handleSelection(id); return true; }
 
