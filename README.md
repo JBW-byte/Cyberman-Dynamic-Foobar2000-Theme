@@ -121,6 +121,9 @@ This theme includes and depends on community-developed components and scripts fr
 
 * **Library Tree SMP** — regor
   [https://github.com/regorxxx/Library-Tree-SMP](https://github.com/regorxxx/Library-Tree-SMP)
+
+* **Biography** — regor
+  [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1078388.html#msg1078388)
 ### Optional Components
 
 * Additional audio outputs and codecs:
