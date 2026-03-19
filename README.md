@@ -80,13 +80,10 @@ If your library has missing or incompatible artwork:
 
 Album Artwork Downloader is a good option for artwork downloads.  
 Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music folder.  
-2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl  
-
 
 * A **Last.fm API key** is required for some options:
 
   * [https://www.last.fm/api](https://www.last.fm/api)
-
 ---
 
 ## Fonts (Required for Icons)
