@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -====== SMP 64bit Disc Spin V3.3.1 ======- \\
+		     // -====== SMP 64bit Disc Spin V3.3.2 ======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.3.1', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.3.2', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -170,7 +170,7 @@ const CONFIG = Object.freeze({
 		{ name: "Minimal",  color: 0x00B400 },
 		{ name: "Matrix",   color: 0x00FF32 },
 		{ name: "Vapor",    color: 0xFFB4FF },
-		{ name: "Cyber",    color: 0x00FFFF },
+		{ name: "Cyber",    color: 0x00BFFF },
 		{ name: "Magenta",  color: 0xFF00FF }
 	],
 
@@ -332,9 +332,6 @@ const Utils = {
 			try { obj.Dispose(); } catch (e) {}
 		}
 	},
-
-	// Check whether a path exists on-disk — delegates to FileManager which caches the result.
-	// (Thin shim kept for any future callers; always prefer FileManager.exists() directly.)
 
 	// Determine whether a file path belongs to a real disc scan, album art, or the default disc.
 	getImageType(path) {
@@ -559,32 +556,37 @@ const FileManager = {
 		return _.find(paths, p => this.exists(p)) || null;
 	},
 
-	// Attempt to extract a cover-art path from a known Last.fm JSON sidecar file.
-	parseLastFmJson(jsonPath, baseFolder) {
+	// Return true if the given JSON file is a Last.fm sidecar we recognise.
+	// Used purely as a folder-quality signal: if Last.fm has processed a folder,
+	// cover art is very likely also present there.
+	_isLastFmSidecar(jsonPath) {
 		try {
-			if (!_isFile(jsonPath)) return null;
+			if (!_isFile(jsonPath)) return false;
 			const content = utils.ReadUTF8(jsonPath);
-			if (!content) return null;
+			if (!content) return false;
 			const data = JSON.parse(content);
-			if (!data || !_.isObject(data)) return null;
+			if (!data || !_.isObject(data)) return false;
 			const fname = _.toLower(jsonPath.split('\\').pop());
-			// Confirm this is actually a Last.fm artefact before using it.
-			const isLastFm = _.includes(fname, 'lastfm') ||
-			                 (data.similarartists && data.similarartists.artist) ||
-			                 (data.url && _.isString(data.url) && _.includes(data.url, 'last.fm'));
-			if (!isLastFm) return null;
-			const paths = this.buildSearchPaths(baseFolder, CONFIG.COVER_PATTERNS, []);
-			return this.findImageInPaths(paths);
+			return _.includes(fname, 'lastfm') ||
+			       !!(data.similarartists && data.similarartists.artist) ||
+			       (_.isString(data.url) && _.includes(data.url, 'last.fm'));
 		} catch (e) {
-			return null;
+			return false;
 		}
 	},
 
-	// Check every known Last.fm JSON filename in a folder for an embedded art reference.
+	// Search baseFolder for a cover image, but only when a Last.fm sidecar file is
+	// present (treated as a confidence signal that art was downloaded alongside it).
+	// Previously named parseLastFmJson — renamed to reflect what it actually does.
+	// The original implementation parsed the JSON but never used the parsed data;
+	// it always fell through to a standard cover-pattern search in the folder.
 	searchLastFmJson(folder) {
 		for (const jsonFile of CONFIG.JSON_ART_FILES) {
-			const result = this.parseLastFmJson(folder + '\\' + jsonFile, folder);
-			if (result) return result;
+			if (this._isLastFmSidecar(folder + '\\' + jsonFile)) {
+				const paths = this.buildSearchPaths(folder, CONFIG.COVER_PATTERNS, []);
+				const found = this.findImageInPaths(paths);
+				if (found) return found;
+			}
 		}
 		return null;
 	},
@@ -927,7 +929,7 @@ const State = {
 	},
 
 	// Replace the displayed image, rebuild composite/rotation caches, and trigger a repaint.
-	// is always rebuilt for the new image — previously, two different songs with identical
+	// DiscComposite is always rebuilt for the new image — previously, two different songs with identical
 	// disc size and mask type shared a cache key and the second song's art was never shown.
 	setImage(newImg, discState, imgType, originalImg) {
 		const oldImg   = this.img;
@@ -1030,6 +1032,7 @@ const State = {
 			pc.discSize  = 0;
 			pc.staticW   = 0;
 			pc.staticH   = 0;
+			pc.valid = true;
 		}
 	},
 
@@ -1074,8 +1077,9 @@ const State = {
 		if (shouldRun && !this.spinTimer) {
 			// Snapshot spinSpeed and step once at timer-start so the hot interval closure
 			// reads plain JS numbers instead of calling window.GetProperty every tick.
-			// updateTimer() is re-called whenever spinSpeed or rotationStep changes
-			// (via menu → stopTimer + restart), so the snapshot stays current.
+			// IMPORTANT: this snapshot is only refreshed when the timer is fully stopped and
+			// restarted. Any code that changes spinSpeed or rotationStep MUST call
+			// stopTimer() before updateTimer() so the new values are captured here.
 			const speed = P.spinSpeed;
 			const step  = RotationCache.step;
 			this.spinTimer = window.SetInterval(() => {
@@ -1527,9 +1531,12 @@ const ImageLoader = {
 
 		if (!metadb) {
 			// Null metadb — treat as load failure (token already verified above).
+			// NOTE: State.currentMetadb is guaranteed non-null here; the `!State.currentMetadb`
+			// guard at the top of this function already returned early if it were null.
 			if (image) {
 				Utils.safeDispose(image);
-			} else if (State.currentMetadb) {
+			} else {
+				// No image and no metadb: nothing was found — fall back to the placeholder.
 				this.loadDefaultDisc();
 				State.updateTimer();
 			}
@@ -1637,7 +1644,7 @@ const RotationCache = {
 	// Wipe live frames and cancel any pending build.
 	clear() {
 		this._cancelBuild();
-		this.frames.forEach(f => { try { f.Dispose(); } catch (_) {} });
+		this.frames.forEach(f => { if (f) { try { f.Dispose(); } catch (_) {} } });
 		this.frames     = [];
 		this._sourceKey = '';
 	},
@@ -1665,7 +1672,8 @@ const RotationCache = {
 		if (this._pendingKey === key && this._pendingFrames !== null) return;
 
 		this._cancelBuild();
-		this._pendingFrames = [];
+		const totalFrames   = Math.round(360 / step);
+		this._pendingFrames = new Array(totalFrames).fill(null);
 		this._pendingAngle  = 0;
 		this._pendingKey    = key;
 
@@ -1695,6 +1703,7 @@ const RotationCache = {
 			// Render up to BATCH_SIZE frames per tick.
 			const end = Math.min(this._pendingAngle + this.BATCH_SIZE * step, 360);
 			for (let a = this._pendingAngle; a < end; a += step) {
+				const frameIdx = Math.round(a / step); // Stable index regardless of push order
 				try {
 					const frame = gdi.CreateImage(src.Width, src.Height);
 					let g = null, rel = false;
@@ -1705,8 +1714,10 @@ const RotationCache = {
 					} finally {
 						if (!rel && g) { try { frame.ReleaseGraphics(g); } catch (_) {} }
 					}
-					this._pendingFrames.push(frame);
-				} catch (e) {} // Skip bad frame; build continues
+					this._pendingFrames[frameIdx] = frame; // Write to fixed slot
+				} catch (e) {
+					// Frame slot stays null; getFrame() falls back to live DrawImage for this angle.
+				}
 			}
 			this._pendingAngle = end;
 
@@ -1724,7 +1735,7 @@ const RotationCache = {
 				Utils.safeDispose(this._pendingScaled); this._pendingScaled = null;
 				this._pendingAngle = 0;
 				this._pendingKey   = '';
-				oldFrames.forEach(f => { try { f.Dispose(); } catch (_) {} });
+				oldFrames.forEach(f => { if (f) { try { f.Dispose(); } catch (_) {} } });
 				if (isLive()) RepaintHelper.full();
 			}
 		};
@@ -1733,12 +1744,13 @@ const RotationCache = {
 		this._buildTimer = window.SetTimeout(buildBatch, 0);
 	},
 
-	// Return the pre-rendered frame closest to the given angle.
-	// During an incremental build this still returns from the old (live) frames.
+	// Return the pre-rendered frame closest to the given angle, or null if the slot
+	// failed during build (caller falls back to live DrawImage rotation).
 	getFrame(angle) {
 		if (this.frames.length === 0) return null;
-		const idx = Math.floor(angle / this.step) % this.frames.length;
-		return this.frames[idx < 0 ? this.frames.length + idx : idx];
+		const idx   = Math.floor(angle / this.step) % this.frames.length;
+		const frame = this.frames[idx < 0 ? this.frames.length + idx : idx];
+		return frame || null; // Explicit null for empty slots (failed frames)
 	}
 };
 
@@ -1777,7 +1789,8 @@ const DiscComposite = {
 				this.img   = discImg.Clone(0, 0, discImg.Width, discImg.Height);
 				this.valid = true;
 			} catch (e) {
-				// Clone failed; valid stays false so the lazy path in paintDisc will retry.
+				this.img   = null;
+				this.valid = true;
 			}
 			return;
 		}
@@ -1796,7 +1809,8 @@ const DiscComposite = {
 			this.valid = true;
 		} catch (e) {
 			if (!released && g) { try { this.img.ReleaseGraphics(g); } catch (_) {} }
-			this.dispose(); // Leave in a clean (invalid) state on failure
+			this.dispose(); // Clears img and RotationCache
+			this.valid = true;
 		}
 	}
 };
@@ -1845,9 +1859,9 @@ const BackgroundCache = {
 			g = null;
 			newImg.StackBlur(P.blurRadius);
 			this._lru.set(key, newImg);
-			newImg = null; // Ownership transferred to the LRU cache
 			this._activeKey = key;
-			this.img = this._lru.get(key);
+			this.img        = newImg; // Ownership transferred; _lru holds the reference
+			newImg = null;
 		} catch (e) {
 			this._activeKey = '';
 			this.img = null;
@@ -2034,6 +2048,8 @@ const StaticBgLayer = {
 						if (BackgroundCache.img) {
 							const bi = BackgroundCache.img;
 							g.DrawImage(bi, 0, 0, w, h, 0, 0, bi.Width, bi.Height);
+						} else {
+							g.DrawImage(State.bgImg, 0, 0, w, h, 0, 0, State.bgImg.Width, State.bgImg.Height);
 						}
 					} else {
 						// Draw the original (unblurred) cover art stretched to fill.
@@ -2289,6 +2305,7 @@ const PresetManager = {
 			OverlayInvalidator.request();
 			DiscComposite.dispose();
 			State.paintCache.valid = false;
+			State.stopTimer();
 			State.updateTimer();
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			RepaintHelper.full();
@@ -2580,10 +2597,10 @@ const MenuManager = {
 			blurMenu.AppendMenuItem(0, 271 + i, 'Radius: ' + value);
 			if (props.blurRadius.value === value) blurMenu.CheckMenuItem(271 + i, true);
 		});
-		blurMenu.AppendMenuItem(0, 283, 'Radius: 240');
-		if (props.blurRadius.value === 240) blurMenu.CheckMenuItem(283, true);
-		blurMenu.AppendMenuItem(0, 282, 'Max: 254');
-		if (props.blurRadius.value === 254) blurMenu.CheckMenuItem(282, true);
+		blurMenu.AppendMenuItem(0, 282, 'Radius: 240');
+		if (props.blurRadius.value === 240) blurMenu.CheckMenuItem(282, true);
+		blurMenu.AppendMenuItem(0, 283, 'Max: 254');
+		if (props.blurRadius.value === 254) blurMenu.CheckMenuItem(283, true);
 		blurMenu.AppendTo(bgMenu, blurEnabled ? 0 : 1, 'Blur Settings');
 
 		const darkenMenu = window.CreatePopupMenu();
@@ -2621,7 +2638,12 @@ const MenuManager = {
 
 		// --- Speed presets (IDs 10–12) ---
 		const speedPreset = _.find(CONFIG.SPEED_PRESETS, (p, i) => (i + 10) === idx);
-		if (speedPreset) { props.spinSpeed.value = speedPreset.value; changed = true; }
+		if (speedPreset) {
+			props.spinSpeed.value = speedPreset.value;
+			State.stopTimer();
+			State.updateTimer();
+			changed = true;
+		}
 
 		// --- Interpolation modes (IDs 20–22): require full image reload ---
 		const interpMode = _.find(CONFIG.INTERPOLATION_MODES, (m, i) => (i + 20) === idx);
@@ -2669,9 +2691,10 @@ const MenuManager = {
 			const newStep    = stepValues[idx];
 			if (newStep !== props.rotationStep.value) {
 				props.rotationStep.value = newStep;
-				// Clear rotation frames - will rebuild lazily on next paint
+				State.stopTimer();
 				DiscComposite.dispose();
 				State.lastFrame = -1;
+				State.updateTimer();
 				changed = true;
 			}
 		}
@@ -2811,6 +2834,7 @@ const MenuManager = {
 			OverlayInvalidator.request();
 			DiscComposite.dispose();
 			State.paintCache.valid = false;
+			State.stopTimer();
 			State.updateTimer();
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
@@ -2841,16 +2865,17 @@ const MenuManager = {
 		}
 		if (idx === 270) { props.blurEnabled.toggle(); BackgroundCache.invalidate(); StaticBgLayer.invalidate(); changed = true; }
 
-		// Blur radius: IDs 271–281 map to 0, 20, 40, ..., 200; ID 283 = 240 (default); ID 282 = 254 (maximum).
+		// Blur radius: IDs 271–281 map to 0, 20, 40, ..., 200; ID 282 = 240; ID 283 = 254 (max).
+		// IDs are now fully sequential (271→281→282→283) matching the visual menu order.
 		if (_.inRange(idx, 271, 282)) {
 			props.blurRadius.value = (idx - 271) * 20;
 			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
 			changed = true;
-		} else if (idx === 283) {
+		} else if (idx === 282) {
 			props.blurRadius.value = 240;
 			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
 			changed = true;
-		} else if (idx === 282) {
+		} else if (idx === 283) {
 			props.blurRadius.value = 254;
 			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
 			changed = true;
@@ -2940,9 +2965,11 @@ const ArtDispatcher = {
 				break;
 
 			case 'stop': {
-				// The 'metadb' slot carries the foobar stop-reason code (0 = user stop).
-				const stopReason = metadb;
-				if (stopReason === 0) State.angle = 0; // Reset disc angle on manual stop
+				// NOTE: for the 'stop' reason, the 'metadb' slot carries the foobar
+				// stop-reason integer (0=user stop, 1=EOF, 2=starting next track) — it is
+				// NOT a metadb handle. Renamed below to avoid accidental misuse.
+				const stopReasonCode = metadb;
+				if (stopReasonCode === 0) State.angle = 0; // Reset disc angle on manual stop
 				State.updateTimer();
 				RepaintHelper.full();
 				break;
@@ -2998,8 +3025,9 @@ function prepareLayers() {
 	const pc = State.paintCache;
 
 	// Ensure DiscComposite is valid before paint reads it.
+	// Only built for disc images — static cover art uses paintStatic which never reads DiscComposite.
 	// This is the only place DiscComposite.build() may allocate; never inside Renderer.
-	if (!DiscComposite.valid && State.img) {
+	if (!DiscComposite.valid && State.img && State.isDiscImage) {
 		DiscComposite.build(State.img, Math.floor(pc.discSize || Utils.getPanelDiscSize()), State.imageType);
 		if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || State.img);
 	}
@@ -3077,7 +3105,10 @@ function on_size() {
 	ImageLoader.clearCache();
 	if (isLive() && State.currentMetadb) {
 		ImageLoader.loadForMetadb(State.currentMetadb, false);
+		// loadForMetadb calls State.updateTimer() at the end of every code path,
+		// so the spin timer is restarted implicitly when the image reload completes.
 	} else {
+		State.updateTimer();
 		RepaintHelper.full();
 	}
 }
@@ -3281,7 +3312,9 @@ function init() {
 							State.setImage(displayImg, false, imageType, original);
 							props.savedPath.value = coverPath;
 						} else {
-							Utils.safeDispose(raw);
+							// scaleProportional already disposed raw internally (in its catch block)
+							// before returning null — do NOT call safeDispose(raw) again here.
+							// Only original needs cleanup; raw was fully released by scaleProportional.
 							Utils.safeDispose(original);
 						}
 					}
