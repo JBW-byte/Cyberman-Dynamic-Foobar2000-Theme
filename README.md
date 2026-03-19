@@ -175,7 +175,7 @@ Select all downloaded component files, apply changes, and restart Foobar2000.
 1. Download the theme file:
 
    * [Original Cyberman-Dynamic.fth](https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth)
-   * [Minimal Cyberman-Dynamic_V2.fth](https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic.fth)
+   * [Minimal Cyberman-Dynamic_V2.fth](https://github.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/blob/main/Cyberman-Dynamic-V2.fth)
 
 2. Import the theme:
 
