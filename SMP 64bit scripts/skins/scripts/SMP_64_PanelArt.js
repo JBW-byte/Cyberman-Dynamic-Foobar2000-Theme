@@ -1,6 +1,6 @@
 'use strict';
            // ============== AUTHOR L.E.D. ============== \\
-          // ==== Panel Artwork and Trackinfo v3.3  ==== \\
+          // ==== Panel Artwork and Trackinfo v3.3.1  ==== \\
          // ========== Blur Artwork + Trackinfo =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -10,7 +10,7 @@
 window.DrawMode = 0; // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript("SMP 64bit PanelArt V3.3", { author: "L.E.D.", grab_focus: true });
+window.DefineScript("SMP 64bit PanelArt V3.3.1", { author: "L.E.D.", grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
