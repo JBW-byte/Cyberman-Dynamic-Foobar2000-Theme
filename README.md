@@ -74,7 +74,7 @@ This method uses a preconfigured **profile folder**.
 
    * `File → Preferences → Media Library → Add (+) Folder`
 
-### Optional: Automatic Artwork Fetching.
+### Automatic Artwork Fetching.
 
 If your library has missing or incompatible artwork:
 
@@ -84,6 +84,7 @@ Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music 
 * A **Last.fm API key** is required for some options:
 
   * [https://www.last.fm/api](https://www.last.fm/api)
+  * 2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl  
 ---
 
 ## Fonts (Required for Icons)
