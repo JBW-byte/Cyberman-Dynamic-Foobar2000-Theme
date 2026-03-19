@@ -79,6 +79,7 @@ This method uses a preconfigured **profile folder**.
 If your library has missing or incompatible artwork:
 
 Album Artwork Downloader is probably the best bet for now, as the other options dont rly work in my script at the moment.
+Added 2nd theme layout with Bio artwork that downlaods a cover to your music folder.
 
 * A **Last.fm API key** is required for biography and album artwork fetching:
 
