@@ -74,12 +74,12 @@ This method uses a preconfigured **profile folder**.
 
    * `File → Preferences → Media Library → Add (+) Folder`
 
-### Optional: Automatic Artwork Fetching, does not work yet.
+### Optional: Automatic Artwork Fetching.
 
 If your library has missing or incompatible artwork:
 
-Album Artwork Downloader is probably the best bet for now, as the other options dont rly work in my script at the moment.
-Added 2nd theme layout with Bio artwork that downlaods a cover to your music folder.
+Album Artwork Downloader is a good option for artwork downloads.  
+Added 2nd theme layout with Biography-v1.4.2.mod.29, artwork that downlaods a cover to your music folder.
 
 * A **Last.fm API key** is required for biography and album artwork fetching:
 
