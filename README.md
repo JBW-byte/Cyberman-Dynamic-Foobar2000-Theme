@@ -83,7 +83,7 @@ Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music 
 2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl  
 
 
-* A **Last.fm API key** is required for biography:
+* A **Last.fm API key** is required for some options:
 
   * [https://www.last.fm/api](https://www.last.fm/api)
 
