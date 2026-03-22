@@ -89,8 +89,8 @@ Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music 
 * A 2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl
 * A 3rd OneRack theme, very minimal, low memory/resource usage* `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-OneRack.ftl  
 <p float="left">
-  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-V2.png" width="49%" alt="Cyberman-Dynamic_V2" title="Cyberman-Dynamic_V2" />
-  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-OneRack.png" width="49%" alt="Cyberman-Dynamic_OneRack" title="Cyberman-Dynamic_OneRack" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-V2.png" width="49%" alt="Cyberman-Dynamic_V2" title="Cyberman-Dynamic-V2" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-OneRack.png" width="49%" alt="Cyberman-Dynamic_OneRack" title="Cyberman-Dynamic-OneRack" />
 </p>  
 
 ---
