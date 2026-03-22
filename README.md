@@ -91,7 +91,8 @@ Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music 
 <p float="left">
   <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-V2.png" width="49%" />
   <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-OneRack.png" width="49%" />
-</p>
+</p>  
+
 ---
 
 ## Fonts (Required for Icons)
