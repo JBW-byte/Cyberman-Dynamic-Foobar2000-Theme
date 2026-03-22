@@ -131,9 +131,6 @@ This theme includes and depends on community-developed components and scripts fr
 * **Biography** — regor
   [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1078388.html#msg1078388)
 
-* **Nowbar** — Jame25 
-  [Nowbar](https://github.com/jame25/foo_nowbar)
-
 ### Optional Components
 
 * Additional audio outputs and codecs:
