@@ -22,6 +22,7 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 * Artwork blur panel
 * Multiple VU meter skins
 * Right-click configuration options on custom panels
+* 3 Themes
 
 **Display notes:**
 
