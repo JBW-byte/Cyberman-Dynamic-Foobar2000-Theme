@@ -84,7 +84,13 @@ Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music 
 * A **Last.fm API key** is required for some options:
 
   * [https://www.last.fm/api](https://www.last.fm/api)
-  * 2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl  
+  * 2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl
+  * 3rd OneRack theme, very minimal, low memory/resource usage* `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-OneRack.ftl  
+
+<p float="left">
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-V2.png" width="49%" />
+  <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic-OneRack.png" width="49%" />
+</p>
 ---
 
 ## Fonts (Required for Icons)
@@ -123,6 +129,10 @@ This theme includes and depends on community-developed components and scripts fr
 
 * **Biography** — regor
   [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1078388.html#msg1078388)
+
+* **Nowbar** — Jame25 
+  [Nowbar](https://github.com/jame25/foo_nowbar)
+
 ### Optional Components
 
 * Additional audio outputs and codecs:
@@ -194,6 +204,7 @@ On first load, errors may appear due to the Library Tree panel not being configu
 3. Select **Package → Import**
 4. Locate `Library-Tree-SMP-package.zip` (recommended location: `profile/packages/`)
 5. Click **OK**
+6. REpeat for Bio, Locate `Biography-v1.4.2.mod.29.zip` (recommended location: `profile/packages/`)
 
 Re-import the theme file to fully activate the layout.
 
