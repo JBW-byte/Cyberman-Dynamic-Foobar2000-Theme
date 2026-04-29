@@ -103,7 +103,7 @@ Some UI icons require additional fonts:
 * [https://www.fontrepo.com/font/27754/guifx-v2-transports](https://www.fontrepo.com/font/27754/guifx-v2-transports)
 * [LCD Font Digital-7 Mono](https://www.dafont.com/digital-7.font)
 
-Install the `.ttf` files into your system fonts directory.
+Install the `.ttf` files.
 
 ---
 
