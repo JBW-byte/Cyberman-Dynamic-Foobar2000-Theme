@@ -123,10 +123,11 @@ This theme includes and depends on community-developed components and scripts fr
 * **Spectrum Analyzer** — pqyt
   [https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer](https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer)
 
-* **Spider Monkey Panel (64-bit)** — marc2k3 — (Unfortunatly this has been removed or locked at the moment)
-  [https://github.com/marc2k3/spider-monkey-panel-x64/releases](https://github.com/marc2k3/spider-monkey-panel-x64/releases)
+* **Spider Monkey Panel (64-bit)** — marc2k3 — (Unfortunatly this has been removed or locked at the moment)<br>
+  new source added courtesy of LUR
+  [https://github.com/spider-monkey-panel-x64/releases](https://github.com/dima-lur/spider-monkey-panel-x64/releases)
 
-  replace with **[Jsplitter(D2D Supported)](https://foobar2000.club/forum/viewtopic.php?t=6378)** panel  — LUR
+  or replace with **[Jsplitter(D2D Supported)](https://foobar2000.club/forum/viewtopic.php?t=6378)** panel  — LUR
 
 * **Library Tree SMP** — regor
   [https://github.com/regorxxx/Library-Tree-SMP](https://github.com/regorxxx/Library-Tree-SMP)
