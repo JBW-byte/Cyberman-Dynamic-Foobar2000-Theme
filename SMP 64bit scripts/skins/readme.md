@@ -62,7 +62,7 @@ Recommended settings for large panels:
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 13 Mar 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 2 May 2026</summary>
 
 ### Update Overview
 Small fixs, hits marker on scroll or up/down keys.
