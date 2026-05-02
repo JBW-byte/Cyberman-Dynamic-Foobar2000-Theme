@@ -1,6 +1,6 @@
 'use strict';
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V2.1  ========\\
+		 // ========  SMP 64bit Volume Knob V2.2  ========\\
 		// =========== Simple Function + Themes ===========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -8,7 +8,7 @@
 
 window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit Volume Knob V2.1', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit Volume Knob V2.2', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 // Lodash first (needed for helpers.js if it uses _)
@@ -226,14 +226,14 @@ const VolumeSync = {
             State.targetAngle=State.dragTargetAngle=VolumeConverter.uiToAngle(State.uiVolume);
             State.currentAngle=State.targetAngle;
             State.requestRepaint();
-        }catch(e){ console.log("Error syncing from foobar:",e); }
+        }catch(e){ if(typeof console!=="undefined")console.log("Error syncing from foobar:",e); }
     },
     setFoobarVolume(uiVol, skipSnap){
         try{
             const db = VolumeConverter.uiToDb(uiVol);
             const newDb = skipSnap ? db : VolumeConverter.applySnap(db);
             if(Math.abs(newDb-fb.Volume)>=0.1) fb.Volume=newDb;
-        }catch(e){ console.log("Error setting foobar volume:",e); }
+        }catch(e){ if(typeof console!=="undefined")console.log("Error setting foobar volume:",e); }
     }
 };
 
@@ -244,6 +244,13 @@ const Renderer = {
         if(!w||!h) return;
         State.updateGeometryCache(w,h);
         const cache=State.geometryCache,theme=THEMES[props.currentTheme.value];
+        // FIX: guard against null arrays after State.cleanup() — a final on_paint
+        // may fire after on_script_unload has nulled tickAngles/markerSegments.
+        if (!cache.tickAngles || !cache.markerSegments) return;
+
+        // FIX Bug15: run animation update before the paint try/catch so errors in
+        // updateAnimation() are not silently swallowed by the paint error handler.
+        this.updateAnimation();
 
         try{
             // Outer circle
@@ -266,8 +273,7 @@ const Renderer = {
                 );
             }
 
-            // Marker animation
-            this.updateAnimation();
+            // Marker
             const rad=(State.currentAngle+CONFIG.ROTATION_OFFSET)*DEG2RAD;
             const sr=Math.sin(rad),cr=Math.cos(rad);
             let alpha=255;
@@ -289,7 +295,7 @@ const Renderer = {
                 );
             }
 
-        }catch(e){ console.log("Paint error:",e); }
+        }catch(e){ if(typeof console!=="undefined")console.log("Paint error:",e); }
     },
     updateAnimation(){
         const prev=State.currentAngle;
@@ -331,7 +337,7 @@ const InputHandler = {
         }
         return true;
     },
-    handleDoubleClick(x,y){ if(!this.hitTest(x,y)) return false; try{ fb.RunMainMenuCommand("Playback/Volume/Mute"); window.SetTimeout(()=>{ if(!State.dragging) VolumeSync.syncFromFoobar(); },50); }catch(e){console.log("Error toggling mute:",e);} return true; }
+    handleDoubleClick(x,y){ if(!this.hitTest(x,y)) return false; try{ fb.RunMainMenuCommand("Playback/Volume/Mute"); window.SetTimeout(()=>{ if(!State.dragging) VolumeSync.syncFromFoobar(); },50); }catch(e){if(typeof console!=="undefined")console.log("Error toggling mute:",e);} return true; }
 };
 
 // ====================== MENU MANAGER ======================
@@ -346,7 +352,7 @@ const MenuManager = {
             }
             const id=menu.TrackPopupMenu(x,y);
             if(id>0){ props.currentTheme.value=id-1; State.requestRepaint(); }
-        }catch(e){ console.log("Menu error:",e); }
+        }catch(e){ if(typeof console!=="undefined")console.log("Menu error:",e); }
         return true;
     }
 };
@@ -357,7 +363,7 @@ function init(){
         State.hasIsMuted = (fb.IsMuted !== undefined);
         VolumeSync.syncFromFoobar(); 
         State.startAnimation(); 
-    }catch(e){console.log("Initialization error:",e);} 
+    }catch(e){if(typeof console!=="undefined")console.log("Initialization error:",e);} 
 }
 init();
 
