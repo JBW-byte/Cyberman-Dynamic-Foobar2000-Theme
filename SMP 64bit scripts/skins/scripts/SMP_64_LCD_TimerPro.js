@@ -1,15 +1,15 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro 1.0 ========= \\
+		  // ======== SMP 64bit LCD TimerPro 1.1 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
  // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
 // ======== Right click menu full Customization and Layout ========= \\
 
-window.DrawMode = 1; // 0 - default GDI+ mode. 1 - D2D
+window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit LCD TimerPro 1.0', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit LCD TimerPro 1.1', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ===================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -61,7 +61,8 @@ let staticLayerCache = null;
 let staticCacheKey = '';
 
 function getStaticCacheKey() {
-    return `${window.Width}|${window.Height}|${themeIdx}|${borderMode}|${opBG}|${opBorder}|${opGhost}|${showGhost}|${showScanlines}|${showPhosphor}|${useReflection}|${displayMode}`;
+    const custSuffix = themeIdx === themes.length - 1 ? `|${custBg}|${custLcd}` : '';
+    return `${window.Width}|${window.Height}|${themeIdx}|${borderMode}|${opBG}|${opBorder}|${opGhost}|${showGhost}|${showScanlines}|${showPhosphor}|${useReflection}|${displayMode}|${vOffset}${custSuffix}`;
 }
 
 function rebuildStaticLayer() {
@@ -111,7 +112,7 @@ function rebuildStaticLayer() {
             g.DrawRect(b / 2, b / 2, w - b, h - b, b, SetAlpha(theme.lcd, opBorder));
         }
     } catch (e) {
-        console.log('LCD: Static layer rebuild error:', e);
+        if(typeof console!=="undefined")console.log('LCD: Static layer rebuild error:', e);
     } finally {
         staticLayerCache.ReleaseGraphics(g);
     }
@@ -298,7 +299,7 @@ function getFont(name, size, style = 0) {
         }
         return f;
     } catch (e) {
-        console.log('LCD: Font error:', e);
+        if(typeof console!=="undefined")console.log('LCD: Font error:', e);
         // Do NOT insert fallback into the LRU — if evicted, Dispose() would be
         // called on a still-live handle corrupting all subsequent draws.
         return fallback;
@@ -433,6 +434,9 @@ function ensureLayoutCache(w, h) {
 
     lc.leftX           = Math.max(borderMode > 0 ? borderMode : 2, basePad + m1TitleOffX);
 
+    // topY uses the same formula as leftX (basePad + offset) so padding is symmetric
+    // when both offsets are equal. The previous formula (leftX + m1TitleOffY) was wrong
+    // — it double-applied basePad through leftX, making topY always larger than leftX.
     lc.topY            = Math.max(borderMode > 0 ? borderMode : 2, basePad + m1TitleOffY);
 
     lc.m1TitleSize     = pc.m1TitleSize;
@@ -466,24 +470,27 @@ function _drawMode1TextLayer(g, w, h, lc, m1TruncatedTitle, m1TruncatedAlbum) {
     const theme = getTheme();
     const trFont     = lc.textRowFontName;
     const leftX      = lc.leftX;
-    const availableW = w - lc.leftX * 2;
+    const availableW = Math.max(1, w - leftX); // matches _m1AvailW in updatePaintCache
 
     const rowSpacing = lc.rowSpacing;
-    
+
     // Title
     const titleText = textCache.titleText;
-    // Use already-shrunk values from paintCache directly
     let titleFontSize = State.paintCache.m1TitleSize;
+    // Title+album zone = top 61.8% of panel (golden ratio), bottom 38.2% = button/codec strip.
+    const maxTextY = Math.floor(h * 0.618);
+
     if (titleText && showM1Title) {
-        const titleFont = getFont(trFont, titleFontSize, 0);
-        // Use truncated text if available
+        const titleFont     = getFont(trFont, titleFontSize, 0);
         const drawTitleText = m1TruncatedTitle || titleText;
-        const m = g.MeasureString(drawTitleText, titleFont, 0, 0, w * 4, h * 4);
         const textX = leftX;
         const textY = lc.topY;
-        const titleDrawW = Math.min(m.Width, w - textX);
-        const titleDrawH = Math.round(titleFontSize * 1.5);
-        // Draw glow
+        if (textY >= maxTextY) return;
+        // Use titleFontSize as drawH — m.Height includes internal leading/descent which
+        // pushes the glyph down from textY, causing apparent top padding on large fonts.
+        // The em-size is what we explicitly set so it correctly bounds the visible cap height.
+        const titleDrawW = Math.max(1, w - textX);
+        const titleDrawH = Math.min(titleFontSize + 4, maxTextY - textY);
         if (showGlow && opGlow > 0) {
             const maxR = Math.max(1, Math.round(titleFontSize * 0.12));
             for (let i = 1; i <= 2; i++) {
@@ -500,19 +507,21 @@ function _drawMode1TextLayer(g, w, h, lc, m1TruncatedTitle, m1TruncatedAlbum) {
         g.DrawString(drawTitleText, titleFont, SetAlpha(theme.lcd, opClock), textX, textY, titleDrawW, titleDrawH);
     }
     
-    // Album - use already-shrunk value from paintCache
+    // Album
     const albumText = textCache.albumText;
     let albumFontSize = State.paintCache.m1AlbumSize;
     if (albumText && showM1Album) {
-        const albumFont = getFont(trFont, albumFontSize, 0);
-        // Use truncated text if available
+        const albumFont     = getFont(trFont, albumFontSize, 0);
         const drawAlbumText = m1TruncatedAlbum || albumText;
-        const m = g.MeasureString(drawAlbumText, albumFont, 0, 0, w * 4, h * 4);
         const textX = leftX;
-        const textY = (showM1Title && titleText) ? lc.topY + titleFontSize + rowSpacing : lc.topY;
-        const drawW = Math.min(m.Width, w - textX);
-        const drawH = Math.round(albumFontSize * 1.5);
-        g.DrawString(drawAlbumText, albumFont, SetAlpha(theme.lcd, Math.floor(opClock * 0.7)), textX, textY, drawW, drawH);
+        // Use em-size of title to position album row — avoids m.Height leading drift.
+        const titleH = (titleText && showM1Title) ? titleFontSize + 4 : 0;
+        const textY  = lc.topY + titleH + rowSpacing;
+        if (textY < maxTextY) {
+            const drawW = Math.max(1, w - textX);
+            const drawH = Math.min(albumFontSize + 4, maxTextY - textY);
+            g.DrawString(drawAlbumText, albumFont, SetAlpha(theme.lcd, Math.floor(opClock * 0.7)), textX, textY, drawW, drawH);
+        }
     }
     
     // Codec info row — gated by per-mode toggles.
@@ -755,13 +764,18 @@ function updatePaintCache(w, h) {
     // of the bottom strip or top margin so overshooting caused disappearing text.
     // Formula: title + album (0.60×title) + spacing (0.15×title) ≈ 1.75×title ≤ availH
     if (autoFontSize) {
-        const _m1TopYEst = Math.max(0, 15 + (borderMode > 0 ? Math.ceil(borderMode / 2) + 4 : 0) + m1TitleOffY);
-        const _m1AvailH  = Math.max(32, h - State.paintCache.bottomH - Math.max(2, borderMode) - _m1TopYEst);
-        State.paintCache.m1TitleSize = Math.min(72, Math.max(8, Math.floor(_m1AvailH / 1.75)));
-        State.paintCache.m1AlbumSize = Math.min(52, Math.max(8, Math.floor(State.paintCache.m1TitleSize * 0.60)));
+        const _basePadEst = 15 + (borderMode > 0 ? Math.ceil(borderMode / 2) + 4 : 0);
+        const _leftXEst   = Math.max(borderMode > 0 ? borderMode : 2, _basePadEst + m1TitleOffX);
+        const _topYEst    = Math.max(borderMode > 0 ? borderMode : 2, _basePadEst + m1TitleOffY);
+        const _topZone    = Math.floor(h * 0.618);
+        const _m1AvailH   = Math.max(32, _topZone - _topYEst);
+        // Title: 40% of top zone — balanced between short and long titles.
+        // Shrink loop reduces further if text overflows available width.
+        State.paintCache.m1TitleSize = Math.min(128, Math.max(14, Math.floor(_m1AvailH * 0.40)));
+        State.paintCache.m1AlbumSize = Math.min(100, Math.max(14, Math.floor(State.paintCache.m1TitleSize * 0.70)));
     } else {
         State.paintCache.m1TitleSize = _scale(textRowFontSize);
-        State.paintCache.m1AlbumSize = Math.max(8, Math.round(State.paintCache.m1TitleSize * 0.618));
+        State.paintCache.m1AlbumSize = Math.max(14, Math.round(State.paintCache.m1TitleSize * 0.618));
     }
     
     // Horizontal shrink for mode 1 title: shrink if wider than available width.
@@ -775,60 +789,53 @@ function updatePaintCache(w, h) {
     const _m1AvailW = Math.max(1, w - _m1LeftX);
     State.paintCache.m1TruncatedTitle = null;
     State.paintCache.m1TruncatedAlbum = null;
-    
-    // Title: shrink or truncate with ...
+
+    // Title: auto mode shrinks down to 14px then truncates. Manual mode truncates at set size.
     if (textCache.titleText && textCache.titleText.length > 0) {
-        let tsz = State.paintCache.m1TitleSize;
-        const tf0 = getFont(textRowFontName || defaultFontName, tsz, 0);
-        if (_gr.MeasureString(textCache.titleText, tf0, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
-            for (let iter = 0; iter < 200; iter++) {
-                tsz--;
-                if (tsz <= 12) break;
+        if (autoFontSize) {
+            let tsz = State.paintCache.m1TitleSize;
+            while (tsz > 14) {
                 const tf = getFont(textRowFontName || defaultFontName, tsz, 0);
                 if (_gr.MeasureString(textCache.titleText, tf, 0, 0, w * 4, h * 4).Width <= _m1AvailW) break;
+                tsz--;
             }
+            State.paintCache.m1TitleSize = Math.max(14, tsz);
+            State.paintCache.m1AlbumSize = Math.min(State.paintCache.m1AlbumSize, State.paintCache.m1TitleSize);
         }
-        State.paintCache.m1TitleSize = Math.max(12, tsz);
-        // If title shrank below the already-computed album size, pull album down with it.
-        State.paintCache.m1AlbumSize = Math.min(State.paintCache.m1AlbumSize, State.paintCache.m1TitleSize);
-        
-        // If still too wide at min size, truncate with ...
-        const finalFont = getFont(textRowFontName || defaultFontName, State.paintCache.m1TitleSize, 0);
-        if (_gr.MeasureString(textCache.titleText, finalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
+        const titleFinalFont = getFont(textRowFontName || defaultFontName, State.paintCache.m1TitleSize, 0);
+        if (_gr.MeasureString(textCache.titleText, titleFinalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
             let truncated = textCache.titleText;
-            while (truncated.length > 0 && _gr.MeasureString(truncated + '...', finalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
+            while (truncated.length > 0 && _gr.MeasureString(truncated + '...', titleFinalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
                 truncated = truncated.slice(0, -1);
             }
             State.paintCache.m1TruncatedTitle = truncated + '...';
         }
     }
-    
-    // Album: shrink or truncate with ...
+
+    // Album: auto mode shrinks down to 14px then truncates. Manual mode truncates at set size.
     if (textCache.albumText && textCache.albumText.length > 0) {
-        let asz = State.paintCache.m1AlbumSize;
-        const af0 = getFont(textRowFontName || defaultFontName, asz, 0);
-        if (_gr.MeasureString(textCache.albumText, af0, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
-            for (let iter = 0; iter < 200; iter++) {
-                asz--;
-                if (asz <= 12) break;
+        if (autoFontSize) {
+            let asz = State.paintCache.m1AlbumSize;
+            while (asz > 14) {
                 const af = getFont(textRowFontName || defaultFontName, asz, 0);
                 if (_gr.MeasureString(textCache.albumText, af, 0, 0, w * 4, h * 4).Width <= _m1AvailW) break;
+                asz--;
             }
+            State.paintCache.m1AlbumSize = Math.min(Math.max(14, asz), State.paintCache.m1TitleSize);
         }
-        // Album must never exceed title size — clamp after the shrink loop so that
-        // a wide album text can't end up larger than a wide title that already shrank.
-        State.paintCache.m1AlbumSize = Math.min(Math.max(12, asz), State.paintCache.m1TitleSize);
-        
-        // If still too wide at min size, truncate with ...
-        const finalFont = getFont(textRowFontName || defaultFontName, State.paintCache.m1AlbumSize, 0);
-        if (_gr.MeasureString(textCache.albumText, finalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
+        const albumFinalFont = getFont(textRowFontName || defaultFontName, State.paintCache.m1AlbumSize, 0);
+        if (_gr.MeasureString(textCache.albumText, albumFinalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
             let truncated = textCache.albumText;
-            while (truncated.length > 0 && _gr.MeasureString(truncated + '...', finalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
+            while (truncated.length > 0 && _gr.MeasureString(truncated + '...', albumFinalFont, 0, 0, w * 4, h * 4).Width > _m1AvailW) {
                 truncated = truncated.slice(0, -1);
             }
             State.paintCache.m1TruncatedAlbum = truncated + '...';
         }
     }
+
+    // Enforce minimum 14px for Mode 1 text - prevent any code path from going lower
+    State.paintCache.m1TitleSize = Math.max(14, State.paintCache.m1TitleSize);
+    State.paintCache.m1AlbumSize = Math.max(14, State.paintCache.m1AlbumSize);
 
     State.paintCache.clockFont = getFont(clockFontName || defaultFontName, State.paintCache.clockSize, 1);
     State.paintCache.codecFont = getFont(codecFontName || defaultFontName, State.paintCache.codecSize, 0);
@@ -867,7 +874,8 @@ function rebuildEffectCache() {
     if (w <= 0 || h <= 0) return;
 
     const theme  = getTheme();
-    const newKey = `${w}|${h}|${themeIdx}|${opScanlines}|${opPhosphor}|${opReflection}|${showScanlines}|${showPhosphor}|${useReflection}`;
+    const custSuffix = themeIdx === themes.length - 1 ? `|${custBg}|${custLcd}` : '';
+    const newKey = `${w}|${h}|${themeIdx}|${opScanlines}|${opPhosphor}|${opReflection}|${showScanlines}|${showPhosphor}|${useReflection}${custSuffix}`;
 
     if (newKey === cacheKey) return;
 
@@ -911,7 +919,7 @@ function rebuildEffectCache() {
                 }
             }
         } catch (e) {
-            console.log('LCD: Scanline cache error:', e);
+            if(typeof console!=="undefined")console.log('LCD: Scanline cache error:', e);
         } finally {
             scanCache.ReleaseGraphics(sg);
         }
@@ -941,7 +949,7 @@ function rebuildEffectCache() {
             if (lastAlpha > 0)
                 rg.FillSolidRect(0, bandStart, w, reflH - bandStart, SetAlpha(white, lastAlpha));
         } catch (e) {
-            console.log('LCD: Reflection cache error:', e);
+            if(typeof console!=="undefined")console.log('LCD: Reflection cache error:', e);
         } finally {
             reflCache.ReleaseGraphics(rg);
         }
@@ -1047,7 +1055,7 @@ function loadPreset(slot) {
     const str = window.GetProperty('LCD.Preset' + slot, null);
     if (!str) return;
     const d = _.attempt(JSON.parse, str);
-    if (_.isError(d)) { console.log('LCD: Load preset error: invalid JSON'); return; }
+    if (_.isError(d)) { if(typeof console!=="undefined")console.log('LCD: Load preset error: invalid JSON'); return; }
     if (d.themeIdx        !== undefined) _setThemeIdx(d.themeIdx);
     if (d.borderMode      !== undefined) borderMode      = d.borderMode;
     if (d.autoFontSize    !== undefined) autoFontSize    = d.autoFontSize;
@@ -1119,10 +1127,13 @@ function update_info() {
             const ar = _tf_artist.EvalWithMetadb(np);
             textCache.titleText  = (t && ar) ? t + ' - ' + ar : (t || ar || '');
             textCache.albumText  = _tf_album.EvalWithMetadb(np) || '';
-            textCache.bitrate    = _tf_bitrate.EvalWithMetadb(np)    + ' kbps';
-            textCache.sampleRate = _tf_samplerate.EvalWithMetadb(np) + ' Hz';
-            textCache.bits       = _tf_bits.EvalWithMetadb(np) + ' bit';
-            textCache.channels   = _tf_channels.EvalWithMetadb(np);
+            const br = _tf_bitrate.EvalWithMetadb(np);
+            const sr = _tf_samplerate.EvalWithMetadb(np);
+            const bt = _tf_bits.EvalWithMetadb(np);
+            textCache.bitrate    = br ? br + ' kbps' : '';
+            textCache.sampleRate = sr ? sr + ' Hz'   : '';
+            textCache.bits       = bt ? bt + ' bit'  : '';
+            textCache.channels   = _tf_channels.EvalWithMetadb(np) || '';
         } catch (e) {
             codecStr = ' ';
             textCache.titleText  = textCache.albumText  = '';
@@ -1282,13 +1293,11 @@ function on_paint(gr) {
         ensureLayoutCache(w, h);
         const lc = State.layoutCache;
         
-        // Play icon em-size = 50% of interior height, but also capped horizontally.
-        // The codec row uses 75% of availableW in _drawMode1TextLayer (w - lc.leftX*2),
-        // so the button must use the same availableW to guarantee it fits in the remaining 25%.
-        const innerH      = h - 2 * borderMode;
+        // Play icon em-size = 38.2% of panel height (golden ratio bottom zone).
+        // Also capped horizontally to 25% of availableW so it fits alongside the codec row.
         const borderInset = borderMode > 0 ? borderMode + 2 : lc.leftX;
         const availableW  = w - lc.leftX * 2;
-        const maxBtnByH   = Math.max(12, Math.round(innerH * 0.5));
+        const maxBtnByH   = Math.max(12, Math.round(h * 0.382));
         const maxBtnByW   = Math.max(12, Math.round(availableW * 0.25));
         const btnHeight   = Math.min(maxBtnByH, maxBtnByW);
         rebuildPaintFonts(btnHeight);
@@ -1310,7 +1319,7 @@ function on_paint(gr) {
                 State.textLayerBitmap = gdi.CreateImage(w, h);
                 const gl = State.textLayerBitmap.GetGraphics();
                 try { _drawMode1TextLayer(gl, w, h, lc, State.paintCache.m1TruncatedTitle, State.paintCache.m1TruncatedAlbum); }
-                catch(e) { console.log('LCD: Mode1 text layer error:', e); }
+                catch(e) { if(typeof console!=="undefined")console.log('LCD: Mode1 text layer error:', e); }
                 finally   { State.textLayerBitmap.ReleaseGraphics(gl); }
                 State.textLayerKey = textKey;
             }
@@ -1319,7 +1328,7 @@ function on_paint(gr) {
                 State.btnLayerBitmap = gdi.CreateImage(w, h);
                 const gb = State.btnLayerBitmap.GetGraphics();
                 try { _drawMode1BtnLayer(gb, w, h, fc, btnHeight, borderInset); }
-                catch(e) { console.log('LCD: Mode1 btn layer error:', e); }
+                catch(e) { if(typeof console!=="undefined")console.log('LCD: Mode1 btn layer error:', e); }
                 finally   { State.btnLayerBitmap.ReleaseGraphics(gb); }
                 State.btnLayerState = btnKey;
             }
@@ -1942,11 +1951,14 @@ function on_playback_stop(reason) {
 // definition overrides the one in helpers.js.  We must therefore handle the
 // helpers.js cleanup here to prevent leaking the measurement bitmap/context.
 function on_script_unload() {
-    _tt('');  // helpers.js version called this; must replicate it here since we override that function
+    if (typeof _tt === 'function') _tt('');
     stopClockTimer();
     stopBtnFlashTimer();
-    // Release helpers.js measurement context (overridden from helpers.js version)
-    if (_bmp) { _bmp.ReleaseGraphics(_gr); }
+    // Release helpers.js measurement context — guard _gr in case it was never initialised.
+    if (_bmp) {
+        if (_gr) { try { _bmp.ReleaseGraphics(_gr); } catch(e) {} }
+        try { _bmp.Dispose(); } catch(e) {}
+    }
     _gr = null;
     _bmp = null;
     RepaintScheduler.cancel();
@@ -1963,9 +1975,9 @@ function on_script_unload() {
 
     if (State.textLayerBitmap) { try { State.textLayerBitmap.Dispose(); } catch(e) {} State.textLayerBitmap = null; }
     if (State.btnLayerBitmap)  { try { State.btnLayerBitmap.Dispose();  } catch(e) {} State.btnLayerBitmap  = null; }
-    if (scanCache) { scanCache.Dispose(); scanCache = null; }
-    if (reflCache) { reflCache.Dispose(); reflCache = null; }
-    if (staticLayerCache) { staticLayerCache.Dispose(); staticLayerCache = null; }
+    if (scanCache)       { try { scanCache.Dispose();       } catch(e) {} scanCache       = null; }
+    if (reflCache)       { try { reflCache.Dispose();       } catch(e) {} reflCache       = null; }
+    if (staticLayerCache){ try { staticLayerCache.Dispose();} catch(e) {} staticLayerCache= null; }
 
     fontCache.forEach(f => { try { f.Dispose(); } catch(e){} });
     fontCache.clear();
