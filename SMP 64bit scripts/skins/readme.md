@@ -84,10 +84,10 @@ Small fixs, hits marker on scroll or up/down keys.
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 21 Mar 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 12 May 2026</summary>
 
 ### Update Overview
-Bug Fix's.
+Bug Fix's. v3.3.3
 
 ### Features
 
