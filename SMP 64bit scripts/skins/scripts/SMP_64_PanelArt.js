@@ -1,6 +1,6 @@
 'use strict';
            // ============== AUTHOR L.E.D. ============== \\
-          // ==== Panel Artwork and Trackinfo v3.3.2  ==== \\
+          // ==== Panel Artwork and Trackinfo v3.3.3  ==== \\
          // ========== Blur Artwork + Trackinfo =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -10,7 +10,7 @@
 window.DrawMode = 0; // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript("SMP 64bit PanelArt V3.3.2", { author: "L.E.D.", grab_focus: true });
+window.DefineScript("SMP 64bit PanelArt V3.3.3", { author: "L.E.D.", grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -1889,7 +1889,8 @@ const ArtController = {
         OverlayCache.invalidate();
         ArtCache.clearScaledCache();
         ImageManager.scheduleBlurRebuild();
-        RepaintHelper.full();
+        // Defer repaint — window.Repaint() must not be called directly from on_size.
+        window.SetTimeout(() => { RepaintHelper.full(); }, 0);
     },
 
     onMouseWheel(delta) {
@@ -2158,7 +2159,7 @@ function on_paint(gr) {
         Renderer.drawOverlay(gr, w, h, artInfo, textArea);
         Renderer.drawSliders(gr);
     } catch (e) {
-        console.log("Paint error:", e);
+        if(typeof console!=="undefined")console.log("Paint error:", e);
     }
 }
 
@@ -2238,7 +2239,7 @@ function on_get_album_art_done(metadb, art_id, image, image_path) {
             RepaintHelper.full();
         }
     } catch (e) {
-        console.log("on_get_album_art_done error:", e);
+        if(typeof console!=="undefined")console.log("on_get_album_art_done error:", e);
     }
 }
 
@@ -2282,7 +2283,7 @@ function on_script_unload() {
     TextHeightCache.clear();
     ArtCache.clearAll();
     // Replicate helpers.js teardown — our on_script_unload supersedes theirs.
-    _tt('');
+    if (typeof _tt === 'function') _tt('');
     if (_gr) { try { if (_bmp) _bmp.ReleaseGraphics(_gr); } catch (e) {} }
     _gr = null; _bmp = null;
 }
@@ -2290,14 +2291,10 @@ function on_script_unload() {
 // ====================== INITIALIZATION ======================
 window.MinHeight = 75;
 window.MinWidth  = 200;
-PanelArt.dimensions.width  = window.Width;
-PanelArt.dimensions.height = window.Height;
 StateManager.load();
 CustomFolders.load();
 (function init() {
     const cfg = StateManager.get();
-    // glitchEnabled and imageFolder are read directly from cfg everywhere;
-    // they do not need (or have) a runtime mirror on PanelArt.
     PanelArt.imageMode  = cfg.imageMode;
     PanelArt.slideMode  = cfg.slideMode;
     PanelArt.slideIndex = cfg.slideIndex || 0;
@@ -2306,6 +2303,11 @@ CustomFolders.load();
     const initTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
     if (initTrack) ImageManager.loadAlbumArt(initTrack);
     else           TextManager.update(null);
-    RepaintHelper.full();
-    window.SetTimeout(() => { phase = Phase.LIVE; RepaintHelper.full(); }, 0);
+    window.SetTimeout(() => {
+        // Read dimensions here — window.Width/Height unreliable at module eval time.
+        PanelArt.dimensions.width  = window.Width;
+        PanelArt.dimensions.height = window.Height;
+        phase = Phase.LIVE;
+        RepaintHelper.full();
+    }, 0);
 })();
