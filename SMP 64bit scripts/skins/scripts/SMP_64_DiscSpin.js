@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -====== SMP 64bit Disc Spin V3.3.2 ======- \\
+		     // -====== SMP 64bit Disc Spin V3.4 ======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.3.2', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.4', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -227,6 +227,7 @@ const SLIDER_STEP        = 5;     // Opacity units changed per mouse wheel notch
 const DISC_CUSTOM_THEME_INDEX = CONFIG.PHOSPHOR_THEMES.length;
 
 let readyTimer = null; // Holds the boot-time timeout handle while waiting for a valid panel size.
+let isPaused   = false; // Mirrors fb.IsPaused; updated by on_playback_pause.
 
 // ====================== IMAGE UID TAGGING ======================
 let _imgUIDCounter = 0;
@@ -362,6 +363,7 @@ const Utils = {
 		const h = window.Height;
 		if (w <= 0 || h <= 0) return props.maxImageSize.value;
 		const layout = calcDiscLayout(w, h);
+		if (layout.size <= 0) return CONFIG.MIN_DISC_SIZE; // guard: panel too small to compute valid size
 		return layout.size > props.maxImageSize.value ? props.maxImageSize.value : layout.size;
 	}
 };
@@ -696,9 +698,16 @@ const AssetManager = {
 		DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
 		State.lastFrame         = -1;
 		State.paintCache.valid  = false;
-		Utils.safeDispose(State.img);
-		State.img       = null;
+		// Dispose the processed image and background source atomically.
+		const oldImg   = State.img;
+		const oldBgImg = State.bgImg;
+		State.img   = null;
+		State.bgImg = null;
 		State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
+		Utils.safeDispose(oldImg);
+		if (oldBgImg && oldBgImg !== oldImg) Utils.safeDispose(oldBgImg);
+		BackgroundCache.invalidate();
+		StaticBgLayer.invalidate();
 		if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 		RepaintHelper.full();
 		return true;
@@ -766,6 +775,7 @@ const ImageProcessor = {
 	// For album art destined for a CD mask the canvas is pre-filled black.
 	scaleToSquare(raw, targetSize, interpolationMode, imageType) {
 		if (!raw) return null;
+		if (targetSize <= 0) { Utils.safeDispose(raw); return null; } // guard: invalid size
 		const w = raw.Width;
 		const h = raw.Height;
 
@@ -815,6 +825,7 @@ const ImageProcessor = {
 	// Used for static (non-disc) cover art displayed without a circular mask.
 	scaleProportional(raw, maxSize, interpolationMode) {
 		if (!raw) return null;
+		if (maxSize <= 0) { Utils.safeDispose(raw); return null; } // guard: invalid size
 		const w      = raw.Width;
 		const h      = raw.Height;
 		const maxDim = Math.max(w, h);
@@ -1012,9 +1023,11 @@ const State = {
 				pc.discY     = Math.floor((h - pc.discSize) / 2);
 			} else {
 				// Static cover art: optionally letterboxed to preserve aspect ratio.
-				let sw = availW, sh = availH, sx = totalInset, sy = totalInset;
-				if (P.keepAspectRatio) {
-					const ratio = Math.min(availW / this.img.Width, availH / this.img.Height);
+				const safeAvailW = Math.max(0, availW);
+				const safeAvailH = Math.max(0, availH);
+				let sw = safeAvailW, sh = safeAvailH, sx = totalInset, sy = totalInset;
+				if (P.keepAspectRatio && safeAvailW > 0 && safeAvailH > 0) {
+					const ratio = Math.min(safeAvailW / this.img.Width, safeAvailH / this.img.Height);
 					sw = Math.floor(this.img.Width  * ratio);
 					sh = Math.floor(this.img.Height * ratio);
 					sx = Math.floor((w - sw) / 2);
@@ -1071,7 +1084,7 @@ const State = {
 		                  this.isDiscImage &&
 		                  P.spinningEnabled &&
 		                  fb.IsPlaying &&
-		                  !fb.IsPaused &&
+		                  !isPaused &&
 		                  !P.useAlbumArtOnly;
 
 		if (shouldRun && !this.spinTimer) {
@@ -1294,6 +1307,7 @@ const ImageLoader = {
 			AssetManager.autoSelectMask(imagePath);
 			return { img: processed, path: imagePath, type: CONFIG.IMAGE_TYPE.REAL_DISC, original };
 		}
+		// processForDisc failed — original was successfully cloned but is now unused.
 		Utils.safeDispose(original);
 		return null;
 	},
@@ -1452,6 +1466,14 @@ const ImageLoader = {
 					} catch (e) {}
 				}
 
+				// Re-check token after the synchronous gdi.Image calls above — a very fast
+				// track skip could have incremented loadToken between the outer check and here.
+				if (State.loadToken !== myToken) {
+					Utils.safeDispose(coverRaw);
+					Utils.safeDispose(bgOriginal);
+					return;
+				}
+
 				// --- Priority 1: Real disc scan ---
 				if (!P.useAlbumArtOnly) {
 					const result = this.searchForDisc(metadb, folderPath);
@@ -1535,11 +1557,11 @@ const ImageLoader = {
 			// guard at the top of this function already returned early if it were null.
 			if (image) {
 				Utils.safeDispose(image);
-			} else {
-				// No image and no metadb: nothing was found — fall back to the placeholder.
-				this.loadDefaultDisc();
-				State.updateTimer();
 			}
+			// Whether or not an image arrived, with no metadb we cannot validate it —
+			// fall back to the placeholder so the disc area is never left blank.
+			this.loadDefaultDisc();
+			State.updateTimer();
 			return;
 		}
 
@@ -1561,9 +1583,12 @@ const ImageLoader = {
 					if (scaled) {
 						State.setImage(scaled, false, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
 						if (image_path) props.savedPath.value = image_path;
+						RepaintHelper.background();
+						State.updateTimer();
 					} else {
 						// scaleProportional already disposes image (raw) in its catch; only original needs cleanup.
 						Utils.safeDispose(original);
+						// Fall through to loadDefaultDisc below.
 					}
 				} else {
 					const processed = ImageProcessor.processForDisc(
@@ -1572,13 +1597,13 @@ const ImageLoader = {
 					if (processed) {
 						State.setImage(processed, true, CONFIG.IMAGE_TYPE.ALBUM_ART, original);
 						if (image_path) props.savedPath.value = image_path;
+						RepaintHelper.background();
+						State.updateTimer();
 					} else {
 						Utils.safeDispose(original);
+						// Fall through to loadDefaultDisc below.
 					}
 				}
-
-				RepaintHelper.background();
-				State.updateTimer();
 				return;
 			} catch (e) {
 				Utils.safeDispose(image);
@@ -1698,7 +1723,10 @@ const RotationCache = {
 
 		const buildBatch = () => {
 			this._buildTimer = null;
-			if (!this._pendingFrames || this._pendingKey !== key) return; // Superseded
+			if (!this._pendingFrames || this._pendingKey !== key) {
+				// Superseded — src may have been disposed by _cancelBuild; stop immediately.
+				return;
+			}
 
 			// Render up to BATCH_SIZE frames per tick.
 			const end = Math.min(this._pendingAngle + this.BATCH_SIZE * step, 360);
@@ -1732,9 +1760,13 @@ const RotationCache = {
 				this.frames        = this._pendingFrames;
 				this._sourceKey    = key;
 				this._pendingFrames = null;
-				Utils.safeDispose(this._pendingScaled); this._pendingScaled = null;
+				// Dispose _pendingScaled only AFTER nulling src's reference source
+				// so the closure cannot use a freed bitmap on a late-arriving tick.
+				const scaledToDispose = this._pendingScaled;
+				this._pendingScaled = null;
 				this._pendingAngle = 0;
 				this._pendingKey   = '';
+				Utils.safeDispose(scaledToDispose);
 				oldFrames.forEach(f => { if (f) { try { f.Dispose(); } catch (_) {} } });
 				if (isLive()) RepaintHelper.full();
 			}
@@ -1748,8 +1780,10 @@ const RotationCache = {
 	// failed during build (caller falls back to live DrawImage rotation).
 	getFrame(angle) {
 		if (this.frames.length === 0) return null;
-		const idx   = Math.floor(angle / this.step) % this.frames.length;
-		const frame = this.frames[idx < 0 ? this.frames.length + idx : idx];
+		const len   = this.frames.length;
+		const raw   = Math.floor(angle / this.step) % len;
+		const idx   = raw < 0 ? raw + len : raw;
+		const frame = this.frames[idx];
 		return frame || null; // Explicit null for empty slots (failed frames)
 	}
 };
@@ -1778,6 +1812,7 @@ const DiscComposite = {
 		const uid = (discImg && discImg._uid !== undefined) ? discImg._uid : (discImg ? 'img' : 'null');
 		const key = `${uid}|${size}|${imageType}|${AssetManager.currentMaskType}`;
 		if (this.valid && this._cacheKey === key && this.img && this.img.Width === size) return;
+		// Key changed — update it before dispose() so callers inspecting _cacheKey see the new one.
 		this._cacheKey = key;
 		this.dispose(); // Clear stale composite and rotation frames
 
@@ -1808,9 +1843,13 @@ const DiscComposite = {
 			g = null;
 			this.valid = true;
 		} catch (e) {
-			if (!released && g) { try { this.img.ReleaseGraphics(g); } catch (_) {} }
-			this.dispose(); // Clears img and RotationCache
-			this.valid = true;
+			if (!released && g) {
+				try { if (this.img) this.img.ReleaseGraphics(g); } catch (_) {}
+			}
+			// Dispose the partially-built bitmap without calling full dispose()
+			// (which would clear _cacheKey and call RotationCache.clear() again).
+			if (this.img) { try { this.img.Dispose(); } catch (_) {} this.img = null; }
+			this.valid = true; // mark valid to prevent prepareLayers looping on repeated failures
 		}
 	}
 };
@@ -1818,7 +1857,7 @@ const DiscComposite = {
 // ====================== BACKGROUND BLUR CACHE ======================
 // Renders (and blurs) the background bitmap once per unique source/size/settings combination.
 const BackgroundCache = {
-	_lru:       LRUCache(CONFIG.MAX_BG_CACHE),
+	_lru:       null, // initialised below after this declaration
 	_activeKey: '',
 	img:        null,
 
@@ -1829,7 +1868,12 @@ const BackgroundCache = {
 		return `${bgId}|${P.blurRadius}|${P.blurEnabled ? 1 : 0}|${w}|${h}`;
 	},
 
-	invalidate() { this._activeKey = ''; this.img = null; RepaintHelper._allValid = false; },
+	invalidate() {
+		// Clear the active pointer so callers never draw a stale or evicted bitmap.
+		this._activeKey = '';
+		this.img = null;
+		RepaintHelper._allValid = false;
+	},
 
 	// Ensure a blurred background bitmap is ready for the given panel dimensions.
 	ensure(w, h) {
@@ -1874,6 +1918,42 @@ const BackgroundCache = {
 	dispose() { this._lru.clear(); this.img = null; this._activeKey = ''; }
 };
 
+// Initialise _lru separately so the eviction callback can reference BackgroundCache.
+// The callback clears BackgroundCache.img when the currently-active bitmap is evicted,
+// preventing a use-after-free when LRU capacity is exceeded.
+BackgroundCache._lru = (() => {
+	const maxSize = CONFIG.MAX_BG_CACHE;
+	const cache   = new Map();
+	return {
+		get(key) {
+			const value = cache.get(key);
+			if (value === undefined) return null;
+			cache.delete(key); cache.set(key, value);
+			return value;
+		},
+		set(key, value) {
+			if (cache.has(key)) {
+				const existing = cache.get(key);
+				if (existing !== value) Utils.safeDispose(existing);
+				cache.delete(key);
+			} else if (cache.size >= maxSize) {
+				const firstKey = cache.keys().next().value;
+				const firstVal = cache.get(firstKey);
+				// If the evicted entry is the one currently drawn, clear the pointer.
+				if (BackgroundCache.img === firstVal) {
+					BackgroundCache.img = null;
+					BackgroundCache._activeKey = '';
+					RepaintHelper._allValid = false;
+				}
+				if (firstVal !== value) Utils.safeDispose(firstVal);
+				cache.delete(firstKey);
+			}
+			cache.set(key, value);
+		},
+		has(key)  { return cache.has(key); },
+		clear()   { cache.forEach(v => Utils.safeDispose(v)); cache.clear(); }
+	};
+})();
 // ====================== OVERLAY REBUILD DEBOUNCER ======================
 // Batches rapid overlay invalidation requests (e.g. from the scroll wheel slider)
 // into a single rebuild after 16 ms of quiet time.
@@ -1917,6 +1997,7 @@ function drawGlow(g, w, h, pc) {
 	const discSz = State.isDiscImage ? pc.discSize : Math.max(pc.staticW, pc.staticH);
 	if (discSz <= 0) return;
 	const op    = P.opGlow;
+	if (op <= 0) return; // guard: prevents division-by-zero in minStep calculation
 	const cx    = State.isDiscImage ? pc.discX + pc.discSize / 2 : pc.staticX + pc.staticW / 2;
 	const cy    = State.isDiscImage ? pc.discY + pc.discSize / 2 : pc.staticY + pc.staticH / 2;
 	const maxR  = discSz * 0.75;
@@ -2007,7 +2088,8 @@ const OverlayCache = {
 			newImg.ReleaseGraphics(g); released = true; g = null;
 			this.img = newImg; newImg = null;
 		} catch (e) {
-			// Overlay is purely cosmetic — swallow draw errors silently
+			// Overlay is purely cosmetic — swallow draw errors silently.
+			// valid is already true (set above) so prepareLayers won't retry every frame.
 		} finally {
 			if (!released && g && newImg) { try { newImg.ReleaseGraphics(g); } catch (_) {} }
 			if (newImg) Utils.safeDispose(newImg);
@@ -2066,6 +2148,8 @@ const StaticBgLayer = {
 			this.img = newImg; newImg = null;
 			this._w = w; this._h = h; this.valid = true;
 		} catch (e) {
+			// On failure mark valid so prepareLayers doesn't retry every frame.
+			this._w = w; this._h = h; this.valid = true;
 		} finally {
 			if (!released && g && newImg) { try { newImg.ReleaseGraphics(g); } catch (_) {} }
 			if (newImg) Utils.safeDispose(newImg);
@@ -2110,6 +2194,8 @@ const StaticTopLayer = {
 			this.img = newImg; newImg = null;
 			this._w = w; this._h = h; this.valid = true;
 		} catch (e) {
+			// On failure mark valid so prepareLayers doesn't retry every frame.
+			this._w = w; this._h = h; this.valid = true;
 		} finally {
 			if (!released && g && newImg) { try { newImg.ReleaseGraphics(g); } catch (_) {} }
 			if (newImg) Utils.safeDispose(newImg);
@@ -2342,6 +2428,7 @@ const SliderRenderer = {
 	// Draw the filled progress bar and value label above it.
 	drawBar(gr, value, max, barY) {
 		const w     = window.Width;
+		const h     = window.Height;
 		const barW  = Math.max(SLIDER_MIN_WIDTH, Math.floor(w * SLIDER_WIDTH_RATIO));
 		const barH  = SLIDER_HEIGHT;
 		const bx    = Math.floor((w - barW) / 2);
@@ -2353,10 +2440,13 @@ const SliderRenderer = {
 
 		const font  = this.getFont();
 		const label = value.toString();
-		const sz    = gr.MeasureString(label, font, 0, 0, w, window.Height);
+		// Use a fixed height cap (64px) instead of window.Height to avoid
+		// MeasureString returning inflated bounds on very tall panels.
+		const sz    = gr.MeasureString(label, font, 0, 0, w, 64);
+		const labelY = Math.max(0, barY - Math.ceil(sz.Height) - 2);
 		gr.DrawString(label, font, DS_WHITE,
 			Math.floor((w - sz.Width) / 2),
-			barY - Math.ceil(sz.Height) - 2,
+			labelY,
 			Math.ceil(sz.Width), Math.ceil(sz.Height));
 	},
 
@@ -2364,9 +2454,9 @@ const SliderRenderer = {
 	drawTitle(gr, text, barY) {
 		const w     = window.Width;
 		const font  = this.getFont();
-		const sz    = gr.MeasureString(text, font, 0, 0, w, window.Height);
-		const valSz = gr.MeasureString('255', font, 0, 0, w, window.Height);
-		const titleY = barY - Math.ceil(valSz.Height) - 4 - Math.ceil(sz.Height) - 4;
+		const sz    = gr.MeasureString(text, font, 0, 0, w, 64);
+		const valSz = gr.MeasureString('255', font, 0, 0, w, 64);
+		const titleY = Math.max(0, barY - Math.ceil(valSz.Height) - 4 - Math.ceil(sz.Height) - 4);
 		gr.DrawString(text, font, MathX.setAlpha(DS_WHITE, 180),
 			Math.floor((w - sz.Width) / 2), titleY,
 			Math.ceil(sz.Width), Math.ceil(sz.Height));
@@ -2382,7 +2472,7 @@ const SliderRenderer = {
 		};
 		const prop = propMap[Slider.target];
 		if (!prop) return;
-		const barY = window.Height - 22;
+		const barY = Math.max(0, window.Height - 22);
 		this.drawTitle(gr, Slider.target + ' Opacity', barY);
 		this.drawBar(gr, prop.value, 255, barY);
 	}
@@ -2626,6 +2716,7 @@ const MenuManager = {
 		if (toggles[idx]) {
 			toggles[idx].prop.toggle();
 			if (toggles[idx].reload && State.currentMetadb) {
+				State.stopTimer(); // stop spin before cache teardown to avoid racing timer ticks
 				ImageLoader.clearCache();
 				DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
 				State.lastFrame = -1;
@@ -2654,9 +2745,16 @@ const MenuManager = {
 			OverlayInvalidator.request();
 			State.lastFrame        = -1;
 			State.paintCache.valid = false;
-			Utils.safeDispose(State.img);
-			State.img       = null;
+			// Dispose both processed image and background source atomically.
+			const oldImg   = State.img;
+			const oldBgImg = State.bgImg;
+			State.img    = null;
+			State.bgImg  = null;
 			State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
+			Utils.safeDispose(oldImg);
+			if (oldBgImg && oldBgImg !== oldImg) Utils.safeDispose(oldBgImg);
+			BackgroundCache.invalidate();
+			StaticBgLayer.invalidate();
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
@@ -2672,9 +2770,16 @@ const MenuManager = {
 			OverlayInvalidator.request();
 			State.paintCache.valid = false;
 			State.lastFrame        = -1;
-			Utils.safeDispose(State.img);
-			State.img       = null;
+			// Dispose both processed image and background source atomically.
+			const oldImg2   = State.img;
+			const oldBgImg2 = State.bgImg;
+			State.img    = null;
+			State.bgImg  = null;
 			State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
+			Utils.safeDispose(oldImg2);
+			if (oldBgImg2 && oldBgImg2 !== oldImg2) Utils.safeDispose(oldBgImg2);
+			BackgroundCache.invalidate();
+			StaticBgLayer.invalidate();
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
@@ -2935,13 +3040,16 @@ const ArtDispatcher = {
 		switch (reason) {
 			case 'track':
 				// Skip reload if the new track's art is already displayed.
+				try {
 				if (metadb && State.currentMetadb && State.img &&
 				    State.currentMetadb.Compare(metadb)) return;
+				} catch (e) { /* stale handle — continue with full reload */ }
 				// Skip rebuild when the new track resolves to the same artwork.
 				// Primary check: same containing folder → same image files on disk.
 				// Secondary check: same album + disc number covers multi-disc albums
 				// whose tracks live in separate subfolders but share one artwork root.
 				if (metadb && State.currentMetadb && State.img) {
+					try {
 					const newFolder = ImageLoader.tf_path.EvalWithMetadb(metadb);
 					const curFolder = ImageLoader.tf_path.EvalWithMetadb(State.currentMetadb);
 					if (newFolder === curFolder) {
@@ -2960,6 +3068,7 @@ const ArtDispatcher = {
 						State.currentMetadb = metadb;
 						return;
 					}
+					} catch (e) { /* stale handle — continue with full reload */ }
 				}
 				if (metadb) ImageLoader.loadForMetadb(metadb, true);
 				break;
@@ -2979,7 +3088,7 @@ const ArtDispatcher = {
 				// Only act when nothing is playing; the playing track takes priority.
 				// Guard is re-checked here because dispatch is deferred 50ms — playback
 				// may have started in that window after on_selection_changed queued this.
-				if (!fb.IsPlaying && !fb.IsPaused && metadb) ImageLoader.loadForMetadb(metadb, false);
+				if (!fb.IsPlaying && !isPaused && metadb) ImageLoader.loadForMetadb(metadb, false);
 				break;
 
 			case 'playlist':
@@ -3121,12 +3230,12 @@ function on_playback_new_track(metadb) {
 // Reload art if the metadata for the currently playing track is edited.
 function on_metadb_changed(metadb_list, fromhook) {
 	if (!isLive()) return;
-	if (!fb.IsPlaying && !fb.IsPaused) return;
+	if (!fb.IsPlaying && !isPaused) return;
 	const nowPlaying = fb.GetNowPlaying();
 	if (!nowPlaying) return;
 	let affected = false;
 	for (let i = 0; i < metadb_list.Count; i++) {
-		const item = metadb_list[i];
+		const item = metadb_list.Item ? metadb_list.Item(i) : metadb_list[i];
 		if (item && item.Compare && item.Compare(nowPlaying)) { affected = true; break; }
 	}
 	if (affected) {
@@ -3135,18 +3244,23 @@ function on_metadb_changed(metadb_list, fromhook) {
 	}
 }
 
-function on_playback_pause(isPaused) {
+function on_playback_pause(state) {
 	if (!isLive()) return;
+	isPaused = !!state;
 	State.updateTimer(); // Pause stops the spin; resume restarts it
 }
 
 function on_playback_stop(reason) {
 	if (!isLive()) return;
+	// reason=2 means "starting next track" — reset pause state but don't fully stop.
+	if (reason === 2) { isPaused = false; return; }
+	isPaused = false;
 	ArtDispatcher.request('stop', reason);
 }
 
 function on_playback_starting() {
 	if (!isLive()) return;
+	isPaused = false; // Reset pause state — new playback always starts un-paused
 	State.updateTimer();
 }
 
@@ -3158,7 +3272,7 @@ function on_playback_seek() {
 // Show art for the focused item when nothing is playing.
 function on_selection_changed() {
 	if (!isLive()) return;
-	if (fb.IsPlaying || fb.IsPaused) return;
+	if (fb.IsPlaying || isPaused) return;
 	const sel = fb.GetSelection();
 	if (sel) ArtDispatcher.request('selection', sel);
 }
@@ -3226,11 +3340,13 @@ function on_mouse_wheel(delta) {
 function on_script_unload() {
 	phase = Phase.SHUTDOWN;
 
-	// Cancel pending async work before freeing resources.
+	// Cancel ALL pending timers before freeing resources to prevent callbacks
+	// firing into a partially torn-down state.
 	if (ArtDispatcher._timer) { window.ClearTimeout(ArtDispatcher._timer); ArtDispatcher._timer = null; }
 	ArtDispatcher._pending = null;
-	if (State.loadTimer) { window.ClearTimeout(State.loadTimer); State.loadTimer = null; }
-	if (readyTimer)      { window.ClearTimeout(readyTimer);      readyTimer      = null; }
+	if (State.loadTimer)   { window.ClearTimeout(State.loadTimer);   State.loadTimer   = null; }
+	if (State.phaseBTimer) { window.ClearTimeout(State.phaseBTimer); State.phaseBTimer = null; }
+	if (readyTimer)        { window.ClearTimeout(readyTimer);        readyTimer        = null; }
 	RotationCache._cancelBuild(); // Cancels timer + disposes _pendingFrames/_pendingScaled
 
 	OverlayInvalidator.cancel();
@@ -3278,16 +3394,19 @@ function init() {
 					let original = null;
 					try { original = raw.Clone(0, 0, raw.Width, raw.Height); _tagImg(original); } catch (_) {}
 					const targetSize = Utils.getPanelDiscSize();
-					const isDisc     = props.savedIsDisc.enabled;
+					// Use imageType as the authoritative source for REAL_DISC; for ALBUM_ART
+					// fall back to the persisted savedIsDisc flag.
+					const treatAsDisc = (imageType === CONFIG.IMAGE_TYPE.REAL_DISC ||
+					                     props.savedIsDisc.enabled);
 					let displayImg;
-					if (isDisc) {
+					if (treatAsDisc) {
 						displayImg = ImageProcessor.processForDisc(raw, targetSize, imageType, P.interpolationMode);
 					} else {
 						displayImg = ImageProcessor.scaleProportional(raw, CONFIG.MAX_STATIC_SIZE, P.interpolationMode);
 						// scaleProportional disposes raw in all code paths; no explicit dispose needed here.
 					}
 					if (displayImg) {
-						State.setImage(displayImg, isDisc, imageType, original);
+						State.setImage(displayImg, treatAsDisc, imageType, original);
 					} else {
 						Utils.safeDispose(original);
 					}
