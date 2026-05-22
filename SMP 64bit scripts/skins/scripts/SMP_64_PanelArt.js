@@ -1,6 +1,6 @@
 'use strict';
            // ============== AUTHOR L.E.D. ============== \\
-          // ==== Panel Artwork and Trackinfo v3.3.3  ==== \\
+          // ==== Panel Artwork and Trackinfo v3.4  ==== \\
          // ========== Blur Artwork + Trackinfo =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -10,7 +10,7 @@
 window.DrawMode = 0; // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript("SMP 64bit PanelArt V3.3.3", { author: "L.E.D.", grab_focus: true });
+window.DefineScript("SMP 64bit PanelArt V3.4", { author: "L.E.D.", grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -743,15 +743,40 @@ const ImageSearch = {
     },
 
     searchInFolderAnyFile(folder, patterns) {
-        return FileManager.findImageInPaths(FileManager.buildSearchPaths(folder, patterns, []));
+        // Build boundary-aware regexes once per pattern, compiled outside the file loop.
+        // Prevents "art" matching "artist.jpg", "cd" matching "acdc.png", etc.
+        const regexes = patterns.map(p =>
+            new RegExp('(^|[._\\\\/ -])' + _.escapeRegExp(p) + '([._\\\\/ -]|$)', 'i')
+        );
+        const paths = FileManager.buildSearchPaths(folder, patterns, []);
+        // First try exact-pattern paths (fast path via FileManager cache).
+        const exact = FileManager.findImageInPaths(paths);
+        if (exact) return exact;
+        // No exact match — scan the folder with boundary-aware regex for any image file.
+        if (!_fso || !_fso.FolderExists(folder)) return null;
+        try {
+            const filesEnum = new Enumerator(_fso.GetFolder(folder).Files);
+            for (; !filesEnum.atEnd(); filesEnum.moveNext()) {
+                const filePath = filesEnum.item().Path;
+                const ext = filePath.toLowerCase().match(/\.[^.]+$/);
+                if (!ext || !EXTENSIONS.includes(ext[0])) continue;
+                const baseName = filePath.split('\\').pop().replace(/\.[^.]+$/, '');
+                for (const re of regexes) {
+                    if (re.test(baseName)) return filePath;
+                }
+            }
+        } catch (e) {}
+        return null;
     },
 
-    _searchFolderTree(folder, patterns, maxLevels) {
+    _searchFolderTree(folder, patterns, maxLevels, visited = new Set()) {
         if (maxLevels <= 0 || !folder) return null;
+        if (visited.has(folder)) return null; // guard: symlink/junction loop
+        visited.add(folder);
         const found = this.searchInFolderAnyFile(folder, patterns);
         if (found) return found;
         for (const sub of FileManager.getSubfolders(folder)) {
-            const r = this._searchFolderTree(sub, patterns, maxLevels - 1);
+            const r = this._searchFolderTree(sub, patterns, maxLevels - 1, visited);
             if (r) return r;
         }
         return null;
@@ -763,8 +788,10 @@ const ImageSearch = {
     // Previously this was three hand-unrolled nested loops that (a) duplicated
     // the same match+search block three times and (b) silently skipped level-3
     // subfolders of non-matched level-1 folders entirely.
-    _searchCustomFolderTree(folder, patterns, metadata, folderMatchNames, levelsLeft) {
+    _searchCustomFolderTree(folder, patterns, metadata, folderMatchNames, levelsLeft, visited = new Set()) {
         if (levelsLeft <= 0 || !FileManager.isDirectory(folder)) return null;
+        if (visited.has(folder)) return null; // guard: symlink/junction loop
+        visited.add(folder);
         const subfolders = FileManager.getSubfolders(folder);
         for (const sub of subfolders) {
             const subName = _.last(sub.split('\\')).toLowerCase();
@@ -775,11 +802,11 @@ const ImageSearch = {
             if (matched) {
                 // Matched — do a full deep search inside this subtree.
                 const img = this.searchInFolder(sub, patterns, metadata, true)
-                         || this._searchFolderTree(sub, patterns, levelsLeft - 1);
+                         || this._searchFolderTree(sub, patterns, levelsLeft - 1, new Set(visited));
                 if (img) return img;
             } else {
                 // Not matched at this level — keep descending.
-                const img = this._searchCustomFolderTree(sub, patterns, metadata, folderMatchNames, levelsLeft - 1);
+                const img = this._searchCustomFolderTree(sub, patterns, metadata, folderMatchNames, levelsLeft - 1, visited);
                 if (img) return img;
             }
         }
@@ -865,7 +892,12 @@ const BlurCache = {
         if (this._cache.size >= MAX_BG_CACHE) {
             const oldKey = this._cache.keys().next().value;
             const old    = this._cache.get(oldKey);
-            if (old && old !== 'null' && typeof old.Dispose === 'function') { try { old.Dispose(); } catch (e) {} }
+            if (old && old !== 'null' && typeof old.Dispose === 'function') {
+                // If the evicted bitmap is the one currently referenced for drawing,
+                // clear that reference before disposing to prevent use-after-free.
+                if (PanelArt.images.blur === old) PanelArt.images.blur = null;
+                try { old.Dispose(); } catch (e) {}
+            }
             this._cache.delete(oldKey);
         }
         let g = null, newImg = null;
@@ -1010,7 +1042,8 @@ const OverlayCache = {
 
             if (cfg.showGlow && cfg.opGlow > 0) {
                 const op = cfg.opGlow;
-                if (artInfo && artInfo.artW > 0 && cfg.albumArtEnabled) {
+                if (op <= 0) { /* guard: division-by-zero in minStep */ }
+                else if (artInfo && artInfo.artW > 0 && cfg.albumArtEnabled) {
                     const cx = artInfo.artX + artInfo.artW / 2;
                     const cy = artInfo.artY + artInfo.artH / 2;
                     const maxR = Math.max(artInfo.artW, artInfo.artH) * 0.75;
@@ -1068,7 +1101,9 @@ const OverlayCache = {
             newImg.ReleaseGraphics(g); g = null;
             this.img = newImg; newImg = null;
         } catch (e) {
-            // Overlay is cosmetic — swallow draw errors, but clean up resources.
+            // Overlay is cosmetic — swallow draw errors, but mark valid so
+            // prepareLayers/drawOverlay doesn't retry build() every paint frame.
+            this.valid = true;
         } finally {
             // If g is still set the try body threw before ReleaseGraphics — release now.
             if (g) { try { newImg.ReleaseGraphics(g); } catch (e2) {} g = null; }
@@ -1403,9 +1438,12 @@ const Renderer = {
         gr.FillSolidRect(bx, yPos, Math.floor(barW * (value / max)), SLIDER_HEIGHT, PanelArt_SetAlpha(PA_WHITE, 180));
         const font = this.getSliderFont();
         const text = value.toString();
-        const sz   = gr.MeasureString(text, font, 0, 0, dim.width, dim.height);
+        // Use a fixed height cap (64px) instead of dim.height to avoid inflated
+        // MeasureString bounds on very tall panels, and clamp Y to ≥ 0.
+        const sz   = gr.MeasureString(text, font, 0, 0, dim.width, 64);
         const sw   = Math.ceil(sz.Width), sh = Math.ceil(sz.Height);
-        gr.DrawString(text, font, PA_WHITE, Math.floor((dim.width - sw) / 2), Math.floor(yPos - sh - 2), sw, sh);
+        const textY = Math.max(0, Math.floor(yPos - sh - 2));
+        gr.DrawString(text, font, PA_WHITE, Math.floor((dim.width - sw) / 2), textY, sw, sh);
     },
 
     drawSliders(gr) {
@@ -1937,6 +1975,13 @@ const ArtController = {
         if (PanelArt.slideTimer)    { window.ClearInterval(PanelArt.slideTimer);     PanelArt.slideTimer    = null; }
         if (PanelArt.slideImage)    { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
         if (PanelArt.imageImage)    { try { PanelArt.imageImage.Dispose(); } catch (e) {} PanelArt.imageImage = null; }
+        // Cancel the debounced save timer — on_script_unload calls StateManager.save()
+        // explicitly, so the deferred callback would be redundant and fires into torn-down state.
+        if (StateManager._saveTimer) {
+            window.ClearTimeout(StateManager._saveTimer);
+            StateManager._saveTimer      = null;
+            StateManager._saveScheduled  = false;
+        }
     }
 };
 
@@ -2195,7 +2240,7 @@ function on_metadb_changed(metadb_list, fromhook) {
     if (!nowPlaying) return;
     let affected = false;
     for (let i = 0; i < metadb_list.Count; i++) {
-        const item = metadb_list[i];
+        const item = metadb_list.Item ? metadb_list.Item(i) : metadb_list[i];
         if (item && item.Compare && item.Compare(nowPlaying)) { affected = true; break; }
     }
     if (affected) {
@@ -2267,14 +2312,13 @@ function on_selection_changed() {
 
 function on_script_unload() {
     phase = Phase.SHUTDOWN;
-    ArtController.onUnload();
-    ArtQueue.clear();
+    ArtQueue.clear();            // stop queue before onUnload so safety timer can't fire after teardown
+    ArtController.onUnload();    // cancels all timers including StateManager._saveTimer
     ArtDispatcher._unloaded = true;
     if (ArtDispatcher._trackTimer) { window.ClearTimeout(ArtDispatcher._trackTimer); ArtDispatcher._trackTimer = null; }
     if (ArtDispatcher._timer)      { window.ClearTimeout(ArtDispatcher._timer);      ArtDispatcher._timer      = null; }
     ArtDispatcher._pending = null;
     if (Renderer._sliderFont) { try { Renderer._sliderFont.Dispose(); } catch (e) {} Renderer._sliderFont = null; }
-    if (StateManager._saveTimer) { window.ClearTimeout(StateManager._saveTimer); StateManager._saveTimer = null; StateManager._saveScheduled = false; }
     StateManager.save();
     BlurCache.dispose();
     ImageManager.cleanup();

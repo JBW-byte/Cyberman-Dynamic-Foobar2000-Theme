@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -====== SMP 64bit Disc Spin V3.4 ======- \\
+		     // -====== SMP 64bit Disc Spin V3.5 ======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.4', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.5', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -341,7 +341,11 @@ const Utils = {
 
 		const lp = path.toLowerCase();
 		for (const pattern of CONFIG.DISC_PATTERNS) {
-			if (new RegExp(`(^|[\\\\/._-])(${pattern})([\\\\/._-]|$)`).test(lp)) {
+			// Require word-boundary separators on both sides and allow an optional
+			// trailing digit (e.g. "disc2", "cd1") to avoid matching "acdc", "codec".
+			if (new RegExp(
+				'(^|[\\\\/._\\- ])' + _.escapeRegExp(pattern) + '\\d*' + '([\\\\/._\\- ]|$)'
+			).test(lp)) {
 				return CONFIG.IMAGE_TYPE.REAL_DISC;
 			}
 		}
@@ -352,8 +356,8 @@ const Utils = {
 	detectMaskFromPath(path) {
 		if (!path) return null;
 		const lp = path.toLowerCase();
-		if (/(^|[\\/._-])(vinyl)([\\/._-]|$)/.test(lp)) return 1;
-		if (/(^|[\\/._-])(disc|cd)([\\/._-]|$)/.test(lp)) return 0;
+		if (/(^|[\\/._\- ])vinyl\d*([\\/._\- ]|$)/.test(lp)) return 1;
+		if (/(^|[\\/._\- ])(disc|cd)\d*([\\/._\- ]|$)/.test(lp)) return 0;
 		return null; // No strong signal — leave the current mask unchanged.
 	},
 
@@ -677,8 +681,13 @@ const AssetManager = {
 	},
 
 	loadRim() {
+		Utils.safeDispose(this.rimSource);
+		this.rimSource = null;
+
 		try {
-			if (FileManager.exists(CONFIG.PATHS.RIM)) this.rimSource = gdi.Image(CONFIG.PATHS.RIM);
+			if (FileManager.exists(CONFIG.PATHS.RIM)) {
+				this.rimSource = gdi.Image(CONFIG.PATHS.RIM);
+			}
 		} catch (e) {}
 	},
 
@@ -1161,26 +1170,32 @@ const ImageLoader = {
 	searchInFolderAnyFile(folder, patterns) {
 		// Use cached file list for performance
 		const files = FileManager.getImageFiles(folder);
-		const lowerPatterns = patterns.map(p => p.toLowerCase());
+		// Build boundary-aware regexes once per pattern to avoid recompilation per file.
+		const regexes = patterns.map(p =>
+			new RegExp('(^|[._\\\\/ -])' + _.escapeRegExp(p) + '\\d*([._\\\\/ -]|$)', 'i')
+		);
 		for (const filePath of files) {
-			const fileName = filePath.toLowerCase().split('\\').pop();
-			for (const pattern of lowerPatterns) {
-				if (fileName.includes(pattern)) {
-					return filePath;
-				}
+			// Match against the filename only (not the full path) to avoid false
+			// positives from directory names containing the pattern string.
+			const fileName = filePath.split('\\').pop() || filePath;
+			const baseName = fileName.replace(/\.[^.]+$/, ''); // strip extension
+			for (const re of regexes) {
+				if (re.test(baseName)) return filePath;
 			}
 		}
 		return null;
 	},
 
 	// Recursively search a folder tree up to maxLevels deep.
-	_searchFolderTree(folder, patterns, maxLevels, isDiscSearch, metadata) {
+	_searchFolderTree(folder, patterns, maxLevels, isDiscSearch, metadata, visited = new Set()) {
 		if (maxLevels <= 0 || !folder) return null;
+		if (visited.has(folder)) return null; // guard: symlink/junction loop
+		visited.add(folder);
 		const found = this.searchFolderForImage(folder, patterns, isDiscSearch, metadata);
 		if (found) return found;
 		const subfolders = FileManager.getSubfolders(folder);
 		for (const sub of subfolders) {
-			const result = this._searchFolderTree(sub, patterns, maxLevels - 1, isDiscSearch, metadata);
+			const result = this._searchFolderTree(sub, patterns, maxLevels - 1, isDiscSearch, metadata, visited);
 			if (result) return result;
 		}
 		return null;
@@ -2677,7 +2692,7 @@ const MenuManager = {
 		bgMenu.AppendMenuItem(uiColorActive ? 1 : 0, 261, 'Custom Background Color...');
 		bgMenu.AppendMenuSeparator();
 
-		const blurEnabled = !uiColorActive && props.backgroundEnabled.enabled;
+		const blurEnabled = !uiColorActive && props.backgroundEnabled.enabled && props.blurEnabled.enabled;
 		const blurMenu    = window.CreatePopupMenu();
 		blurMenu.AppendMenuItem(0, 270, 'Enable Blur');
 		if (props.blurEnabled.enabled) blurMenu.CheckMenuItem(270, true);
