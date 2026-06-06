@@ -9,7 +9,7 @@
 
 It features a **dynamic colour scheme based on album artwork**, custom playback controls, multiple VU meter skins, and configurable spectrum and layout presets.
 
-> **Last updated:** 22 May 2026 Added LCD Timer and 3 Theme's. Updated componets/scripts
+> **Last updated:** 06 June 2026 Added LCD Timer and 3 Theme's. Updated componets/scripts
 
 ---
 
