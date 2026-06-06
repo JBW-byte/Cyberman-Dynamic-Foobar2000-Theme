@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -====== SMP 64bit Disc Spin V3.5 ======- \\
+		     // -======= SMP 64bit Disc Spin V3.6 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.5', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.6', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -102,6 +102,10 @@ function on_font_changed() {
 // ====================== IMMUTABLE CONFIGURATION ======================
 const CONFIG = Object.freeze({
 	TIMER_INTERVAL:      42,    // ~24fps spin timer (ms)
+	DISPOSE_DELAY_MS:    50,    // Deferred GDI bitmap disposal delay (ms).
+	                            // 16 ms (one nominal frame) is too tight under CPU load —
+	                            // a queued DrawImage can still reference the old bitmap.
+	                            // 50 ms covers two full frames even at half the target rate.
 	MAX_STATIC_SIZE:     3000,  // Max pixel dimension for non-disc (cover art) images
 	MAX_MASK_CACHE:      10,
 	MAX_RIM_CACHE:       10,
@@ -226,8 +230,13 @@ const SLIDER_STEP        = 5;     // Opacity units changed per mouse wheel notch
 // The phosphor "Custom" entry sits one past the last named theme in the array.
 const DISC_CUSTOM_THEME_INDEX = CONFIG.PHOSPHOR_THEMES.length;
 
-let readyTimer = null; // Holds the boot-time timeout handle while waiting for a valid panel size.
-let isPaused   = false; // Mirrors fb.IsPaused; updated by on_playback_pause.
+let readyTimer  = null; // Holds the boot-time timeout handle while waiting for a valid panel size.
+let resizeTimer = null; // Debounce handle for on_size cache teardown.
+// Stage handles for the post-resize rebuild pipeline (Stages 1–3).
+let _resizeStage1Timer = null;
+let _resizeStage2Timer = null;
+let _resizeStage3Timer = null;
+let isPaused    = false; // Mirrors fb.IsPaused; updated by on_playback_pause.
 
 // ====================== IMAGE UID TAGGING ======================
 let _imgUIDCounter = 0;
@@ -252,23 +261,62 @@ function _tagImg(img) {
 //
 // _allValid: fast-path flag set by prepareLayers() when every cache is current.
 // Any invalidate() call must clear it so the next prepareLayers() re-runs all guards.
+// Coalesces non-animation repaint requests (state changes, image loads, settings)
+// into one window.Repaint() per event-loop tick. The spin timer's RepaintHelper.disc()
+// path stays direct (window.RepaintRect) since it already fires at a controlled rate.
+const RepaintScheduler = (() => {
+	let _pending = false;
+	let _timer   = null;
+	return {
+		request() {
+			if (_pending) return;
+			_pending = true;
+			_timer = window.SetTimeout(() => {
+				_pending = false;
+				_timer   = null;
+				if (!isLive()) return;
+				window.Repaint();
+			}, 0);
+		},
+		immediate() {
+			if (!isLive()) return;
+			if (_timer) { window.ClearTimeout(_timer); _timer = null; }
+			_pending = false;
+			window.Repaint();
+		},
+		cancel() {
+			if (_timer) { window.ClearTimeout(_timer); _timer = null; }
+			_pending = false;
+		}
+	};
+})();
+
 const RepaintHelper = {
 	_allValid: false,
 
-	full() { prepareLayers(); window.Repaint(); },
+	full() { prepareLayers(); RepaintScheduler.request(); },
 
 	// Dirty-rect repaint for the spinning disc area only — avoids full-panel redraws during spin.
+	// Uses direct window.RepaintRect (not the scheduler) to maintain the spin animation frame rate.
 	region(x, y, w, h) {
 		prepareLayers();
 		if (w > 0 && h > 0) window.RepaintRect(x, y, w, h);
-		else window.Repaint();
+		else RepaintScheduler.request();
 	},
 
 	disc() {
 		const pc = State.paintCache;
 		if (pc.valid && pc.discSize > 0) {
-			// Add a small margin so the disc edge is never clipped during rotation.
-			this.region(pc.discX - 10, pc.discY - 10, pc.discSize + 20, pc.discSize + 20);
+			// Hot path: all layers already built — skip prepareLayers() entirely.
+			// This is the steady-state spin path called at ~24 fps; every avoided
+			// function call and property read matters here.
+			if (RepaintHelper._allValid) {
+				window.RepaintRect(pc.discX - 10, pc.discY - 10, pc.discSize + 20, pc.discSize + 20);
+				return;
+			}
+			// Layers need a rebuild — run prepareLayers then dirty-rect repaint.
+			prepareLayers();
+			window.RepaintRect(pc.discX - 10, pc.discY - 10, pc.discSize + 20, pc.discSize + 20);
 			return;
 		}
 		// Fallback: estimate position when the cache is not yet populated.
@@ -280,7 +328,8 @@ const RepaintHelper = {
 		if (size <= 0) { this.full(); return; } // panel too small to compute a valid disc rect
 		const x      = Math.floor((w - size) / 2);
 		const y      = Math.floor((h - size) / 2);
-		this.region(x - 10, y - 10, size + 20, size + 20);
+		prepareLayers();
+		window.RepaintRect(x - 10, y - 10, size + 20, size + 20);
 	},
 
 	background() { this.full(); }
@@ -433,26 +482,50 @@ const _fso = (function() {
 })();
 
 const FileManager = {
-	cache:          new Map(), // file-path → boolean (exists?)
+	// file-path → { result: boolean, at: timestamp }
+	cache:          new Map(),
 	subfolderCache: new Map(), // folder-path → string[] (subfolders)
-	fileListCache: new Map(), // folder-path → string[] (image files)
+	// folder-path → { files: string[], at: timestamp }
+	fileListCache: new Map(),
 
-	// Cached wrapper around _isFile(); evicts the oldest entry once the cache is full.
+	// TTLs in milliseconds.
+	// Positive hits: re-verify after 5 minutes so moved/replaced files are detected.
+	// File-list entries: expire after 2 minutes so newly downloaded art is picked up.
+	FILE_EXIST_TTL:  5 * 60 * 1000,
+	FILE_LIST_TTL:   2 * 60 * 1000,
+
+	// Cached wrapper around _isFile(). Positive results are re-verified after
+	// FILE_EXIST_TTL so moved or replaced artwork files are not served stale.
+	// Negative results are never cached — a missing file may appear at any time.
 	exists(path) {
 		if (!path) return false;
-		if (this.cache.has(path)) return this.cache.get(path);
+		if (this.cache.has(path)) {
+			const entry = this.cache.get(path);
+			// Re-verify positive hits that are older than the TTL.
+			if (Date.now() - entry.at < this.FILE_EXIST_TTL) return entry.result;
+			// TTL expired — fall through to re-check on disk.
+			this.cache.delete(path);
+		}
 		const exists = _isFile(path);
-		this.cache.set(path, exists);
-		if (this.cache.size > CONFIG.MAX_FILE_CACHE) {
-			this.cache.delete(this.cache.keys().next().value);
+		// Only cache positive results; negative results are not cached so new
+		// files (downloaded art, copied discs) are detected on the next call.
+		if (exists) {
+			this.cache.set(path, { result: true, at: Date.now() });
+			if (this.cache.size > CONFIG.MAX_FILE_CACHE) {
+				this.cache.delete(this.cache.keys().next().value);
+			}
 		}
 		return exists;
 	},
 
-	// Get list of image files in folder (cached)
+	// Get list of image files in folder (cached with TTL so new downloads appear).
 	getImageFiles(folder) {
 		if (!folder) return [];
-		if (this.fileListCache.has(folder)) return this.fileListCache.get(folder);
+		if (this.fileListCache.has(folder)) {
+			const entry = this.fileListCache.get(folder);
+			if (Date.now() - entry.at < this.FILE_LIST_TTL) return entry.files;
+			this.fileListCache.delete(folder);
+		}
 		
 		const files = [];
 		try {
@@ -471,7 +544,7 @@ const FileManager = {
 			}
 		} catch (e) {}
 		
-		this.fileListCache.set(folder, files);
+		this.fileListCache.set(folder, { files, at: Date.now() });
 		if (this.fileListCache.size > CONFIG.MAX_FILE_LIST_CACHE) {
 			this.fileListCache.delete(this.fileListCache.keys().next().value);
 		}
@@ -581,18 +654,54 @@ const FileManager = {
 		}
 	},
 
+	// Extract the first local image path referenced inside a Last.fm JSON object.
+	// Returns null when the JSON only contains remote URLs or no image field at all.
+	_extractLocalImageFromLastFm(data, folder) {
+		const imageFields = [];
+		if (data.image)                                          imageFields.push(data.image);
+		if (data.album && data.album.image)                      imageFields.push(data.album.image);
+		if (data.track && data.track.album && data.track.album.image)
+			imageFields.push(data.track.album.image);
+		for (const field of imageFields) {
+			const candidates = _.isArray(field) ? field : [field];
+			for (const entry of candidates) {
+				const ref = (entry && (entry['#text'] || entry.url || entry)) || '';
+				const str = _.isString(ref) ? _.trim(ref) : '';
+				if (!str || str.startsWith('http')) continue;
+				// Relative or absolute local path — verify it exists on disk.
+				const abs = (str.includes('\\') || str.includes('/')) ? str : folder + '\\' + str;
+				if (_isFile(abs)) return abs;
+			}
+		}
+		return null;
+	},
+
 	// Search baseFolder for a cover image, but only when a Last.fm sidecar file is
-	// present (treated as a confidence signal that art was downloaded alongside it).
-	// Previously named parseLastFmJson — renamed to reflect what it actually does.
-	// The original implementation parsed the JSON but never used the parsed data;
-	// it always fell through to a standard cover-pattern search in the folder.
+	// present AND it contains a reference to a local image file that exists on disk.
+	// Treating mere JSON presence as a confidence signal caused unrelated thumbnails,
+	// cached web images, and artist banners to be selected as cover art.
 	searchLastFmJson(folder) {
 		for (const jsonFile of CONFIG.JSON_ART_FILES) {
-			if (this._isLastFmSidecar(folder + '\\' + jsonFile)) {
+			const jsonPath = folder + '\\' + jsonFile;
+			try {
+				if (!_isFile(jsonPath)) continue;
+				const content = utils.ReadUTF8(jsonPath);
+				if (!content) continue;
+				const data = JSON.parse(content);
+				if (!data || !_.isObject(data)) continue;
+				if (!this._isLastFmSidecar(jsonPath)) continue;
+
+				// Prefer an explicit local image reference from the JSON itself.
+				const localRef = this._extractLocalImageFromLastFm(data, folder);
+				if (localRef) return localRef;
+
+				// No local image reference — fall back to standard cover-pattern search
+				// scoped to this folder only. This preserves the original behaviour of
+				// preferring Last.fm-processed folders while avoiding false positives.
 				const paths = this.buildSearchPaths(folder, CONFIG.COVER_PATTERNS, []);
 				const found = this.findImageInPaths(paths);
 				if (found) return found;
-			}
+			} catch (e) {}
 		}
 		return null;
 	},
@@ -669,26 +778,36 @@ const AssetManager = {
 
 	// Reload the mask source bitmap for the current mask type; clears the resized cache.
 	loadMask() {
-		Utils.safeDispose(this.maskSource);
+		const oldMask = this.maskSource;
 		this.maskSource = null;
 		this.maskCache.clear();
 		const maskType = CONFIG.MASK_TYPES[this.currentMaskType];
-		if (!maskType || !maskType.file) return; // Mask type "No Mask" — nothing to load
+		if (!maskType || !maskType.file) {
+			// Deferred disposal: getMask() may be mid-call in a paint frame.
+			if (oldMask) window.SetTimeout(() => { if (!isLive()) return; Utils.safeDispose(oldMask); }, CONFIG.DISPOSE_DELAY_MS);
+			return;
+		}
 		const maskPath = CONFIG.PATHS.SKINS_DIR + maskType.file;
 		try {
 			if (FileManager.exists(maskPath)) this.maskSource = gdi.Image(maskPath);
 		} catch (e) {}
+		// Defer disposal of the old source — it may still be in use by a getMask() call
+		// that is compositing into a DiscComposite or RotationCache frame right now.
+		// Use DISPOSE_DELAY_MS (50 ms) rather than 16 ms: under CPU load a queued
+		// DrawImage can still hold a reference beyond a single nominal frame window.
+		if (oldMask) window.SetTimeout(() => { if (!isLive()) return; Utils.safeDispose(oldMask); }, CONFIG.DISPOSE_DELAY_MS);
 	},
 
 	loadRim() {
-		Utils.safeDispose(this.rimSource);
+		const oldRim = this.rimSource;
 		this.rimSource = null;
-
 		try {
 			if (FileManager.exists(CONFIG.PATHS.RIM)) {
 				this.rimSource = gdi.Image(CONFIG.PATHS.RIM);
 			}
 		} catch (e) {}
+		// Defer disposal for the same reason as loadMask — getRim() may be mid-call.
+		if (oldRim) window.SetTimeout(() => { if (!isLive()) return; Utils.safeDispose(oldRim); }, CONFIG.DISPOSE_DELAY_MS);
 	},
 
 	// Switch the active mask type, optionally flagging it as a user override so
@@ -713,10 +832,16 @@ const AssetManager = {
 		State.img   = null;
 		State.bgImg = null;
 		State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
-		Utils.safeDispose(oldImg);
-		if (oldBgImg && oldBgImg !== oldImg) Utils.safeDispose(oldBgImg);
-		BackgroundCache.invalidate();
-		StaticBgLayer.invalidate();
+		// Defer disposal — the spin timer or an in-progress DrawImage may still hold
+		// a reference to these bitmaps in the current or queued paint frame.
+		if (oldImg || oldBgImg) {
+			window.SetTimeout(() => {
+				if (!isLive()) return;
+				Utils.safeDispose(oldImg);
+				if (oldBgImg && oldBgImg !== oldImg) Utils.safeDispose(oldBgImg);
+			}, CONFIG.DISPOSE_DELAY_MS);
+		}
+		invalidateBgCaches();
 		if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 		RepaintHelper.full();
 		return true;
@@ -964,28 +1089,48 @@ const State = {
 		this.isDiscImage        = discState;
 		this.imageType          = imgType;
 		this.paintCache.valid   = false;
-		BackgroundCache.invalidate();
-		StaticBgLayer.invalidate();
+		invalidateBgCaches();
 		OverlayCache.invalidate();
 
 		// Dispose old bitmaps only when they are not still needed by other references.
-		if (oldImg && oldImg !== newImg && oldImg !== originalImg) {
-			Utils.safeDispose(oldImg);
-		}
-		if (oldBgImg &&
-		    oldBgImg !== oldImg &&
-		    oldBgImg !== newImg &&
-		    oldBgImg !== originalImg) {
-			Utils.safeDispose(oldBgImg);
+		// Deferred one tick: a spin-timer paint may still be mid-DrawImage against these
+		// bitmaps when setImage() runs synchronously on a track change.
+		if ((oldImg && oldImg !== newImg && oldImg !== originalImg) ||
+		    (oldBgImg && oldBgImg !== oldImg && oldBgImg !== newImg && oldBgImg !== originalImg)) {
+			const doomedImg   = (oldImg && oldImg !== newImg && oldImg !== originalImg) ? oldImg : null;
+			const doomedBgImg = (oldBgImg && oldBgImg !== oldImg && oldBgImg !== newImg && oldBgImg !== originalImg) ? oldBgImg : null;
+			// Capture the UIDs at scheduling time. If State.img/bgImg change again before
+			// the timer fires (rapid track skips), the new bitmap now owns those slots and
+			// disposing by UID-mismatch would corrupt live state — skip it in that case.
+			const doomedImgUid   = doomedImg   && doomedImg._uid   !== undefined ? doomedImg._uid   : null;
+			const doomedBgImgUid = doomedBgImg && doomedBgImg._uid !== undefined ? doomedBgImg._uid : null;
+			window.SetTimeout(() => {
+				if (!isLive()) return;
+				// Only dispose if the bitmap is no longer referenced by State — a second
+				// track change in the delay window may have re-assigned State.img/bgImg.
+				if (doomedImg && (doomedImgUid === null || !State.img || State.img._uid !== doomedImgUid)) {
+					Utils.safeDispose(doomedImg);
+				}
+				if (doomedBgImg && (doomedBgImgUid === null || !State.bgImg || State.bgImg._uid !== doomedBgImgUid)) {
+					Utils.safeDispose(doomedBgImg);
+				}
+			}, CONFIG.DISPOSE_DELAY_MS);
 		}
 
 		if (discState && newImg) {
-			const size = Utils.getPanelDiscSize();
-			// build() calls this.dispose() internally — no need to dispose twice.
-			DiscComposite.build(newImg, size, imgType);
-			// Schedule RotationCache build asynchronously so the first paint is never blocked.
-			// The slow-path (live rotation) handles the disc until the cache is ready.
-			if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || newImg);
+			if (!isStaticMode()) {
+				const size = Utils.getPanelDiscSize();
+				// build() calls this.dispose() internally — no need to dispose twice.
+				DiscComposite.build(newImg, size, imgType);
+				if (P.spinningEnabled) {
+					RotationCache.scheduleAsyncBuild(DiscComposite.img || newImg);
+				}
+			} else {
+				// Static mode: composite and rotation frames are never read.
+				// Dispose any stale composite and leave RotationCache empty so
+				// neither the masked bitmap nor its frame bitmaps occupy memory.
+				DiscComposite.dispose();
+			}
 		} else {
 			DiscComposite.dispose(); // Clears RotationCache via its own dispose chain.
 		}
@@ -1097,16 +1242,12 @@ const State = {
 		                  !P.useAlbumArtOnly;
 
 		if (shouldRun && !this.spinTimer) {
-			// Snapshot spinSpeed and step once at timer-start so the hot interval closure
-			// reads plain JS numbers instead of calling window.GetProperty every tick.
-			// IMPORTANT: this snapshot is only refreshed when the timer is fully stopped and
-			// restarted. Any code that changes spinSpeed or rotationStep MUST call
-			// stopTimer() before updateTimer() so the new values are captured here.
-			const speed = P.spinSpeed;
-			const step  = RotationCache.step;
 			this.spinTimer = window.SetInterval(() => {
-				this.angle = (this.angle + speed) % CONFIG.ANGLE_MODULO;
-				const frame = Math.floor(this.angle / step);
+				// Read spinSpeed and rotationStep live so any setting change takes
+				// effect immediately without needing a stop/restart cycle.
+				// Both go through window.GetProperty which is fast enough at 24 fps.
+				this.angle = (this.angle + P.spinSpeed) % CONFIG.ANGLE_MODULO;
+				const frame = Math.floor(this.angle / RotationCache.step);
 				if (frame !== State.lastFrame) {
 					State.lastFrame = frame;
 					RepaintHelper.disc(); // Dirty-rect only — do not redraw the whole panel
@@ -1114,15 +1255,43 @@ const State = {
 			}, CONFIG.TIMER_INTERVAL);
 		} else if (!shouldRun && this.spinTimer) {
 			this.stopTimer();
+			// When stopping because static mode is active, reset the disc to its
+			// resting position and invalidate the last-frame guard so the next paint
+			// draws the unrotated image rather than a stale mid-spin frame.
+			if (isStaticMode()) {
+				this.angle     = 0;
+				this.lastFrame = -1;
+			}
 		}
 	}
 };
 
-// ====================== IMAGE LOADER ======================
+// ====================== STATIC MODE HELPER ======================
+// Returns true when spinning/disc resources are completely unnecessary.
+// Used as a single gate to skip RotationCache builds, DiscComposite work,
+// angle updates, and repaint scheduling from the spin timer.
+function isStaticMode() {
+	return P.useAlbumArtOnly || !P.spinningEnabled;
+}
+
+// Release all spin-only resources immediately when switching to static mode.
+// Safe to call at any time — all operations are no-ops when resources are absent.
+function releaseSpinResources() {
+	State.stopTimer();
+	RotationCache.clear();        // disposes all frame bitmaps + cancels async build
+	DiscComposite.dispose();      // disposes composite bitmap + calls RotationCache.clear() again (safe)
+	State.angle     = 0;
+	State.lastFrame = -1;
+}
 // Orchestrates all image searches (disc, cover, async album art) and
 // wires results into State.setImage().
 const ImageLoader = {
-	_pathCache:    new Map(), // disc:/cover: + folder → cached image path string (or null)
+	_pathCache:    new Map(), // folder → { path, type, at } | { at } for misses
+	// Path cache TTLs.  Hits are re-verified after 5 min so moved/replaced art is
+	// detected without a full manual flush.  Null misses expire after 30 s so newly
+	// downloaded or copied artwork is found on the next track visit.
+	PATH_HIT_TTL:  5 * 60 * 1000,
+	PATH_MISS_TTL: 30 * 1000,
 	tf_path:       fb.TitleFormat("$directory_path(%path%)"),
 	tf_folder:     fb.TitleFormat("$directory(%path%)"),
 	tf_artist:     fb.TitleFormat("%artist%"),
@@ -1229,9 +1398,14 @@ const ImageLoader = {
 		const folderMatchNames = _.uniq(nameVariations);
 		const customFolders    = CustomFolders.getAll();
 
+		// Shared visited set across all passes — prevents junction/symlink loops
+		// where a subfolder points back to an ancestor already in the traversal.
+		const visited = new Set();
+
 		// Pass 1: search directly inside each custom root folder by filename.
 		for (const customFolder of customFolders) {
 			if (!FileManager.isDirectory(customFolder)) continue;
+			visited.add(customFolder);
 			const nameMatched = this.searchInFolder(customFolder, patterns, metadata, true);
 			if (nameMatched) {
 				return isDiscSearch ? this._loadDiscResult(nameMatched) : nameMatched;
@@ -1243,6 +1417,8 @@ const ImageLoader = {
 			if (!FileManager.isDirectory(customFolder)) continue;
 			const level1 = FileManager.getSubfolders(customFolder);
 			for (const sub1 of level1) {
+				if (visited.has(sub1)) continue;
+				visited.add(sub1);
 				const sub1Name = _.last(sub1.split('\\')).toLowerCase();
 				const match1   = folderMatchNames.some(n =>
 					sub1Name === n || sub1Name.includes(n) || n.includes(sub1Name) ||
@@ -1257,6 +1433,8 @@ const ImageLoader = {
 
 					const sub1Folders = FileManager.getSubfolders(sub1);
 					for (const sub2 of sub1Folders) {
+						if (visited.has(sub2)) continue;
+						visited.add(sub2);
 						const sImg = this.searchInFolder(sub2, patterns, metadata, true)
 						          || this.searchInFolderAnyFile(sub2, patterns);
 						if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
@@ -1264,6 +1442,8 @@ const ImageLoader = {
 						// Level 3 search inside level 2 matched folder
 						const sub2Folders = FileManager.getSubfolders(sub2);
 						for (const sub3 of sub2Folders) {
+							if (visited.has(sub3)) continue;
+							visited.add(sub3);
 							const s3Img = this.searchInFolder(sub3, patterns, metadata, true)
 							             || this.searchInFolderAnyFile(sub3, patterns);
 							if (s3Img) return isDiscSearch ? this._loadDiscResult(s3Img) : s3Img;
@@ -1274,6 +1454,8 @@ const ImageLoader = {
 				// No name match at level1 — try level2 subfolders
 				const level2 = FileManager.getSubfolders(sub1);
 				for (const sub2 of level2) {
+					if (visited.has(sub2)) continue;
+					visited.add(sub2);
 					const sub2Name = _.last(sub2.split('\\')).toLowerCase();
 					const match2   = folderMatchNames.some(n =>
 						sub2Name === n || sub2Name.includes(n) || n.includes(sub2Name) ||
@@ -1288,6 +1470,8 @@ const ImageLoader = {
 
 						const sub2Folders = FileManager.getSubfolders(sub2);
 						for (const sub3 of sub2Folders) {
+							if (visited.has(sub3)) continue;
+							visited.add(sub3);
 							const sImg = this.searchInFolder(sub3, patterns, metadata, true)
 							          || this.searchInFolderAnyFile(sub3, patterns);
 							if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
@@ -1347,10 +1531,29 @@ const ImageLoader = {
 		const cacheKey = 'disc:' + baseFolder;
 		if (this._pathCache.has(cacheKey)) {
 			const cached = this._pathCache.get(cacheKey);
-			if (!cached) return null;
-			const result = this._loadDiscResult(cached.path);
-			if (!result) this._pathCache.delete(cacheKey); // stale entry
-			return result;
+			const age    = Date.now() - (cached.at || 0);
+			if (!cached.path) {
+				// Null miss — expire after PATH_MISS_TTL so new art is found quickly.
+				if (age < this.PATH_MISS_TTL) return null;
+				this._pathCache.delete(cacheKey);
+			} else if (age < this.PATH_HIT_TTL) {
+				// Hit still within TTL — attempt to load it.
+				const result = this._loadDiscResult(cached.path);
+				if (!result) this._pathCache.delete(cacheKey); // file was deleted/moved
+				return result;
+			} else {
+				// Hit TTL expired — re-verify the path exists before trusting it.
+				if (!FileManager.exists(cached.path)) {
+					this._pathCache.delete(cacheKey);
+				} else {
+					const result = this._loadDiscResult(cached.path);
+					if (result) {
+						cached.at = Date.now(); // refresh timestamp on successful reload
+						return result;
+					}
+					this._pathCache.delete(cacheKey);
+				}
+			}
 		}
 
 		const metadata = metadb
@@ -1363,7 +1566,7 @@ const ImageLoader = {
 			const result = this._loadDiscResult(trackMatch);
 			if (result) {
 				AssetManager.autoSelectMask(trackMatch);
-				this._pathCache.set(cacheKey, { path: trackMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC });
+				this._pathCache.set(cacheKey, { path: trackMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, at: Date.now() });
 				return result;
 			}
 		}
@@ -1374,7 +1577,7 @@ const ImageLoader = {
 			const result = this._loadDiscResult(trackAnyMatch);
 			if (result) {
 				AssetManager.autoSelectMask(trackAnyMatch);
-				this._pathCache.set(cacheKey, { path: trackAnyMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC });
+				this._pathCache.set(cacheKey, { path: trackAnyMatch, type: CONFIG.IMAGE_TYPE.REAL_DISC, at: Date.now() });
 				return result;
 			}
 		}
@@ -1382,18 +1585,18 @@ const ImageLoader = {
 		// --- Step 3: Recurse two subfolder levels ---
 		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, CONFIG.MAX_SUBFOLDER_DEPTH, true, metadata);
 		if (trackSubMatch) {
-			this._pathCache.set(cacheKey, { path: trackSubMatch.path, type: trackSubMatch.type });
+			this._pathCache.set(cacheKey, { path: trackSubMatch.path, type: trackSubMatch.type, at: Date.now() });
 			return trackSubMatch;
 		}
 
 		// --- Step 4: User-configured custom artwork folders ---
 		const customResult = this.searchCustomFolders(metadata, CONFIG.DISC_PATTERNS, true);
 		if (customResult) {
-			this._pathCache.set(cacheKey, { path: customResult.path, type: customResult.type });
+			this._pathCache.set(cacheKey, { path: customResult.path, type: customResult.type, at: Date.now() });
 			return customResult;
 		}
 
-		this._pathCache.set(cacheKey, null); // Cache the miss to avoid repeated searches
+		this._pathCache.set(cacheKey, { path: null, at: Date.now() }); // Cache the miss to avoid repeated searches
 		return null;
 	},
 
@@ -1402,10 +1605,26 @@ const ImageLoader = {
 		const cacheKey = 'cover:' + baseFolder;
 		if (this._pathCache.has(cacheKey)) {
 			const cached = this._pathCache.get(cacheKey);
-			if (cached && !FileManager.exists(cached)) {
-				this._pathCache.delete(cacheKey); // File was deleted since we cached it
+			const age    = Date.now() - (cached.at || 0);
+			if (!cached.path) {
+				// Null miss — expire quickly so new downloads are picked up.
+				if (age < this.PATH_MISS_TTL) return null;
+				this._pathCache.delete(cacheKey);
+			} else if (age < this.PATH_HIT_TTL) {
+				// Hit within TTL — but verify the file still exists (deletion check).
+				if (!FileManager.exists(cached.path)) {
+					this._pathCache.delete(cacheKey);
+				} else {
+					return cached.path;
+				}
 			} else {
-				return cached;
+				// TTL expired — re-verify existence before trusting the cached path.
+				if (!FileManager.exists(cached.path)) {
+					this._pathCache.delete(cacheKey);
+				} else {
+					cached.at = Date.now(); // refresh timestamp
+					return cached.path;
+				}
 			}
 		}
 
@@ -1414,21 +1633,21 @@ const ImageLoader = {
 			: { artist: '', album: '', title: '', folder: '', artistTitle: '', artistAlbum: '' };
 
 		const jsonArt = FileManager.searchLastFmJson(baseFolder);
-		if (jsonArt)        { this._pathCache.set(cacheKey, jsonArt);        return jsonArt; }
+		if (jsonArt)        { this._pathCache.set(cacheKey, { path: jsonArt,        at: Date.now() }); return jsonArt; }
 
 		const trackMatch = this.searchInFolder(baseFolder, CONFIG.COVER_PATTERNS, metadata);
-		if (trackMatch)     { this._pathCache.set(cacheKey, trackMatch);     return trackMatch; }
+		if (trackMatch)     { this._pathCache.set(cacheKey, { path: trackMatch,     at: Date.now() }); return trackMatch; }
 
 		const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.COVER_PATTERNS);
-		if (trackAnyMatch)  { this._pathCache.set(cacheKey, trackAnyMatch);  return trackAnyMatch; }
+		if (trackAnyMatch)  { this._pathCache.set(cacheKey, { path: trackAnyMatch,  at: Date.now() }); return trackAnyMatch; }
 
 		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, CONFIG.MAX_SUBFOLDER_DEPTH, false, metadata);
-		if (trackSubMatch)  { this._pathCache.set(cacheKey, trackSubMatch);  return trackSubMatch; }
+		if (trackSubMatch)  { this._pathCache.set(cacheKey, { path: trackSubMatch,  at: Date.now() }); return trackSubMatch; }
 
 		const customResult = this.searchCustomFolders(metadata, CONFIG.COVER_PATTERNS, false);
-		if (customResult)   { this._pathCache.set(cacheKey, customResult);   return customResult; }
+		if (customResult)   { this._pathCache.set(cacheKey, { path: customResult,   at: Date.now() }); return customResult; }
 
-		this._pathCache.set(cacheKey, null);
+		this._pathCache.set(cacheKey, { path: null, at: Date.now() });
 		return null;
 	},
 
@@ -1600,6 +1819,7 @@ const ImageLoader = {
 						if (image_path) props.savedPath.value = image_path;
 						RepaintHelper.background();
 						State.updateTimer();
+						return; // success — do not fall through to loadDefaultDisc
 					} else {
 						// scaleProportional already disposes image (raw) in its catch; only original needs cleanup.
 						Utils.safeDispose(original);
@@ -1614,12 +1834,12 @@ const ImageLoader = {
 						if (image_path) props.savedPath.value = image_path;
 						RepaintHelper.background();
 						State.updateTimer();
+						return; // success — do not fall through to loadDefaultDisc
 					} else {
 						Utils.safeDispose(original);
 						// Fall through to loadDefaultDisc below.
 					}
 				}
-				return;
 			} catch (e) {
 				Utils.safeDispose(image);
 				Utils.safeDispose(original);
@@ -1670,6 +1890,9 @@ const RotationCache = {
 	_pendingKey:    '',   // Key for the in-progress build
 	BATCH_SIZE:     8,    // Frames per tick (~5–10 ms per batch at 500px)
 
+	// Store the step used when frames were built so getFrame() uses the same granularity.
+	_builtStep: 2,
+
 	get step() { return P.rotationStep; },
 
 	// Cancel any in-flight build and dispose its resources.
@@ -1687,6 +1910,7 @@ const RotationCache = {
 		this.frames.forEach(f => { if (f) { try { f.Dispose(); } catch (_) {} } });
 		this.frames     = [];
 		this._sourceKey = '';
+		this._builtStep = 2;
 	},
 
 	// Schedule an incremental, non-blocking frame-cache build.
@@ -1697,6 +1921,9 @@ const RotationCache = {
 	// _pendingFrames; when the full set is ready they are atomically swapped in.
 	scheduleAsyncBuild(img) {
 		if (!img) return;
+		// Never build rotation frames in static mode — they will never be read.
+		// This is the primary memory guard: frame bitmaps are the largest spin resource.
+		if (isStaticMode()) return;
 
 		// Re-resolve source: composite takes priority over the raw disc image.
 		const composite = (DiscComposite.valid && DiscComposite.img) ? DiscComposite.img : img;
@@ -1742,6 +1969,14 @@ const RotationCache = {
 				// Superseded — src may have been disposed by _cancelBuild; stop immediately.
 				return;
 			}
+			// If static mode was entered mid-build (e.g. user toggled Album Art Only or
+			// disabled spinning while frames were still rendering), abort immediately.
+			// Frames will never be read in static mode, so continuing wastes CPU for up
+			// to (totalFrames / BATCH_SIZE) more ticks.
+			if (isStaticMode()) {
+				this._cancelBuild();
+				return;
+			}
 
 			// Render up to BATCH_SIZE frames per tick.
 			const end = Math.min(this._pendingAngle + this.BATCH_SIZE * step, 360);
@@ -1774,6 +2009,7 @@ const RotationCache = {
 				const oldFrames    = this.frames;
 				this.frames        = this._pendingFrames;
 				this._sourceKey    = key;
+				this._builtStep    = step; // lock in the granularity used during this build
 				this._pendingFrames = null;
 				// Dispose _pendingScaled only AFTER nulling src's reference source
 				// so the closure cannot use a freed bitmap on a late-arriving tick.
@@ -1782,7 +2018,38 @@ const RotationCache = {
 				this._pendingAngle = 0;
 				this._pendingKey   = '';
 				Utils.safeDispose(scaledToDispose);
-				oldFrames.forEach(f => { if (f) { try { f.Dispose(); } catch (_) {} } });
+				// Defer old-frame disposal: the spin timer may have captured a
+				// frame reference from getFrame() and be mid-DrawImage when the swap runs.
+				// Use DISPOSE_DELAY_MS (50 ms) to cover two full frames under CPU load.
+				window.SetTimeout(() => {
+					if (!isLive()) return;
+					oldFrames.forEach(f => { if (f) { try { f.Dispose(); } catch (_) {} } });
+				}, CONFIG.DISPOSE_DELAY_MS);
+				// Point 3 optimisation: if every angle has a pre-rendered frame (no null slots),
+				// DiscComposite.img is no longer needed — paintDisc's slow path (live DrawImage
+				// rotation) is unreachable when getFrame() always returns a valid bitmap.
+				// Dispose it now to free the masked+composited bitmap (~4 MB at 1000px).
+				// DiscComposite.valid stays true so prepareLayers doesn't rebuild immediately;
+				// if a rebuild is later needed (settings change, resize, mask change),
+				// prepareLayers will detect valid=true and skip — the rebuild is triggered
+				// explicitly by DiscComposite.dispose() in those paths, which sets valid=false.
+				// The slow path falls back to State.img (the unmasked source) in the gap
+				// between dispose and the next DiscComposite.build — acceptable for one frame.
+				const allFramesBuilt = this.frames.every(f => f !== null);
+				if (allFramesBuilt && DiscComposite.img) {
+					window.SetTimeout(() => {
+						if (!isLive()) return;
+						// Only dispose if frames are still complete and DiscComposite hasn't
+						// been rebuilt since (a rebuild would have reset _sourceKey).
+						if (this._sourceKey === key && this.frames.every(f => f !== null)) {
+							if (DiscComposite.img) {
+								try { DiscComposite.img.Dispose(); } catch (_) {}
+								DiscComposite.img = null;
+								// valid stays true — prepareLayers will not rebuild.
+							}
+						}
+					}, CONFIG.DISPOSE_DELAY_MS);
+				}
 				if (isLive()) RepaintHelper.full();
 			}
 		};
@@ -1793,10 +2060,12 @@ const RotationCache = {
 
 	// Return the pre-rendered frame closest to the given angle, or null if the slot
 	// failed during build (caller falls back to live DrawImage rotation).
+	// Uses _builtStep (the step captured at build time) rather than the live getter
+	// so that a mid-flight rotationStep change cannot corrupt the frame index.
 	getFrame(angle) {
 		if (this.frames.length === 0) return null;
 		const len   = this.frames.length;
-		const raw   = Math.floor(angle / this.step) % len;
+		const raw   = Math.floor(angle / this._builtStep) % len;
 		const idx   = raw < 0 ? raw + len : raw;
 		const frame = this.frames[idx];
 		return frame || null; // Explicit null for empty slots (failed frames)
@@ -1996,6 +2265,35 @@ const OverlayInvalidator = (() => {
 		}
 	};
 })();
+
+// ====================== CACHE INVALIDATION HELPERS ======================
+// Three composable helpers covering the repeated invalidation patterns throughout
+// the script. Using named functions prevents individual calls from drifting out
+// of sync when a new cache layer is added in future.
+
+// Full reset: invalidates every visual cache layer.
+// Use when the disc image, mask, or panel size changes.
+function invalidateAllCaches() {
+	BackgroundCache.invalidate();
+	StaticBgLayer.invalidate();
+	StaticTopLayer.invalidate();
+	OverlayInvalidator.request();
+	DiscComposite.dispose(); // also clears RotationCache internally
+}
+
+// Background-only reset: background art changed but overlay geometry is unchanged.
+// Use when blur radius, darken level, or background colour changes.
+function invalidateBgCaches() {
+	BackgroundCache.invalidate();
+	StaticBgLayer.invalidate();
+}
+
+// Top-layer reset: border or overlay effect changed but background is unchanged.
+// Use when overlay toggles, opacity, or border settings change.
+function invalidateTopCaches() {
+	StaticTopLayer.invalidate();
+	OverlayInvalidator.request();
+}
 
 // ====================== OVERLAY DRAW PRIMITIVES ======================
 // Each function writes into an existing graphics context; they are called by OverlayCache.build.
@@ -2400,11 +2698,7 @@ const PresetManager = {
 			ImageLoader.clearCache();
 			AssetManager.maskCache.clear();
 			AssetManager.rimCache.clear();
-			BackgroundCache.invalidate();
-			StaticBgLayer.invalidate();
-			StaticTopLayer.invalidate();
-			OverlayInvalidator.request();
-			DiscComposite.dispose();
+			invalidateAllCaches();
 			State.paintCache.valid = false;
 			State.stopTimer();
 			State.updateTimer();
@@ -2730,14 +3024,30 @@ const MenuManager = {
 		};
 		if (toggles[idx]) {
 			toggles[idx].prop.toggle();
-			if (toggles[idx].reload && State.currentMetadb) {
-				State.stopTimer(); // stop spin before cache teardown to avoid racing timer ticks
-				ImageLoader.clearCache();
-				DiscComposite.dispose(); // dispose() internally calls RotationCache.clear()
-				State.lastFrame = -1;
-				ImageLoader.loadForMetadb(State.currentMetadb, true);
+			if (idx === 1) {
+				// Switching useAlbumArtOnly: immediately release spin resources when
+				// entering static mode, regardless of whether a reload follows.
+				if (P.useAlbumArtOnly) {
+					// Now enabled — entering static mode.
+					releaseSpinResources();
+				}
+				if (State.currentMetadb) {
+					// releaseSpinResources() already called stopTimer(); clearCache + reload.
+					ImageLoader.clearCache();
+					DiscComposite.dispose(); // also clears RotationCache
+					State.lastFrame = -1;
+					ImageLoader.loadForMetadb(State.currentMetadb, true);
+				}
+			} else if (idx === 2) {
+				// Toggling spinningEnabled: release spin resources immediately when disabling.
+				if (!P.spinningEnabled) {
+					releaseSpinResources();
+				} else {
+					State.updateTimer();
+				}
+			} else {
+				if (toggles[idx].timer) State.updateTimer();
 			}
-			if (toggles[idx].timer) State.updateTimer();
 			if (toggles[idx].cache) State.paintCache.valid = false;
 			changed = true;
 		}
@@ -2746,8 +3056,8 @@ const MenuManager = {
 		const speedPreset = _.find(CONFIG.SPEED_PRESETS, (p, i) => (i + 10) === idx);
 		if (speedPreset) {
 			props.spinSpeed.value = speedPreset.value;
-			State.stopTimer();
-			State.updateTimer();
+			// No stop/restart needed — the interval closure reads P.spinSpeed live
+			// so the new speed takes effect on the very next tick automatically.
 			changed = true;
 		}
 
@@ -2768,8 +3078,7 @@ const MenuManager = {
 			State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
 			Utils.safeDispose(oldImg);
 			if (oldBgImg && oldBgImg !== oldImg) Utils.safeDispose(oldBgImg);
-			BackgroundCache.invalidate();
-			StaticBgLayer.invalidate();
+			invalidateBgCaches();
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
@@ -2793,8 +3102,7 @@ const MenuManager = {
 			State.imageType = CONFIG.IMAGE_TYPE.REAL_DISC;
 			Utils.safeDispose(oldImg2);
 			if (oldBgImg2 && oldBgImg2 !== oldImg2) Utils.safeDispose(oldBgImg2);
-			BackgroundCache.invalidate();
-			StaticBgLayer.invalidate();
+			invalidateBgCaches();
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
@@ -2948,11 +3256,7 @@ const MenuManager = {
 			ImageLoader.clearCache();
 			AssetManager.maskCache.clear();
 			AssetManager.rimCache.clear();
-			BackgroundCache.invalidate();
-			StaticBgLayer.invalidate();
-			StaticTopLayer.invalidate();
-			OverlayInvalidator.request();
-			DiscComposite.dispose();
+			invalidateAllCaches();
 			State.paintCache.valid = false;
 			State.stopTimer();
 			State.updateTimer();
@@ -2964,47 +3268,47 @@ const MenuManager = {
 		if (idx === 250) {
 			const v = utils.InputBox(window.ID, 'Border Size', 'Enter size (0-50):', props.borderSize.value.toString(), false);
 			const n = parseInt(v, 10);
-			if (!isNaN(n)) { props.borderSize.value = _.clamp(n, 0, 50); State.paintCache.valid = false; StaticTopLayer.invalidate(); changed = true; }
+			if (!isNaN(n)) { props.borderSize.value = _.clamp(n, 0, 50); State.paintCache.valid = false; invalidateTopCaches(); changed = true; }
 		}
 		if (idx === 251) {
 			const picked = utils.ColourPicker(window.ID, props.borderColor.value);
-			if (picked !== -1) { props.borderColor.value = picked; StaticTopLayer.invalidate(); RepaintHelper.full(); changed = true; }
+			if (picked !== -1) { props.borderColor.value = picked; invalidateTopCaches(); RepaintHelper.full(); changed = true; }
 		}
 		if (idx === 252) {
 			const v = utils.InputBox(window.ID, 'Padding', 'Enter size (0-100):', props.padding.value.toString(), false);
 			const n = parseInt(v, 10);
-			if (!isNaN(n)) { props.padding.value = _.clamp(n, 0, 100); State.paintCache.valid = false; StaticTopLayer.invalidate(); changed = true; }
+			if (!isNaN(n)) { props.padding.value = _.clamp(n, 0, 100); State.paintCache.valid = false; invalidateTopCaches(); changed = true; }
 		}
 
 		// --- Background controls (IDs 260–295) ---
-		if (idx === 263) { props.bgUseUIColor.toggle();        BackgroundCache.invalidate(); StaticBgLayer.invalidate(); changed = true; }
-		if (idx === 260) { props.backgroundEnabled.toggle();   BackgroundCache.invalidate(); StaticBgLayer.invalidate(); changed = true; }
+		if (idx === 263) { props.bgUseUIColor.toggle();        invalidateBgCaches(); changed = true; }
+		if (idx === 260) { props.backgroundEnabled.toggle();   invalidateBgCaches(); changed = true; }
 		if (idx === 261) {
 			const picked = utils.ColourPicker(window.ID, props.customBackgroundColor.value);
 			if (picked !== -1) { props.customBackgroundColor.value = picked; StaticBgLayer.invalidate(); RepaintHelper.background(); changed = true; }
 		}
-		if (idx === 270) { props.blurEnabled.toggle(); BackgroundCache.invalidate(); StaticBgLayer.invalidate(); changed = true; }
+		if (idx === 270) { props.blurEnabled.toggle(); invalidateBgCaches(); changed = true; }
 
 		// Blur radius: IDs 271–281 map to 0, 20, 40, ..., 200; ID 282 = 240; ID 283 = 254 (max).
 		// IDs are now fully sequential (271→281→282→283) matching the visual menu order.
 		if (_.inRange(idx, 271, 282)) {
 			props.blurRadius.value = (idx - 271) * 20;
-			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
+			invalidateBgCaches();
 			changed = true;
 		} else if (idx === 282) {
 			props.blurRadius.value = 240;
-			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
+			invalidateBgCaches();
 			changed = true;
 		} else if (idx === 283) {
 			props.blurRadius.value = 254;
-			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
+			invalidateBgCaches();
 			changed = true;
 		}
 
 		// Darken veil: IDs 290–295 map to 0%, 10%, ..., 50%.
 		if (_.inRange(idx, 290, 296)) {
 			props.darkenValue.value = (idx - 290) * 10;
-			BackgroundCache.invalidate(); StaticBgLayer.invalidate();
+			invalidateBgCaches();
 			changed = true;
 		}
 
@@ -3127,6 +3431,11 @@ const ArtDispatcher = {
 //   ✓ Paint only reads state; mutations happen in prepareLayers.
 //   ✓ Artworks and large resources loaded asynchronously and cached.
 function prepareLayers() {
+	// Ultra-fast path: all layers are valid and sized — nothing to do.
+	// This check runs BEFORE any window property reads, making it truly zero-cost
+	// on the rare cases where prepareLayers() is still called while _allValid=true.
+	if (RepaintHelper._allValid) return;
+
 	const w = window.Width;
 	const h = window.Height;
 	if (w <= 0 || h <= 0) return;
@@ -3135,12 +3444,12 @@ function prepareLayers() {
 	State.paintCache.panelW = w;
 	State.paintCache.panelH = h;
 
-	// Fast-path: if every cache is already valid at the current size, skip all guards.
-	// This makes the steady-state spin path (RepaintHelper.disc → prepareLayers) near-zero cost.
-	// Any invalidate() call sets _allValid=false, which re-enables the full check below.
-	if (RepaintHelper._allValid &&
-	    StaticBgLayer._w === w && StaticBgLayer._h === h &&
-	    StaticTopLayer._w === w && StaticTopLayer._h === h) {
+	// Secondary fast-path: sizes match and all layers are valid.
+	if (StaticBgLayer._w === w && StaticBgLayer._h === h &&
+	    StaticTopLayer._w === w && StaticTopLayer._h === h &&
+	    StaticBgLayer.valid && StaticTopLayer.valid &&
+	    OverlayCache.valid && DiscComposite.valid) {
+		RepaintHelper._allValid = true;
 		return;
 	}
 
@@ -3150,10 +3459,15 @@ function prepareLayers() {
 
 	// Ensure DiscComposite is valid before paint reads it.
 	// Only built for disc images — static cover art uses paintStatic which never reads DiscComposite.
+	// In static mode the composite and rotation frames are never needed, so skip entirely.
 	// This is the only place DiscComposite.build() may allocate; never inside Renderer.
-	if (!DiscComposite.valid && State.img && State.isDiscImage) {
+	if (!DiscComposite.valid && State.img && State.isDiscImage && !isStaticMode()) {
 		DiscComposite.build(State.img, Math.floor(pc.discSize || Utils.getPanelDiscSize()), State.imageType);
 		if (P.spinningEnabled) RotationCache.scheduleAsyncBuild(DiscComposite.img || State.img);
+	} else if (!DiscComposite.valid && State.img && State.isDiscImage && isStaticMode()) {
+		// Static mode — mark valid without allocating so the fast-path guard is satisfied
+		// and prepareLayers doesn't re-enter this block on every paint frame.
+		DiscComposite.valid = true;
 	}
 
 	// Invalidate size-mismatched overlay before deciding to rebuild.
@@ -3183,11 +3497,27 @@ function prepareLayers() {
 	                          StaticTopLayer.valid;
 }
 
+// Re-entrancy guard: if on_paint is ever called while a previous on_paint frame
+// is still executing (e.g. a GDI allocation inside on_paint triggers a callback
+// that calls window.Repaint() synchronously), the inner call must not proceed —
+// it would read partially-built cache state and could corrupt bitmaps.
+// Under normal operation this flag is never set when on_paint is called.
+let _paintReentrant = false;
+
 function on_paint(gr) {
-	// Dimensions were stored in paintCache by prepareLayers() — no second window query needed.
+	if (_paintReentrant) {
+		// Defensive: schedule a clean repaint for the next tick rather than
+		// silently dropping the frame — the caller expected a visual update.
+		RepaintScheduler.request();
+		return;
+	}
+	_paintReentrant = true;
+	try {
+	// Read dimensions: prefer values stored by prepareLayers(), fall back to window
+	// properties for the spin fast-path that bypasses prepareLayers().
 	const pc = State.paintCache;
-	const w  = pc.panelW;
-	const h  = pc.panelH;
+	const w  = pc.panelW || window.Width;
+	const h  = pc.panelH || window.Height;
 	if (w <= 0 || h <= 0) return;
 
 	// All preparation (GDI allocations, cache builds, state mutations) was done in
@@ -3211,30 +3541,113 @@ function on_paint(gr) {
 
 	// Layer 4: Transient opacity slider HUD (only visible when slider is active)
 	SliderRenderer.draw(gr);
+	} finally {
+		_paintReentrant = false;
+	}
 }
 
 function on_size() {
-	// Stop the spin timer first — it must not fire during the cache teardown below.
+	// Stop the spin timer immediately — it must not fire during cache teardown.
+	// Also invalidate the layout cache so any paint during the debounce window
+	// does not try to use stale disc coordinates.
 	State.stopTimer();
-	// Flush all size-dependent caches so everything is rebuilt at the new dimensions.
 	State.paintCache.valid = false;
-	BackgroundCache.invalidate();
-	StaticBgLayer.invalidate();
-	StaticTopLayer.invalidate();
-	OverlayInvalidator.request();
-	DiscComposite.dispose(); // Also clears RotationCache internally via its dispose chain
-	// NOTE: RotationCache.clear() is NOT called here — DiscComposite.dispose() already does it.
+	RepaintHelper._allValid = false;
+
+	// Debounce the start of the rebuild pipeline. Continuous window dragging fires
+	// on_size many times per second; we wait for 50 ms of quiet before doing any work.
+	if (resizeTimer)        { window.ClearTimeout(resizeTimer);        resizeTimer        = null; }
+	// Also cancel any in-flight pipeline stages from a previous resize — a new drag
+	// supersedes them and _runResizePipeline will restart cleanly from Stage 0.
+	if (_resizeStage1Timer) { window.ClearTimeout(_resizeStage1Timer); _resizeStage1Timer = null; }
+	if (_resizeStage2Timer) { window.ClearTimeout(_resizeStage2Timer); _resizeStage2Timer = null; }
+	if (_resizeStage3Timer) { window.ClearTimeout(_resizeStage3Timer); _resizeStage3Timer = null; }
+	resizeTimer = window.SetTimeout(() => {
+		resizeTimer = null;
+		if (!isLive()) return;
+		_runResizePipeline();
+	}, 50);
+}
+
+// ─── Staged resize rebuild pipeline ──────────────────────────────────────────
+// Spreads the post-resize work across multiple event-loop ticks so the JS engine
+// can process queued paint and timer callbacks between stages.  This prevents the
+// single large CPU spike that occurred when everything ran synchronously in one
+// debounce callback.
+//
+// Stage 0 (immediate, sync):  invalidate all caches + repaint with fallback fills.
+//   The panel shows a solid-colour background immediately after drag ends.
+// Stage 1 (tick +0):  rebuild BgLayer + BackgroundCache blur (heaviest — StackBlur).
+// Stage 2 (tick +0):  rebuild masks, DiscComposite, RotationCache schedule.
+// Stage 3 (tick +0):  image reload (gdi.Image + processForDisc) if needed.
+//
+// Each stage fires via SetTimeout(fn, 0) so the browser/SMP event loop can
+// deliver any pending paint or timer events between them.
+function _runResizePipeline() {
+	// ── Stage 0: invalidate synchronously so on_paint never reads size-mismatched bitmaps.
+	invalidateAllCaches();
 	AssetManager.maskCache.clear();
 	AssetManager.rimCache.clear();
 	ImageLoader.clearCache();
-	if (isLive() && State.currentMetadb) {
-		ImageLoader.loadForMetadb(State.currentMetadb, false);
-		// loadForMetadb calls State.updateTimer() at the end of every code path,
-		// so the spin timer is restarted implicitly when the image reload completes.
-	} else {
-		State.updateTimer();
-		RepaintHelper.full();
-	}
+	// Trigger a repaint with fallback solid fills — panel looks correct immediately.
+	RepaintScheduler.request();
+
+	// ── Stage 1: background blur (deferred — StackBlur is the most expensive step).
+	_resizeStage1Timer = window.SetTimeout(() => {
+		_resizeStage1Timer = null;
+		if (!isLive()) return;
+		const w = window.Width, h = window.Height;
+		if (w > 0 && h > 0) {
+			// BackgroundCache.ensure() runs StackBlur internally; StaticBgLayer.build()
+			// calls it on a cache-miss.  Both are guarded by their own validity flags.
+			StaticBgLayer.build(w, h);
+		}
+		RepaintScheduler.request();
+
+		// ── Stage 2: masks + composite + rotation (deferred after blur).
+		_resizeStage2Timer = window.SetTimeout(() => {
+			_resizeStage2Timer = null;
+			if (!isLive()) return;
+			// DiscComposite.build() needs the disc image; skip if none is loaded yet —
+			// Stage 3's loadForMetadb will build it once the image is available.
+			// Also skip entirely in static mode — composite and rotation frames are unused.
+			if (State.img && State.isDiscImage && !isStaticMode()) {
+				const size = Utils.getPanelDiscSize();
+				DiscComposite.build(State.img, size, State.imageType);
+				if (P.spinningEnabled) {
+					RotationCache.scheduleAsyncBuild(DiscComposite.img || State.img);
+				}
+			}
+			// Rebuild the overlay + top layer at the new size.
+			const w2 = window.Width, h2 = window.Height;
+			if (w2 > 0 && h2 > 0) {
+				// Ensure paint cache has up-to-date layout coordinates before building
+				// the overlay — drawGlow() reads discX/Y/Size and staticX/Y/W/H from it.
+				State.updatePaintCache();
+				OverlayCache.build(w2, h2, State.paintCache);
+				StaticTopLayer.build(w2, h2);
+			}
+			RepaintScheduler.request();
+
+			// ── Stage 3: image reload (deferred after composite — loadForMetadb is I/O).
+			_resizeStage3Timer = window.SetTimeout(() => {
+				_resizeStage3Timer = null;
+				if (!isLive()) return;
+				if (State.currentMetadb) {
+					// immediate=false: uses the LOAD_DEBOUNCE_MS guard so a resize followed
+					// immediately by a track change doesn't double-load.
+					ImageLoader.loadForMetadb(State.currentMetadb, false);
+					// loadForMetadb calls State.updateTimer() at the end of every async code path,
+					// but the same-folder early-return path skips it. Call here to ensure the spin
+					// timer is always restarted after a resize regardless of which path was taken.
+					State.updateTimer();
+				} else {
+					State.updateTimer();
+					RepaintScheduler.immediate();
+				}
+			}, 0);
+		}, 0);
+	}, 0);
 }
 
 function on_playback_new_track(metadb) {
@@ -3249,7 +3662,8 @@ function on_metadb_changed(metadb_list, fromhook) {
 	const nowPlaying = fb.GetNowPlaying();
 	if (!nowPlaying) return;
 	let affected = false;
-	for (let i = 0; i < metadb_list.Count; i++) {
+	const count = (metadb_list.Count !== undefined ? metadb_list.Count : metadb_list.length) || 0;
+	for (let i = 0; i < count; i++) {
 		const item = metadb_list.Item ? metadb_list.Item(i) : metadb_list[i];
 		if (item && item.Compare && item.Compare(nowPlaying)) { affected = true; break; }
 	}
@@ -3357,6 +3771,11 @@ function on_script_unload() {
 
 	// Cancel ALL pending timers before freeing resources to prevent callbacks
 	// firing into a partially torn-down state.
+	RepaintScheduler.cancel();
+	if (resizeTimer)         { window.ClearTimeout(resizeTimer);         resizeTimer         = null; }
+	if (_resizeStage1Timer)  { window.ClearTimeout(_resizeStage1Timer);  _resizeStage1Timer  = null; }
+	if (_resizeStage2Timer)  { window.ClearTimeout(_resizeStage2Timer);  _resizeStage2Timer  = null; }
+	if (_resizeStage3Timer)  { window.ClearTimeout(_resizeStage3Timer);  _resizeStage3Timer  = null; }
 	if (ArtDispatcher._timer) { window.ClearTimeout(ArtDispatcher._timer); ArtDispatcher._timer = null; }
 	ArtDispatcher._pending = null;
 	if (State.loadTimer)   { window.ClearTimeout(State.loadTimer);   State.loadTimer   = null; }
@@ -3409,9 +3828,11 @@ function init() {
 					let original = null;
 					try { original = raw.Clone(0, 0, raw.Width, raw.Height); _tagImg(original); } catch (_) {}
 					const targetSize = Utils.getPanelDiscSize();
-					// Use imageType as the authoritative source for REAL_DISC; for ALBUM_ART
-					// fall back to the persisted savedIsDisc flag.
-					const treatAsDisc = (imageType === CONFIG.IMAGE_TYPE.REAL_DISC ||
+					// useAlbumArtOnly overrides everything — never apply a mask in static mode.
+					// For disc mode: real disc scans always render as disc; cover art uses the
+					// persisted savedIsDisc flag (which reflects how it was processed last session).
+					const treatAsDisc = !P.useAlbumArtOnly &&
+					                    (imageType === CONFIG.IMAGE_TYPE.REAL_DISC ||
 					                     props.savedIsDisc.enabled);
 					let displayImg;
 					if (treatAsDisc) {
