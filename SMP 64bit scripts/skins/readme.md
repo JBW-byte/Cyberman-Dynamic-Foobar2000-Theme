@@ -32,10 +32,10 @@ For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable 
 # Components
 
 <details>
-<summary><strong>DiscSpin</strong> — Updated 06 June 2026</summary>
+<summary><strong>DiscSpin</strong> — Updated 27 June 2026</summary>
 
 ### Update Overview
-Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v3.6
+Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v3.7
 
 ### Features
 
