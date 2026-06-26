@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V3.6 =======- \\
+		     // -======= SMP 64bit Disc Spin V3.7 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
 
-window.DefineScript('SMP 64bit Disc Spin V3.6', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.7', { author: 'L.E.D.', grab_focus: true });
 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -1300,6 +1300,28 @@ const ImageLoader = {
 	tf_discnumber: fb.TitleFormat("%discnumber%"),
 
 	clearCache() { this._pathCache.clear(); },
+
+	// Resolve a folder path (as broadcast via the 'ArtFolder' notification from the
+	// Library/Playlist panels) to a metadb handle so its art/colours can be loaded.
+	// Searches the media library directly — DiscSpin has no playlist-row cache of
+	// its own, so this is folder-based rather than row-based like the other panels.
+	findHandleForFolder(folderPath) {
+		if (!folderPath || !fb.IsLibraryEnabled()) return null;
+		const libItems = fb.GetLibraryItems();
+		if (!libItems) return null;
+		try {
+			for (let i = 0, n = libItems.Count; i < n; i++) {
+				const h = libItems.Item ? libItems.Item(i) : libItems[i];
+				if (!h) continue;
+				const fp = this.tf_path.EvalWithMetadb(h);
+				if (fp === folderPath) return h;
+			}
+		} catch (e) {
+		} finally {
+			try { libItems.Dispose(); } catch (e) {}
+		}
+		return null;
+	},
 
 	// Extract all useful metadata strings from a metadb handle.
 	getMetadataNames(metadb) {
@@ -3334,7 +3356,7 @@ const MenuManager = {
 const ArtDispatcher = {
 	_pending:  null,
 	_timer:    null,
-	_priority: { track: 4, stop: 3, selection: 2, playlist: 1 },
+	_priority: { track: 4, stop: 3, selection: 2, folder: 2, playlist: 1 },
 
 	// Queue an art-load request. Higher-priority requests preempt lower ones.
 	request(reason, metadb) {
@@ -3409,6 +3431,22 @@ const ArtDispatcher = {
 				// may have started in that window after on_selection_changed queued this.
 				if (!fb.IsPlaying && !isPaused && metadb) ImageLoader.loadForMetadb(metadb, false);
 				break;
+
+			case 'folder': {
+				// 'metadb' slot carries the folder path string here (see on_notify_data).
+				// Library/Playlist broadcast 'ArtFolder' only when nothing is playing and
+				// the user clicked/hovered an album, so mirror that art here too.
+				// Guard re-checked because dispatch is deferred 50ms.
+				if (fb.IsPlaying || isPaused) break;
+				const folderPath = metadb;
+				if (!folderPath) break;
+				const handle = ImageLoader.findHandleForFolder(folderPath);
+				// immediate=false (not true): lets loadForMetadb's own same-folder dedup
+				// check run, so re-notifications for the folder already on screen don't
+				// trigger a redundant filesystem search + GetAlbumArtAsync round-trip.
+				if (handle) ImageLoader.loadForMetadb(handle, false);
+				break;
+			}
 
 			case 'playlist':
 				if (fb.IsPlaying && fb.GetNowPlaying()) {
@@ -3719,6 +3757,16 @@ function on_playlist_items_added(playlist_index) {
 function on_playlist_items_removed(playlist_index) {
 	if (!isLive()) return;
 	ArtDispatcher.request('playlist', null);
+}
+
+// Library/Playlist panels broadcast 'ArtFolder' via NotifyOthers() whenever the user
+// clicks/hovers an album while nothing is playing. Mirror that selection here so the
+// disc/background shows the currently selected album instead of stale last-played art.
+function on_notify_data(name, info) {
+	if (!isLive()) return;
+	if (name === 'ArtFolder') {
+		ArtDispatcher.request('folder', info);
+	}
 }
 
 // Receives the result of utils.GetAlbumArtAsync(); stale results are discarded via token check.
