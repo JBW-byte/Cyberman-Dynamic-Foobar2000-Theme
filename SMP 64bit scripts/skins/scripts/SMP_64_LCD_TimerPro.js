@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro 1.1 ========= \\
+		  // ======== SMP 64bit LCD TimerPro 1.2 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -9,7 +9,7 @@
 
 window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit LCD TimerPro 1.1', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit LCD TimerPro 1.2', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ===================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -276,7 +276,13 @@ const opAccessors = {
 const fallback = gdi.Font('Segoe UI', 12, 0);
 
 // ===================== FONT CACHE =====================
-const MAX_FONT_CACHE = 40;
+const MAX_FONT_CACHE = 200; // raised from 40 — a single updatePaintCache() shrink-loop burst
+                             // (clock/codec/tech auto-sizing, up to ~200 iterations each) can
+                             // insert far more than 40 distinct font keys in one pass; a small
+                             // cap let that burst evict-and-Dispose() still-referenced fonts
+                             // (State.paintCache.clockFont/codecFont, State.fontCache.btnFont)
+                             // out from under their holders. Font objects are cheap (metrics
+                             // only, no pixel buffer), so a larger cap costs ~nothing.
 const fontCache = new Map();
 
 function getFont(name, size, style = 0) {
@@ -454,13 +460,13 @@ function invalidateLayoutCache() {
 function rebuildPaintFonts(btnSize) {
     const fc          = State.fontCache;
     const wantedName  = playIconType > 0 ? LCD_ICON_FONT_NAMES[playIconType] : 'FontAwesome';
-    const sizeChanged = fc.btnFontSize !== btnSize;
-    const nameChanged = fc.btnFontName !== wantedName;
-    if (sizeChanged || nameChanged) {
-        fc.btnFontSize = btnSize;
-        fc.btnFontName = wantedName;
-        fc.btnFont     = getFont(wantedName, btnSize, 0);
-    }
+    fc.btnFontSize = btnSize;
+    fc.btnFontName = wantedName;
+    // Always re-fetch (cheap Map hit when unchanged) rather than only on change — this keeps
+    // btnFont's LRU entry continuously bumped to most-recently-used, so it can't be evicted
+    // and Dispose()'d by some other font request (e.g. a clock/codec/tech shrink-loop burst
+    // in updatePaintCache()) while still being held and drawn here every frame.
+    fc.btnFont = getFont(wantedName, btnSize, 0);
 }
 
 // ===================== LAYERED CACHES FOR DISPLAY MODE 1 =====================
