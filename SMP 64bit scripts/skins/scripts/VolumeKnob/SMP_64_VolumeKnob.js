@@ -1,6 +1,6 @@
 'use strict';
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V2.2  ========\\
+		 // ========  SMP 64bit Volume Knob V2.3  ========\\
 		// =========== Simple Function + Themes ===========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -8,7 +8,7 @@
 
 window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit Volume Knob V2.2', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit Volume Knob V2.3', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 // Lodash first (needed for helpers.js if it uses _)
@@ -100,6 +100,7 @@ const State = {
     targetAngle: 0,
     dragTargetAngle: 0,
     animationTimer: null,
+    muteResyncTimer: null,
     needsRepaint: false,
     hasIsMuted: false,
     geometryCache: {
@@ -156,6 +157,7 @@ const State = {
 
     cleanup(){
         this.stopAnimation();
+        if (this.muteResyncTimer) { window.ClearTimeout(this.muteResyncTimer); this.muteResyncTimer = null; }
         this.geometryCache.tickAngles=null;
         this.geometryCache.markerSegments=null;
     },
@@ -337,7 +339,18 @@ const InputHandler = {
         }
         return true;
     },
-    handleDoubleClick(x,y){ if(!this.hitTest(x,y)) return false; try{ fb.RunMainMenuCommand("Playback/Volume/Mute"); window.SetTimeout(()=>{ if(!State.dragging) VolumeSync.syncFromFoobar(); },50); }catch(e){if(typeof console!=="undefined")console.log("Error toggling mute:",e);} return true; }
+    handleDoubleClick(x,y){
+        if(!this.hitTest(x,y)) return false;
+        try{
+            fb.RunMainMenuCommand("Playback/Volume/Mute");
+            if (State.muteResyncTimer) { window.ClearTimeout(State.muteResyncTimer); State.muteResyncTimer = null; }
+            State.muteResyncTimer = window.SetTimeout(()=>{
+                State.muteResyncTimer = null;
+                if(!State.dragging) VolumeSync.syncFromFoobar();
+            },50);
+        }catch(e){if(typeof console!=="undefined")console.log("Error toggling mute:",e);}
+        return true;
+    }
 };
 
 // ====================== MENU MANAGER ======================
