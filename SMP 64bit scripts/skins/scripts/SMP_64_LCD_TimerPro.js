@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro 1.2 ========= \\
+		  // ======== SMP 64bit LCD TimerPro 1.3 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -9,7 +9,7 @@
 
 window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit LCD TimerPro 1.2', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit LCD TimerPro 1.3', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ===================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
