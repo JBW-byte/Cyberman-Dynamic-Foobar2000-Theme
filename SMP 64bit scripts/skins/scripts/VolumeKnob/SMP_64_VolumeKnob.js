@@ -1,6 +1,6 @@
 'use strict';
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V2.3  ========\\
+		 // ========  SMP 64bit Volume Knob V2.4  ========\\
 		// =========== Simple Function + Themes ===========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -8,7 +8,7 @@
 
 window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit Volume Knob V2.3', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit Volume Knob V2.4', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 // Lodash first (needed for helpers.js if it uses _)
@@ -370,18 +370,35 @@ const MenuManager = {
     }
 };
 
+// ====================== LIFECYCLE GUARD ======================
+// Prevents a callback that fires in a narrow race during panel teardown
+// (e.g. on_volume_change or on_size right as on_script_unload runs) from
+// resurrecting State.animationTimer via startAnimation() after cleanup() —
+// that interval would then call window.Repaint() forever into a dead panel.
+let _unloaded = false;
+
 // ====================== INITIALIZATION ======================
-function init(){ 
-    try{ 
+function init(){
+    // Isolated from the block below: on some hosts/older foobar2000 builds
+    // reading fb.IsMuted can throw rather than simply being undefined. If that
+    // check shared a try/catch with syncFromFoobar()/startAnimation(), a throw
+    // here would silently skip both — leaving the knob desynced from the real
+    // volume and its animation timer never started. Default to false on error;
+    // the mute-dimming visual is cosmetic and safe to lose.
+    try{
         State.hasIsMuted = (fb.IsMuted !== undefined);
-        VolumeSync.syncFromFoobar(); 
-        State.startAnimation(); 
-    }catch(e){if(typeof console!=="undefined")console.log("Initialization error:",e);} 
+    }catch(e){ State.hasIsMuted = false; }
+
+    try{
+        VolumeSync.syncFromFoobar();
+        State.startAnimation();
+    }catch(e){if(typeof console!=="undefined")console.log("Initialization error:",e);}
 }
 init();
 
 // ====================== FOOBAR CALLBACKS ======================
 function on_key_down(vkey) {
+    if (_unloaded) return false;
     if (vkey === VK_UP) {
         InputHandler.handleWheel(1);
         return true;
@@ -393,11 +410,13 @@ function on_key_down(vkey) {
     return false;
 }
 
-function on_paint(gr){ 
+function on_paint(gr){
+    if (_unloaded) return;
     if (panel && panel.paint) panel.paint(gr);
     Renderer.draw(gr); 
 }
-function on_size(){ 
+function on_size(){
+    if (_unloaded) return;
     if (panel && panel.size) panel.size();
     const w=window.Width,h=window.Height; 
     if(State.geometryCache.width!==w||State.geometryCache.height!==h){ 
@@ -405,19 +424,20 @@ function on_size(){
         State.requestRepaint(); 
     } 
 }
-function on_colours_changed(){ 
+function on_colours_changed(){
+    if (_unloaded) return;
     if (panel && panel.colours_changed) panel.colours_changed();
     State.requestRepaint(); 
 }
-function on_font_changed(){ State.requestRepaint(); }
-function on_volume_change(){ if(!State.dragging) VolumeSync.syncFromFoobar(); }
-function on_mouse_lbtn_down(x,y){ if (window.SetFocus) window.SetFocus(); return InputHandler.handleDragStart(x,y); }
-function on_mouse_lbtn_up() { return InputHandler.handleDragEnd(); }  // x,y unused
-function on_mouse_move(x,y){ return InputHandler.handleDragMove(x,y); }
-function on_mouse_wheel(step){ return InputHandler.handleWheel(step); }
-function on_mouse_lbtn_dblclk(x,y){ if (window.SetFocus) window.SetFocus(); return InputHandler.handleDoubleClick(x,y); }
-function on_mouse_rbtn_up(x,y){ return MenuManager.show(x,y); }
-function on_script_unload(){ State.cleanup(); }
+function on_font_changed(){ if (!_unloaded) State.requestRepaint(); }
+function on_volume_change(){ if (!_unloaded && !State.dragging) VolumeSync.syncFromFoobar(); }
+function on_mouse_lbtn_down(x,y){ if (_unloaded) return false; if (window.SetFocus) window.SetFocus(); return InputHandler.handleDragStart(x,y); }
+function on_mouse_lbtn_up() { if (_unloaded) return false; return InputHandler.handleDragEnd(); }  // x,y unused
+function on_mouse_move(x,y){ if (_unloaded) return false; return InputHandler.handleDragMove(x,y); }
+function on_mouse_wheel(step){ if (_unloaded) return false; return InputHandler.handleWheel(step); }
+function on_mouse_lbtn_dblclk(x,y){ if (_unloaded) return false; if (window.SetFocus) window.SetFocus(); return InputHandler.handleDoubleClick(x,y); }
+function on_mouse_rbtn_up(x,y){ if (_unloaded) return false; return MenuManager.show(x,y); }
+function on_script_unload(){ _unloaded = true; State.cleanup(); }
 
 window.MinHeight = 200;
 window.MinWidth  = 100;
