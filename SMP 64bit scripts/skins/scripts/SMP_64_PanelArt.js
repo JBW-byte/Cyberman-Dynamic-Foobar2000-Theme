@@ -736,8 +736,15 @@ const TextManager = {
 // ====================== IMAGE SEARCH ======================
 const ImageSearch = {
     _pathCache: new Map(),
+    // Null-result cache entries expire after this long so cover art added or
+    // downloaded to a folder mid-session is picked up without requiring the
+    // user to manually run "Clear Image Cache". Positive hits are kept until
+    // FileManager.exists() reports the file is gone (checked on next lookup).
+    PATH_MISS_TTL: 30 * 1000,
 
     clearCache() { this._pathCache.clear(); },
+
+    _setCache(baseFolder, path) { this._pathCache.set(baseFolder, { path, at: Date.now() }); },
 
     _toTitleCase(str) {
         return str.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.substring(1).toLowerCase());
@@ -906,21 +913,30 @@ const ImageSearch = {
     searchForCover(metadb, baseFolder) {
         if (this._pathCache.has(baseFolder)) {
             const cached = this._pathCache.get(baseFolder);
-            if (cached && !FileManager.exists(cached)) this._pathCache.delete(baseFolder);
-            else return cached;
+            const age    = Date.now() - (cached.at || 0);
+            if (!cached.path) {
+                // Null miss — expire after PATH_MISS_TTL so newly added/downloaded
+                // art is picked up without requiring a manual "Clear Image Cache".
+                if (age < this.PATH_MISS_TTL) return null;
+                this._pathCache.delete(baseFolder);
+            } else if (!FileManager.exists(cached.path)) {
+                this._pathCache.delete(baseFolder);
+            } else {
+                return cached.path;
+            }
         }
 
         const metadata = metadb ? this.getMetadataNames(metadb)
             : { artist: '', album: '', title: '', folder: '', artistAlbum: '' };
 
         const trackMatch = this.searchInFolder(baseFolder, COVER_PATTERNS, metadata, false);
-        if (trackMatch) { this._pathCache.set(baseFolder, trackMatch); return trackMatch; }
+        if (trackMatch) { this._setCache(baseFolder, trackMatch); return trackMatch; }
 
         const trackAny = this.searchInFolderAnyFile(baseFolder, COVER_PATTERNS);
-        if (trackAny)   { this._pathCache.set(baseFolder, trackAny);   return trackAny; }
+        if (trackAny)   { this._setCache(baseFolder, trackAny);   return trackAny; }
 
         const trackSub = this._searchFolderTree(baseFolder, COVER_PATTERNS, MAX_SUBFOLDER_DEPTH);
-        if (trackSub)   { this._pathCache.set(baseFolder, trackSub);   return trackSub; }
+        if (trackSub)   { this._setCache(baseFolder, trackSub);   return trackSub; }
 
         // Custom folder search
         const artistAlbumSpace = (metadata.artist && metadata.album) ? metadata.artist + ' ' + metadata.album   : '';
@@ -935,13 +951,13 @@ const ImageSearch = {
         const folderMatchNames = _.uniq(nameVariations);
 
         const customFolders = CustomFolders.getAll();
-        if (customFolders.length === 0) { this._pathCache.set(baseFolder, null); return null; }
+        if (customFolders.length === 0) { this._setCache(baseFolder, null); return null; }
 
         // First pass: search each custom folder root directly (flat, with metadata variations).
         for (const cf of customFolders) {
             if (!FileManager.isDirectory(cf)) continue;
             const hit = this.searchInFolder(cf, COVER_PATTERNS, metadata, true);
-            if (hit) { this._pathCache.set(baseFolder, hit); return hit; }
+            if (hit) { this._setCache(baseFolder, hit); return hit; }
         }
 
         // Second pass: walk each custom folder tree recursively, matching subfolder names
@@ -949,10 +965,10 @@ const ImageSearch = {
         for (const cf of customFolders) {
             if (!FileManager.isDirectory(cf)) continue;
             const hit = this._searchCustomFolderTree(cf, COVER_PATTERNS, metadata, folderMatchNames, MAX_SUBFOLDER_DEPTH);
-            if (hit) { this._pathCache.set(baseFolder, hit); return hit; }
+            if (hit) { this._setCache(baseFolder, hit); return hit; }
         }
 
-        this._pathCache.set(baseFolder, null);
+        this._setCache(baseFolder, null);
         return null;
     }
 };
@@ -2436,6 +2452,7 @@ function on_selection_changed() {
 
 function on_script_unload() {
     phase = Phase.SHUTDOWN;
+    if (_startupTimer) { window.ClearTimeout(_startupTimer); _startupTimer = null; }
     RepaintScheduler.cancel();       // prevent queued SetTimeout firing into torn-down state
     ArtQueue.clear();            // stop queue before onUnload so safety timer can't fire after teardown
     ArtController.onUnload();    // cancels all timers including StateManager._saveTimer
@@ -2466,6 +2483,7 @@ window.MinHeight = 75;
 window.MinWidth  = 200;
 StateManager.load();
 CustomFolders.load();
+let _startupTimer = null;
 (function init() {
     const cfg = StateManager.get();
     PanelArt.imageMode  = cfg.imageMode;
@@ -2476,7 +2494,8 @@ CustomFolders.load();
     const initTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
     if (initTrack) ImageManager.loadAlbumArt(initTrack);
     else           TextManager.update(null);
-    window.SetTimeout(() => {
+    _startupTimer = window.SetTimeout(() => {
+        _startupTimer = null;
         // Read dimensions here — window.Width/Height unreliable at module eval time.
         PanelArt.dimensions.width  = window.Width;
         PanelArt.dimensions.height = window.Height;

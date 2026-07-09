@@ -258,6 +258,14 @@ let opacitySliderTarget = null;
 let positionAdjustMode  = null;
 let displayOff         = false;
 let displayMode        = window.GetProperty('LCD.DisplayMode', 0);
+// Unlike this script's siblings (DiscSpin/PanelArt/PlayList/Library, which all
+// use a Phase.BOOT/LIVE/SHUTDOWN state machine), this file has no lifecycle
+// guard at all. Without one, a callback that fires in a narrow race right as
+// the panel is torn down (e.g. on_playback_new_track calling startClockTimer())
+// can resurrect a SetInterval after on_script_unload() already ran its
+// one-time cleanup — that timer then fires forever into a torn-down script.
+// This flag closes that gap cheaply without restructuring the whole file.
+let _unloaded          = false;
 
 
 const opAccessors = {
@@ -1205,6 +1213,7 @@ function stopBtnFlashTimer() {
 
 // ===================== PAINT =====================
 function on_paint(gr) {
+    if (_unloaded) return;
     const w = window.Width;
     const h = window.Height;
     if (!gr || w <= 0 || h <= 0) return;
@@ -1438,6 +1447,7 @@ function invalidateMode1Layers() {
 }
 
 function on_size() {
+    if (_unloaded) return;
     cacheKey = '';
     staticCacheKey = '';
     invalidatePaintCache();
@@ -1446,6 +1456,7 @@ function on_size() {
 }
 
 function on_colours_changed() {
+    if (_unloaded) return;
     cacheKey       = '';
     staticCacheKey = '';
     invalidateMode1Layers();  // system colour change can affect text rendering too
@@ -1453,6 +1464,7 @@ function on_colours_changed() {
 }
 
 function on_font_changed() {
+    if (_unloaded) return;
     invalidatePaintCache();
     staticCacheKey = '';
     invalidateMode1Layers();
@@ -1461,6 +1473,7 @@ function on_font_changed() {
 
 // ===================== KEYBOARD =====================
 function on_key_down(vkey) {
+    if (_unloaded) return false;
     if (!positionAdjustMode) return false;
 
     // VK_ constants from helpers.js — no magic numbers.
@@ -1514,6 +1527,7 @@ const STATIC_OPACITY_TARGETS = new Set(['Background', 'Ghost', 'Border']);
 const EFFECT_OPACITY_TARGETS  = new Set(['Reflection', 'Scanlines', 'Phosphor']);
 
 function on_mouse_wheel(step) {
+    if (_unloaded) return false;
     // Cycle display mode if not in adjust mode or opacity mode
     if (!positionAdjustMode && !opacitySliderTarget) {
         displayMode = displayMode === 0 ? 1 : 0;
@@ -1566,16 +1580,19 @@ function on_mouse_wheel(step) {
 }
 
 function on_mouse_lbtn_down(x, y) {
+    if (_unloaded) return;
     if (window.SetFocus) window.SetFocus();
 }
 
 function on_mouse_lbtn_dblclk(x, y) {
+    if (_unloaded) return;
     if (window.SetFocus) window.SetFocus();
     displayOff = !displayOff;
     window.Repaint();
 }
 
 function on_mouse_lbtn_up(x, y) {
+    if (_unloaded) return false;
     if (positionAdjustMode) {
         positionAdjustMode = null;
         window.Repaint();
@@ -1598,6 +1615,7 @@ function on_mouse_lbtn_up(x, y) {
 
 // ===================== CONTEXT MENU =====================
 function on_mouse_rbtn_up(x, y) {
+    if (_unloaded) return false;
     const m        = window.CreatePopupMenu();
     const themeM   = window.CreatePopupMenu();
     const appM     = window.CreatePopupMenu();
@@ -1845,7 +1863,7 @@ function on_mouse_rbtn_up(x, y) {
         _setThemeIdx(0);
         borderMode = 2; autoFontSize = true; modeRemaining = false;  // FEAT: default border = 2px
         vOffset = 0; codecOffX = -10; codecOffY = -20; detailOffX = -10; detailOffY = -5; m1TitleOffX = -10; m1TitleOffY = -20; m1CodecOffX = -10; m1CodecOffY = -5;
-        opClock = 255; opGhost = 10; opTech = 255; opBorder = 60;
+        opClock = 255; opGhost = 5; opTech = 255; opBorder = 60;
         opBG = 255; opReflection = 20; opShadow = 60; opGlow = 110;
         opScanlines = 50; opPhosphor = 10;
       
@@ -1875,6 +1893,7 @@ function on_mouse_rbtn_up(x, y) {
 
 // ===================== PLAYBACK =====================
 function on_playback_pause(status) {
+    if (_unloaded) return;
     State.btnLayerState = '';  // Invalidate button layer for play/pause icon change
     if (status === true) {
         // Paused — stop btn blink (paused icon is always fully visible)
@@ -1895,6 +1914,7 @@ function on_playback_pause(status) {
     RepaintScheduler.request();
 }
 function on_playback_new_track() {
+    if (_unloaded) return;
     invalidateMode1Layers();
     invalidatePaintCache();
     invalidateStaticLayer();
@@ -1905,6 +1925,7 @@ function on_playback_new_track() {
     window.Repaint();
 }
 function on_playback_starting() {
+    if (_unloaded) return;
     startClockTimer();
     invalidateMode1Layers();
     invalidatePaintCache();
@@ -1923,10 +1944,12 @@ function on_playback_starting() {
 }
 
 function on_playback_seek() {
+    if (_unloaded) return;
     window.Repaint();
 }
 
 function on_playback_stop(reason) {
+    if (_unloaded) return;
     // reason=2 = "starting new track" — not a real stop; on_playback_starting fires next.
     // Without this guard every track change triggers stopClockTimer + full cache teardown,
     // causing a visible blank-frame flash between tracks.
@@ -1957,6 +1980,7 @@ function on_playback_stop(reason) {
 // definition overrides the one in helpers.js.  We must therefore handle the
 // helpers.js cleanup here to prevent leaking the measurement bitmap/context.
 function on_script_unload() {
+    _unloaded = true;
     if (typeof _tt === 'function') _tt('');
     stopClockTimer();
     stopBtnFlashTimer();

@@ -1,35 +1,35 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V3.7 =======- \\
+		     // -======= SMP 64bit Disc Spin V3.6 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
-
+ 
     // ===================*** Foobar2000 64bit ***================== \\
    // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
   // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
  // ======== Sample Code ApplyMask author: T.P Wang / marc2003 ======== \\
 // ==-== Inspired by "CD Album Art, @authors "marc2003, Jul23, vnav" =-==\\
-
+ 
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
-
-window.DefineScript('SMP 64bit Disc Spin V3.7', { author: 'L.E.D.', grab_focus: true });
-
+ 
+window.DefineScript('SMP 64bit Disc Spin V3.6', { author: 'L.E.D.', grab_focus: true });
+ 
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
 include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
-
+ 
 // Wrap utils.ReplaceIllegalChars for safe filesystem path segments.
 function _fbSanitise(str) {
 	if (!str) return '';
 	return utils.ReplaceIllegalChars(str, true);
 }
-
+ 
 // ====================== LIFECYCLE PHASE GUARD ======================
 // Prevents callbacks from firing before init() completes or after unload begins.
 const Phase = { BOOT: 0, LIVE: 1, SHUTDOWN: 2 };
 let phase = Phase.BOOT;
 function isLive() { return phase === Phase.LIVE; }
-
+ 
 // ====================== PERSISTENT PROPERTIES ======================
 // Each _p wraps a window property. Boolean default → .enabled ; any other type → .value
 const props = {
@@ -44,7 +44,7 @@ const props = {
 	maskType:               new _p('RP.MaskType', 0),
 	userOverrideMask:       new _p('RP.UserOverrideMask', false),
 	rotationStep:           new _p('RP.RotationStep', 2),
-
+ 
 	showReflection:         new _p('Disc.ShowReflection', true),
 	opReflection:           new _p('Disc.OpReflection', 30),
 	showGlow:               new _p('Disc.ShowGlow', false),
@@ -57,11 +57,11 @@ const props = {
 	customPhosphorColor:    new _p('Disc.CustomPhosphorColor', 0xFFFFFFFF),
 	overlayAllOff:          new _p('Disc.OverlayAllOff', false),
 	savedOverlay:           new _p('Disc.SavedOverlay', ''),
-
+ 
 	borderSize:             new _p('Disc.BorderSize', 5),
 	borderColor:            new _p('Disc.BorderColor', 0xFF202020),
 	padding:                new _p('Disc.Padding', 10),
-
+ 
 	backgroundEnabled:      new _p('Disc.BackgroundEnabled', true),
 	blurRadius:             new _p('Disc.BlurRadius', 240),
 	blurEnabled:            new _p('Disc.BlurEnabled', true),
@@ -69,7 +69,7 @@ const props = {
 	customBackgroundColor:  new _p('Disc.CustomBackgroundColor', 0xFF191919),
 	bgUseUIColor:           new _p('Disc.BgUseUIColor', false)
 };
-
+ 
 // Reads the host UI's accent colour; falls back gracefully between DUI and CUI hosts.
 function _getUIColour() {
 	try {
@@ -80,7 +80,7 @@ function _getUIColour() {
 		return window.GetColourDUI(1);
 	}
 }
-
+ 
 // Invalidate the background layer when the host theme colour changes.
 function on_colours_changed() {
 	if (!isLive()) return;
@@ -88,7 +88,7 @@ function on_colours_changed() {
 	StaticBgLayer.invalidate();
 	RepaintHelper.full();
 }
-
+ 
 // Release the cached slider font so it is recreated at the new DPI / style.
 function on_font_changed() {
 	if (!isLive()) return;
@@ -98,7 +98,7 @@ function on_font_changed() {
 	}
 	RepaintHelper.full();
 }
-
+ 
 // ====================== IMMUTABLE CONFIGURATION ======================
 const CONFIG = Object.freeze({
 	TIMER_INTERVAL:      42,    // ~24fps spin timer (ms)
@@ -113,12 +113,12 @@ const CONFIG = Object.freeze({
 	MAX_FILE_LIST_CACHE: 30,    // Max folder entries in the image-file-list cache
 	MAX_SUBFOLDER_CACHE: 50,
 	MAX_BG_CACHE:        4,     // LRU slots for blurred background bitmaps
-
+ 
 	MIN_DISC_SIZE:       125,
 	MAX_DISC_SIZE:       1000,
 	MIN_SPIN_SPEED:      0.5,
 	MAX_SPIN_SPEED:      5,
-
+ 
 	// GDI+ smoothing modes: 0=Invalid 1=Default 2=HighSpeed 3=HighQuality 4=None 5=AntiAlias
 	SMOOTHING_MODE:      4,
 	DISC_SCALE_FACTOR:   1.00,  // Multiplier applied to the computed disc size (1.0 = fill available area)
@@ -126,30 +126,30 @@ const CONFIG = Object.freeze({
 	LOAD_DEBOUNCE_MS:    33,    // Delay before triggering a full image search after a track change
 	MAX_SUBFOLDER_DEPTH: 3,
 	MAX_CUSTOM_FOLDERS:  5,
-
+ 
 	PATHS: {
 		DEFAULT_DISC: fb.ProfilePath + "skins\\default_disc.png",
 		RIM:          fb.ProfilePath + "skins\\center_album_rim.png",
 		SKINS_DIR:    fb.ProfilePath + "skins\\"
 	},
-
+ 
 	// Each entry maps to a mask PNG file inside SKINS_DIR (null = no mask applied).
 	MASK_TYPES: [
 		{ name: "CD Mask",    file: "mask.png",      id: 0 },
 		{ name: "Vinyl Mask", file: "vinyl_mask.png", id: 1 },
 		{ name: "No Mask",    file: null,             id: 2 }
 	],
-
+ 
 	// Filename fragments that indicate a file is a physical disc scan rather than cover art.
 	DISC_PATTERNS: ["disc", "cd", "media", "vinyl"],
-
+ 
 	// Filename fragments used when searching for standard album cover art.
 	COVER_PATTERNS: [
 		"cover", "front", "folder", "albumart", "album", "artwork", "art", "front cover"
 	],
-
+ 
 	EXTENSIONS: [".png", ".jpg", ".jpeg", ".webp", ".bmp"],
-
+ 
 	// Known Last.fm JSON sidecar filenames that may reference cover art.
 	JSON_ART_FILES: [
 		"lastfm_artist_getSimilar.json",
@@ -157,14 +157,14 @@ const CONFIG = Object.freeze({
 		"lastfm_track_getInfo.json",
 		"lastfm.json"
 	],
-
+ 
 	OVERLAY: {
 		REFLECTION_HEIGHT_RATIO: 0.45,  // Reflection covers the top 45% of the panel
 		SCANLINE_SPACING:        3,     // Pixels between scanline stripes
 		GLOW_ART_STEPS:          30,    // Radial gradient step count for the glow effect
 		GLOW_ART_MULT:           0.05   // Per-step alpha multiplier for glow fall-off
 	},
-
+ 
 	PHOSPHOR_THEMES: [
 		{ name: "Classic",  color: 0x00FF00 },
 		{ name: "Neo",      color: 0x00FFFF },
@@ -177,13 +177,13 @@ const CONFIG = Object.freeze({
 		{ name: "Cyber",    color: 0x00BFFF },
 		{ name: "Magenta",  color: 0xFF00FF }
 	],
-
+ 
 	INTERPOLATION_MODES: [
 		{ name: "Nearest Neighbor (Fastest)", value: 0 },
 		{ name: "Low Quality",                value: 1 },
 		{ name: "Bilinear",                   value: 2 }
 	],
-
+ 
 	DISC_SIZE_PRESETS: [
 		{ name: "Small (125px)",  value: 125  },
 		{ name: "Medium (250px)", value: 250  },
@@ -191,45 +191,45 @@ const CONFIG = Object.freeze({
 		{ name: "XL (750px)",     value: 750  },
 		{ name: "XXL (1000px)",   value: 1000 }
 	],
-
+ 
 	SPEED_PRESETS: [
 		{ name: "Slow (1.0x)",   value: 1.0 },
 		{ name: "Normal (2.0x)", value: 2.0 },
 		{ name: "Fast (3.0x)",   value: 3.0 }
 	],
-
+ 
 	IMAGE_TYPE: {
 		REAL_DISC:    0,  // Genuine disc scan found in the track folder
 		ALBUM_ART:    1,  // Standard cover art, rendered as a disc via mask
 		DEFAULT_DISC: 2   // Fallback placeholder disc from the skins folder
 	}
 });
-
+ 
 // Clamp any persisted numeric props that may have drifted outside the valid range.
 (function clampPersistedProps() {
 	const s  = props.spinSpeed.value;
 	const cs = Math.max(CONFIG.MIN_SPIN_SPEED, Math.min(CONFIG.MAX_SPIN_SPEED, s));
 	if (cs !== s) props.spinSpeed.value = cs;
-
+ 
 	const sz  = props.maxImageSize.value;
 	const csz = Math.max(CONFIG.MIN_DISC_SIZE, Math.min(CONFIG.MAX_DISC_SIZE, sz));
 	if (csz !== sz) props.maxImageSize.value = csz;
-
+ 
 	// Ensure rotationStep is one of the three valid values {2, 3, 4}.
 	// An out-of-range persisted value (e.g. from a corrupt profile) would cause
 	// RotationCache to build frames at the wrong angular granularity.
 	if (![2, 3, 4].includes(props.rotationStep.value)) props.rotationStep.value = 2;
 })();
-
+ 
 // ====================== SLIDER UI CONSTANTS ======================
 const SLIDER_MIN_WIDTH   = 220;   // Absolute minimum slider bar width in pixels
 const SLIDER_WIDTH_RATIO = 0.6;   // Slider bar occupies 60% of the panel width
 const SLIDER_HEIGHT      = 6;
 const SLIDER_STEP        = 5;     // Opacity units changed per mouse wheel notch
-
+ 
 // The phosphor "Custom" entry sits one past the last named theme in the array.
 const DISC_CUSTOM_THEME_INDEX = CONFIG.PHOSPHOR_THEMES.length;
-
+ 
 let readyTimer  = null; // Holds the boot-time timeout handle while waiting for a valid panel size.
 let resizeTimer = null; // Debounce handle for on_size cache teardown.
 // Stage handles for the post-resize rebuild pipeline (Stages 1–3).
@@ -237,10 +237,10 @@ let _resizeStage1Timer = null;
 let _resizeStage2Timer = null;
 let _resizeStage3Timer = null;
 let isPaused    = false; // Mirrors fb.IsPaused; updated by on_playback_pause.
-
+ 
 // ====================== IMAGE UID TAGGING ======================
 let _imgUIDCounter = 0;
-
+ 
 /**
  * Stamps a unique integer ID onto a GDI image object in-place.
  * Called by ImageProcessor after every new bitmap is produced.
@@ -253,7 +253,7 @@ function _tagImg(img) {
 	}
 	return img;
 }
-
+ 
 // ====================== REPAINT HELPERS ======================
 // Centralise repaint calls so callers do not need to know exact disc coordinates.
 // Every path calls prepareLayers() first so on_paint receives fully-built bitmaps
@@ -290,12 +290,12 @@ const RepaintScheduler = (() => {
 		}
 	};
 })();
-
+ 
 const RepaintHelper = {
 	_allValid: false,
-
+ 
 	full() { prepareLayers(); RepaintScheduler.request(); },
-
+ 
 	// Dirty-rect repaint for the spinning disc area only — avoids full-panel redraws during spin.
 	// Uses direct window.RepaintRect (not the scheduler) to maintain the spin animation frame rate.
 	region(x, y, w, h) {
@@ -303,7 +303,7 @@ const RepaintHelper = {
 		if (w > 0 && h > 0) window.RepaintRect(x, y, w, h);
 		else RepaintScheduler.request();
 	},
-
+ 
 	disc() {
 		const pc = State.paintCache;
 		if (pc.valid && pc.discSize > 0) {
@@ -331,10 +331,10 @@ const RepaintHelper = {
 		prepareLayers();
 		window.RepaintRect(x - 10, y - 10, size + 20, size + 20);
 	},
-
+ 
 	background() { this.full(); }
 };
-
+ 
 // ====================== PROPERTY SHORTCUT ACCESSORS ======================
 // Reads the current value of every _p property through a single 'P' namespace
 // so paint/timer code stays concise without caching stale values.
@@ -349,7 +349,7 @@ const P = {
 	get maskType()              { return props.maskType.value; },
 	get userOverrideMask()      { return props.userOverrideMask.enabled; },
 	get rotationStep()          { return props.rotationStep.value; },
-
+ 
 	get showReflection()        { return props.showReflection.enabled; },
 	get opReflection()          { return props.opReflection.value; },
 	get showGlow()              { return props.showGlow.enabled; },
@@ -361,11 +361,11 @@ const P = {
 	get phosphorTheme()         { return props.phosphorTheme.value; },
 	get customPhosphorColor()   { return props.customPhosphorColor.value; },
 	get overlayAllOff()         { return props.overlayAllOff.enabled; },
-
+ 
 	get borderSize()            { return props.borderSize.value; },
 	get borderColor()           { return props.borderColor.value; },
 	get padding()               { return props.padding.value; },
-
+ 
 	get backgroundEnabled()     { return props.backgroundEnabled.enabled; },
 	get blurRadius()            { return props.blurRadius.value; },
 	get blurEnabled()           { return props.blurEnabled.enabled; },
@@ -373,7 +373,7 @@ const P = {
 	get customBackgroundColor() { return props.customBackgroundColor.value; },
 	get bgUseUIColor()          { return props.bgUseUIColor.enabled; }
 };
-
+ 
 // ====================== GENERAL UTILITIES ======================
 const Utils = {
 	// Safe wrapper around Dispose() — silently ignores objects that lack the method.
@@ -382,12 +382,12 @@ const Utils = {
 			try { obj.Dispose(); } catch (e) {}
 		}
 	},
-
+ 
 	// Determine whether a file path belongs to a real disc scan, album art, or the default disc.
 	getImageType(path) {
 		if (!path) return null;
 		if (path === CONFIG.PATHS.DEFAULT_DISC) return CONFIG.IMAGE_TYPE.DEFAULT_DISC;
-
+ 
 		const lp = path.toLowerCase();
 		for (const pattern of CONFIG.DISC_PATTERNS) {
 			// Require word-boundary separators on both sides and allow an optional
@@ -400,7 +400,7 @@ const Utils = {
 		}
 		return CONFIG.IMAGE_TYPE.ALBUM_ART;
 	},
-
+ 
 	// Heuristically detect the best mask type from a file path (vinyl vs CD vs unknown).
 	detectMaskFromPath(path) {
 		if (!path) return null;
@@ -409,7 +409,7 @@ const Utils = {
 		if (/(^|[\\/._\- ])(disc|cd)\d*([\\/._\- ]|$)/.test(lp)) return 0;
 		return null; // No strong signal — leave the current mask unchanged.
 	},
-
+ 
 	// Compute the disc render size capped by the user-chosen maxImageSize property.
 	getPanelDiscSize() {
 		const w = window.Width;
@@ -420,7 +420,7 @@ const Utils = {
 		return layout.size > props.maxImageSize.value ? props.maxImageSize.value : layout.size;
 	}
 };
-
+ 
 // Compute the square disc area and its centred position for a given panel size.
 function calcDiscLayout(w, h) {
 	const inset  = P.padding + P.borderSize;
@@ -429,18 +429,18 @@ function calcDiscLayout(w, h) {
 	const size   = Math.max(0, Math.floor(Math.min(availW, availH) * CONFIG.DISC_SCALE_FACTOR));
 	return { size, x: (w - size) / 2, y: (h - size) / 2 };
 }
-
+ 
 // ====================== COLOUR MATH HELPERS ======================
 const MathX = {
 	// Replace the alpha channel of a packed ARGB colour without touching RGB.
 	setAlpha(col, a) { return ((col & 0x00FFFFFF) | (a << 24)) >>> 0; }
 	// NOTE: deg() removed — it was defined but never called anywhere in the script.
 };
-
+ 
 // Opaque black and white constants used by all overlay / background drawing routines.
 const DS_BLACK = MathX.setAlpha(_RGB(0, 0, 0),     255);
 const DS_WHITE = MathX.setAlpha(_RGB(255, 255, 255), 255);
-
+ 
 // ====================== LRU CACHE ======================
 // Evicts the least-recently-used entry once capacity is exceeded.
 // autoDispose=true calls Dispose() on evicted GDI image objects.
@@ -474,26 +474,26 @@ const LRUCache = (maxSize, autoDispose = true) => {
 		clear()   { cache.forEach(dispose); cache.clear(); }
 	};
 };
-
+ 
 // ====================== FILE SYSTEM MANAGER ======================
 // Caches file-existence results and subfolder enumerations to avoid redundant I/O.
 const _fso = (function() {
 	try { return new ActiveXObject('Scripting.FileSystemObject'); } catch (e) { return null; }
 })();
-
+ 
 const FileManager = {
 	// file-path → { result: boolean, at: timestamp }
 	cache:          new Map(),
 	subfolderCache: new Map(), // folder-path → string[] (subfolders)
 	// folder-path → { files: string[], at: timestamp }
 	fileListCache: new Map(),
-
+ 
 	// TTLs in milliseconds.
 	// Positive hits: re-verify after 5 minutes so moved/replaced files are detected.
 	// File-list entries: expire after 2 minutes so newly downloaded art is picked up.
 	FILE_EXIST_TTL:  5 * 60 * 1000,
 	FILE_LIST_TTL:   2 * 60 * 1000,
-
+ 
 	// Cached wrapper around _isFile(). Positive results are re-verified after
 	// FILE_EXIST_TTL so moved or replaced artwork files are not served stale.
 	// Negative results are never cached — a missing file may appear at any time.
@@ -517,7 +517,7 @@ const FileManager = {
 		}
 		return exists;
 	},
-
+ 
 	// Get list of image files in folder (cached with TTL so new downloads appear).
 	getImageFiles(folder) {
 		if (!folder) return [];
@@ -550,9 +550,9 @@ const FileManager = {
 		}
 		return files;
 	},
-
+ 
 	isDirectory(path) { return path ? _isFolder(path) : false; },
-
+ 
 	// Strip articles, brackets, and punctuation for fuzzy folder-name matching.
 	sanitizeMetadata(str) {
 		if (!str) return "";
@@ -567,7 +567,7 @@ const FileManager = {
 			   .replace(/\s+/g, ' ')
 		);
 	},
-
+ 
 	// Produce variations of a metadata string (lower-case, hyphenated, no-article, etc.)
 	// for robust fuzzy file searching across different naming conventions.
 	createSearchVariations(str) {
@@ -583,11 +583,11 @@ const FileManager = {
 			_.toLower(cleaned.replace(/\s+/g, '-'))
 		].filter(Boolean));
 	},
-
+ 
 	// Enumerate immediate subfolders of a directory via FSO; results are cached.
 	getSubfolders(folder) {
 		if (this.subfolderCache.has(folder)) return this.subfolderCache.get(folder);
-
+ 
 		const subfolders = [];
 		if (this.isDirectory(folder)) {
 			try {
@@ -600,14 +600,14 @@ const FileManager = {
 				console.log('DiscSpin: getSubfolders error for "' + folder + '":', e);
 			}
 		}
-
+ 
 		this.subfolderCache.set(folder, subfolders);
 		if (this.subfolderCache.size > CONFIG.MAX_SUBFOLDER_CACHE) {
 			this.subfolderCache.delete(this.subfolderCache.keys().next().value);
 		}
 		return subfolders;
 	},
-
+ 
 	// Build a candidate path list by combining all patterns × all extensions.
 	// If useVariations=true, each metadataName also spawns its fuzzy variants.
 	buildSearchPaths(folder, patterns, metadataNames, useVariations = false) {
@@ -629,12 +629,12 @@ const FileManager = {
 		});
 		return paths;
 	},
-
+ 
 	// Return the first path in the list that actually exists on disk, or null.
 	findImageInPaths(paths) {
 		return _.find(paths, p => this.exists(p)) || null;
 	},
-
+ 
 	// Return true if the given JSON file is a Last.fm sidecar we recognise.
 	// Used purely as a folder-quality signal: if Last.fm has processed a folder,
 	// cover art is very likely also present there.
@@ -653,7 +653,7 @@ const FileManager = {
 			return false;
 		}
 	},
-
+ 
 	// Extract the first local image path referenced inside a Last.fm JSON object.
 	// Returns null when the JSON only contains remote URLs or no image field at all.
 	_extractLocalImageFromLastFm(data, folder) {
@@ -675,7 +675,7 @@ const FileManager = {
 		}
 		return null;
 	},
-
+ 
 	// Search baseFolder for a cover image, but only when a Last.fm sidecar file is
 	// present AND it contains a reference to a local image file that exists on disk.
 	// Treating mere JSON presence as a confidence signal caused unrelated thumbnails,
@@ -690,11 +690,11 @@ const FileManager = {
 				const data = JSON.parse(content);
 				if (!data || !_.isObject(data)) continue;
 				if (!this._isLastFmSidecar(jsonPath)) continue;
-
+ 
 				// Prefer an explicit local image reference from the JSON itself.
 				const localRef = this._extractLocalImageFromLastFm(data, folder);
 				if (localRef) return localRef;
-
+ 
 				// No local image reference — fall back to standard cover-pattern search
 				// scoped to this folder only. This preserves the original behaviour of
 				// preferring Last.fm-processed folders while avoiding false positives.
@@ -705,7 +705,7 @@ const FileManager = {
 		}
 		return null;
 	},
-
+ 
 	// Flush all cached file-existence and subfolder data (call after cache-clear menu action).
 	clear() {
 		this.cache.clear();
@@ -713,17 +713,17 @@ const FileManager = {
 		this.fileListCache.clear();
 	}
 };
-
+ 
 // Title-case helper used when building folder name search variations.
 function _toTitleCase(str) {
 	return str.replace(/\w\S*/g, txt => txt.charAt(0).toUpperCase() + txt.substring(1).toLowerCase());
 }
-
+ 
 // ====================== CUSTOM FOLDERS MANAGER ======================
 // Stores user-defined artwork search root folders, persisted as JSON in a window property.
 const CustomFolders = {
 	folders: [],
-
+ 
 	load() {
 		const saved  = window.GetProperty("RP.CustomFolders", "");
 		const parsed = _jsonParse(saved);
@@ -731,11 +731,11 @@ const CustomFolders = {
 			? _.filter(parsed, f => _.isString(f) && f.length > 0)
 			: [];
 	},
-
+ 
 	save() {
 		try { window.SetProperty("RP.CustomFolders", JSON.stringify(this.folders)); } catch (e) {}
 	},
-
+ 
 	// Returns false if the path is not a valid directory or is already registered.
 	add(folder) {
 		if (!folder || !FileManager.isDirectory(folder)) return false;
@@ -745,7 +745,7 @@ const CustomFolders = {
 		this.save();
 		return true;
 	},
-
+ 
 	remove(index) {
 		if (index >= 0 && index < this.folders.length) {
 			this.folders.splice(index, 1);
@@ -754,11 +754,11 @@ const CustomFolders = {
 		}
 		return false;
 	},
-
+ 
 	clear()  { this.folders = []; this.save(); },
 	getAll() { return [...this.folders]; }
 };
-
+ 
 // ====================== ASSET MANAGER ======================
 // Manages the mask and rim overlay bitmaps, including loading, caching, and resizing.
 const AssetManager = {
@@ -768,14 +768,14 @@ const AssetManager = {
 	rimCache:         LRUCache(CONFIG.MAX_RIM_CACHE),  // rim  size → resized GDI image
 	currentMaskType:  0,
 	userOverrideMask: false, // True when the user explicitly chose a mask via the menu
-
+ 
 	init() {
 		this.currentMaskType  = props.maskType.value;
 		this.userOverrideMask = props.userOverrideMask.enabled;
 		this.loadMask();
 		this.loadRim();
 	},
-
+ 
 	// Reload the mask source bitmap for the current mask type; clears the resized cache.
 	loadMask() {
 		const oldMask = this.maskSource;
@@ -797,7 +797,7 @@ const AssetManager = {
 		// DrawImage can still hold a reference beyond a single nominal frame window.
 		if (oldMask) window.SetTimeout(() => { if (!isLive()) return; Utils.safeDispose(oldMask); }, CONFIG.DISPOSE_DELAY_MS);
 	},
-
+ 
 	loadRim() {
 		const oldRim = this.rimSource;
 		this.rimSource = null;
@@ -809,7 +809,7 @@ const AssetManager = {
 		// Defer disposal for the same reason as loadMask — getRim() may be mid-call.
 		if (oldRim) window.SetTimeout(() => { if (!isLive()) return; Utils.safeDispose(oldRim); }, CONFIG.DISPOSE_DELAY_MS);
 	},
-
+ 
 	// Switch the active mask type, optionally flagging it as a user override so
 	// auto-detection won't clobber the choice on the next track change.
 	setMaskType(index, isUserOverride = true, forceReload = false) {
@@ -846,7 +846,7 @@ const AssetManager = {
 		RepaintHelper.full();
 		return true;
 	},
-
+ 
 	// Auto-select the best mask based on the image path — only runs when the user has
 	// not manually overridden the mask type.
 	autoSelectMask(imagePath) {
@@ -857,16 +857,16 @@ const AssetManager = {
 		}
 		return false;
 	},
-
+ 
 	hasMask() { return this.maskSource !== null; },
-
+ 
 	// The centre-hole rim is only composited for album-art-on-CD-mask combinations.
 	shouldShowRim(imageType) {
 		return imageType === CONFIG.IMAGE_TYPE.ALBUM_ART &&
 		       this.currentMaskType === 0 &&
 		       this.hasMask();
 	},
-
+ 
 	// Return (and cache) the mask bitmap resized to targetSize × targetSize.
 	getMask(size) {
 		if (!this.maskSource) return null;
@@ -879,7 +879,7 @@ const AssetManager = {
 			return resized;
 		} catch (e) { return null; }
 	},
-
+ 
 	// Return (and cache) the rim overlay bitmap resized to targetSize × targetSize.
 	getRim(size) {
 		if (!this.rimSource) return null;
@@ -892,7 +892,7 @@ const AssetManager = {
 			return resized;
 		} catch (e) { return null; }
 	},
-
+ 
 	cleanup() {
 		this.maskCache.clear();
 		this.rimCache.clear();
@@ -900,7 +900,7 @@ const AssetManager = {
 		Utils.safeDispose(this.rimSource);
 	}
 };
-
+ 
 // ====================== IMAGE PROCESSOR ======================
 // All image scaling, cropping, and mask application goes through here.
 // Every bitmap produced by these methods is tagged with a unique _uid by _tagImg().
@@ -912,7 +912,7 @@ const ImageProcessor = {
 		if (targetSize <= 0) { Utils.safeDispose(raw); return null; } // guard: invalid size
 		const w = raw.Width;
 		const h = raw.Height;
-
+ 
 		if (w === targetSize && h === targetSize) {
 			try {
 				const cloned = raw.Clone(0, 0, w, h);
@@ -920,7 +920,7 @@ const ImageProcessor = {
 				return _tagImg(cloned);
 			} catch (e) { return _tagImg(raw); }
 		}
-
+ 
 		let newImg = null;
 		try {
 			newImg = gdi.CreateImage(targetSize, targetSize);
@@ -954,7 +954,7 @@ const ImageProcessor = {
 			return null;
 		}
 	},
-
+ 
 	// Scale raw proportionally so its longest dimension does not exceed maxSize.
 	// Used for static (non-disc) cover art displayed without a circular mask.
 	scaleProportional(raw, maxSize, interpolationMode) {
@@ -963,7 +963,7 @@ const ImageProcessor = {
 		const w      = raw.Width;
 		const h      = raw.Height;
 		const maxDim = Math.max(w, h);
-
+ 
 		if (maxDim <= maxSize) {
 			try {
 				const cloned = raw.Clone(0, 0, w, h);
@@ -971,7 +971,7 @@ const ImageProcessor = {
 				return _tagImg(cloned);
 			} catch (e) { return _tagImg(raw); }
 		}
-
+ 
 		const scale  = maxSize / maxDim;
 		const nw     = Math.floor(w * scale);
 		const nh     = Math.floor(h * scale);
@@ -998,7 +998,7 @@ const ImageProcessor = {
 			return null;
 		}
 	},
-
+ 
 	// Punch the circular mask into the image using GDI+ ApplyMask().
 	// The original image is disposed; a masked clone is returned.
 	applyMask(image, size) {
@@ -1016,7 +1016,7 @@ const ImageProcessor = {
 			return _tagImg(image);
 		}
 	},
-
+ 
 	// Full pipeline for disc images: scale to square then apply the active mask.
 	processForDisc(raw, targetSize, imageType, interpolationMode) {
 		if (!raw) return null;
@@ -1031,7 +1031,7 @@ const ImageProcessor = {
 		return processed; // _uid was tagged inside scaleToSquare / applyMask
 	}
 };
-
+ 
 // ====================== STATE MANAGER ======================
 // Central mutable state object; all image transitions flow through setImage().
 const State = {
@@ -1048,7 +1048,7 @@ const State = {
 	spinTimer:     null,
 	loadTimer:     null,
 	phaseBTimer:   null,  // Handle for the deferred image-I/O tick (Phase B of loadForMetadb)
-
+ 
 	// Paint-layout cache: recalculated only when the panel size or image changes.
 	paintCache: {
 		bgColor:        _getUIColour(),
@@ -1072,14 +1072,14 @@ const State = {
 		borderSize:     0,
 		valid:          false
 	},
-
+ 
 	// Replace the displayed image, rebuild composite/rotation caches, and trigger a repaint.
 	// DiscComposite is always rebuilt for the new image — previously, two different songs with identical
 	// disc size and mask type shared a cache key and the second song's art was never shown.
 	setImage(newImg, discState, imgType, originalImg) {
 		const oldImg   = this.img;
 		const oldBgImg = this.bgImg;
-
+ 
 		this.img         = newImg;
 		this.bgImg       = originalImg;
 		// Stamp a background-image ID so the blur cache can detect source changes.
@@ -1091,7 +1091,7 @@ const State = {
 		this.paintCache.valid   = false;
 		invalidateBgCaches();
 		OverlayCache.invalidate();
-
+ 
 		// Dispose old bitmaps only when they are not still needed by other references.
 		// Deferred one tick: a spin-timer paint may still be mid-DrawImage against these
 		// bitmaps when setImage() runs synchronously on a track change.
@@ -1116,7 +1116,7 @@ const State = {
 				}
 			}, CONFIG.DISPOSE_DELAY_MS);
 		}
-
+ 
 		if (discState && newImg) {
 			if (!isStaticMode()) {
 				const size = Utils.getPanelDiscSize();
@@ -1134,10 +1134,10 @@ const State = {
 		} else {
 			DiscComposite.dispose(); // Clears RotationCache via its own dispose chain.
 		}
-
+ 
 		RepaintHelper.full();
 	},
-
+ 
 	// Recompute layout coordinates only when the panel size or image dimensions change.
 	updatePaintCache() {
 		const w      = window.Width;
@@ -1145,7 +1145,7 @@ const State = {
 		const pc     = this.paintCache;
 		const pad    = P.padding;
 		const border = P.borderSize;
-
+ 
 		if (pc.valid &&
 		    pc.windowWidth   === w &&
 		    pc.windowHeight  === h &&
@@ -1154,21 +1154,21 @@ const State = {
 		    pc.keepAspectRatio === P.keepAspectRatio &&
 		    pc.padding       === pad &&
 		    pc.borderSize    === border) return;
-
+ 
 		pc.windowWidth     = w;
 		pc.windowHeight    = h;
 		pc.keepAspectRatio = P.keepAspectRatio;
 		pc.padding         = pad;
 		pc.borderSize      = border;
-
+ 
 		if (this.img) {
 			pc.imgWidth  = this.img.Width;
 			pc.imgHeight = this.img.Height;
-
+ 
 			const totalInset = pad + border;
 			const availW     = w - totalInset * 2;
 			const availH     = h - totalInset * 2;
-
+ 
 			if (this.isDiscImage) {
 				// Disc is always square and centred.
 				const layout = calcDiscLayout(w, h);
@@ -1202,7 +1202,7 @@ const State = {
 			pc.valid = true;
 		}
 	},
-
+ 
 	// Release all held bitmaps and cancel pending timers.
 	cleanup() {
 		this.stopTimer();
@@ -1224,14 +1224,14 @@ const State = {
 		Utils.safeDispose(img);
 		if (bgImg && bgImg !== img) Utils.safeDispose(bgImg);
 	},
-
+ 
 	stopTimer() {
 		if (this.spinTimer) {
 			window.ClearInterval(this.spinTimer);
 			this.spinTimer = null;
 		}
 	},
-
+ 
 	// Start or stop the spin interval timer depending on current playback and settings.
 	updateTimer() {
 		const shouldRun = this.img &&
@@ -1240,7 +1240,7 @@ const State = {
 		                  fb.IsPlaying &&
 		                  !isPaused &&
 		                  !P.useAlbumArtOnly;
-
+ 
 		if (shouldRun && !this.spinTimer) {
 			this.spinTimer = window.SetInterval(() => {
 				// Read spinSpeed and rotationStep live so any setting change takes
@@ -1265,7 +1265,7 @@ const State = {
 		}
 	}
 };
-
+ 
 // ====================== STATIC MODE HELPER ======================
 // Returns true when spinning/disc resources are completely unnecessary.
 // Used as a single gate to skip RotationCache builds, DiscComposite work,
@@ -1273,7 +1273,7 @@ const State = {
 function isStaticMode() {
 	return P.useAlbumArtOnly || !P.spinningEnabled;
 }
-
+ 
 // Release all spin-only resources immediately when switching to static mode.
 // Safe to call at any time — all operations are no-ops when resources are absent.
 function releaseSpinResources() {
@@ -1298,31 +1298,9 @@ const ImageLoader = {
 	tf_album:      fb.TitleFormat("%album%"),
 	tf_title:      fb.TitleFormat("%title%"),
 	tf_discnumber: fb.TitleFormat("%discnumber%"),
-
+ 
 	clearCache() { this._pathCache.clear(); },
-
-	// Resolve a folder path (as broadcast via the 'ArtFolder' notification from the
-	// Library/Playlist panels) to a metadb handle so its art/colours can be loaded.
-	// Searches the media library directly — DiscSpin has no playlist-row cache of
-	// its own, so this is folder-based rather than row-based like the other panels.
-	findHandleForFolder(folderPath) {
-		if (!folderPath || !fb.IsLibraryEnabled()) return null;
-		const libItems = fb.GetLibraryItems();
-		if (!libItems) return null;
-		try {
-			for (let i = 0, n = libItems.Count; i < n; i++) {
-				const h = libItems.Item ? libItems.Item(i) : libItems[i];
-				if (!h) continue;
-				const fp = this.tf_path.EvalWithMetadb(h);
-				if (fp === folderPath) return h;
-			}
-		} catch (e) {
-		} finally {
-			try { libItems.Dispose(); } catch (e) {}
-		}
-		return null;
-	},
-
+ 
 	// Extract all useful metadata strings from a metadb handle.
 	getMetadataNames(metadb) {
 		const artist = this.tf_artist.EvalWithMetadb(metadb);
@@ -1338,7 +1316,7 @@ const ImageLoader = {
 			artistAlbum: (artist && album) ? `${artist} - ${album}` : ""
 		};
 	},
-
+ 
 	// Search a single folder for an image matching any of the given patterns or
 	// derived metadata name variants.
 	searchInFolder(folder, patterns, metadata, useVariations = false) {
@@ -1356,7 +1334,7 @@ const ImageLoader = {
 		const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames, useVariations);
 		return FileManager.findImageInPaths(paths);
 	},
-
+ 
 	// Search a single folder without metadata context — pattern-only filename matching.
 	searchInFolderAnyFile(folder, patterns) {
 		// Use cached file list for performance
@@ -1376,7 +1354,7 @@ const ImageLoader = {
 		}
 		return null;
 	},
-
+ 
 	// Recursively search a folder tree up to maxLevels deep.
 	_searchFolderTree(folder, patterns, maxLevels, isDiscSearch, metadata, visited = new Set()) {
 		if (maxLevels <= 0 || !folder) return null;
@@ -1391,19 +1369,19 @@ const ImageLoader = {
 		}
 		return null;
 	},
-
+ 
 	// Walk every user-configured custom root folder, matching by filename pattern then
 	// by subfolder name (two levels deep), returning the first hit found.
 	searchCustomFolders(metadata, patterns, isDiscSearch) {
 		const artistAlbumDash  = metadata.artistAlbum || '';
 		const artistAlbumSpace = (metadata.artist && metadata.album)
 			? metadata.artist + ' ' + metadata.album : '';
-
+ 
 		const simpleNames = _.compact([
 			metadata.title, metadata.artist, metadata.album,
 			artistAlbumDash, artistAlbumSpace
 		]);
-
+ 
 		// Build every name variation we will compare against subfolder names.
 		const nameVariations = [];
 		_.forEach(simpleNames, name => {
@@ -1419,11 +1397,11 @@ const ImageLoader = {
 		});
 		const folderMatchNames = _.uniq(nameVariations);
 		const customFolders    = CustomFolders.getAll();
-
+ 
 		// Shared visited set across all passes — prevents junction/symlink loops
 		// where a subfolder points back to an ancestor already in the traversal.
 		const visited = new Set();
-
+ 
 		// Pass 1: search directly inside each custom root folder by filename.
 		for (const customFolder of customFolders) {
 			if (!FileManager.isDirectory(customFolder)) continue;
@@ -1433,7 +1411,7 @@ const ImageLoader = {
 				return isDiscSearch ? this._loadDiscResult(nameMatched) : nameMatched;
 			}
 		}
-
+ 
 		// Pass 2: walk up to three levels of subfolders, matching folder names to metadata.
 		for (const customFolder of customFolders) {
 			if (!FileManager.isDirectory(customFolder)) continue;
@@ -1452,7 +1430,7 @@ const ImageLoader = {
 					const img = this.searchInFolder(sub1, patterns, metadata, true)
 					         || this.searchInFolderAnyFile(sub1, patterns);
 					if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
-
+ 
 					const sub1Folders = FileManager.getSubfolders(sub1);
 					for (const sub2 of sub1Folders) {
 						if (visited.has(sub2)) continue;
@@ -1460,7 +1438,7 @@ const ImageLoader = {
 						const sImg = this.searchInFolder(sub2, patterns, metadata, true)
 						          || this.searchInFolderAnyFile(sub2, patterns);
 						if (sImg) return isDiscSearch ? this._loadDiscResult(sImg) : sImg;
-
+ 
 						// Level 3 search inside level 2 matched folder
 						const sub2Folders = FileManager.getSubfolders(sub2);
 						for (const sub3 of sub2Folders) {
@@ -1489,7 +1467,7 @@ const ImageLoader = {
 						const img = this.searchInFolder(sub2, patterns, metadata, true)
 						         || this.searchInFolderAnyFile(sub2, patterns);
 						if (img) return isDiscSearch ? this._loadDiscResult(img) : img;
-
+ 
 						const sub2Folders = FileManager.getSubfolders(sub2);
 						for (const sub3 of sub2Folders) {
 							if (visited.has(sub3)) continue;
@@ -1504,7 +1482,7 @@ const ImageLoader = {
 		}
 		return null;
 	},
-
+ 
 	// Load a disc-result object { img, path, type, original } from a known file path.
 	// Returns null on any failure so callers can fall through to the next source.
 	_loadDiscResult(imagePath) {
@@ -1515,11 +1493,11 @@ const ImageLoader = {
 			return null;
 		}
 		if (!raw) return null;
-
+ 
 		let original = null;
 		try { original = raw.Clone(0, 0, raw.Width, raw.Height); _tagImg(original); }
 		catch (e) { Utils.safeDispose(raw); return null; }
-
+ 
 		const targetSize = Utils.getPanelDiscSize();
 		const processed  = ImageProcessor.processForDisc(
 			raw, targetSize, CONFIG.IMAGE_TYPE.REAL_DISC, P.interpolationMode
@@ -1532,20 +1510,20 @@ const ImageLoader = {
 		Utils.safeDispose(original);
 		return null;
 	},
-
+ 
 	// Search a folder for the best image matching either disc patterns or cover patterns.
 	searchFolderForImage(folder, patterns, isDiscSearch, metadata) {
 		// Prefer any Last.fm JSON sidecar art over filename matching.
 		const jsonArt = FileManager.searchLastFmJson(folder);
 		if (jsonArt) return isDiscSearch ? this._loadDiscResult(jsonArt) : jsonArt;
-
+ 
 		const meta  = metadata || { artist: '', album: '', title: '', folder: '', artistTitle: '', artistAlbum: '' };
 		const found = this.searchInFolder(folder, patterns, meta, true)
 		           || this.searchInFolderAnyFile(folder, patterns);
 		if (!found) return null;
 		return isDiscSearch ? this._loadDiscResult(found) : found;
 	},
-
+ 
 	// Search for a disc-scan image with progressive fallback:
 	// 1. Track folder (by metadata name), 2. Track folder (any disc filename),
 	// 3. Subfolder tree, 4. User-defined custom folders.
@@ -1577,11 +1555,11 @@ const ImageLoader = {
 				}
 			}
 		}
-
+ 
 		const metadata = metadb
 			? this.getMetadataNames(metadb)
 			: { artist: '', album: '', title: '', folder: '', artistTitle: '', artistAlbum: '' };
-
+ 
 		// --- Step 1: Match by metadata name in the track's own folder ---
 		const trackMatch = this.searchInFolder(baseFolder, CONFIG.DISC_PATTERNS, metadata);
 		if (trackMatch) {
@@ -1592,7 +1570,7 @@ const ImageLoader = {
 				return result;
 			}
 		}
-
+ 
 		// --- Step 2: Any disc-pattern filename in the track's own folder ---
 		const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.DISC_PATTERNS);
 		if (trackAnyMatch) {
@@ -1603,25 +1581,25 @@ const ImageLoader = {
 				return result;
 			}
 		}
-
+ 
 		// --- Step 3: Recurse two subfolder levels ---
 		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.DISC_PATTERNS, CONFIG.MAX_SUBFOLDER_DEPTH, true, metadata);
 		if (trackSubMatch) {
 			this._pathCache.set(cacheKey, { path: trackSubMatch.path, type: trackSubMatch.type, at: Date.now() });
 			return trackSubMatch;
 		}
-
+ 
 		// --- Step 4: User-configured custom artwork folders ---
 		const customResult = this.searchCustomFolders(metadata, CONFIG.DISC_PATTERNS, true);
 		if (customResult) {
 			this._pathCache.set(cacheKey, { path: customResult.path, type: customResult.type, at: Date.now() });
 			return customResult;
 		}
-
+ 
 		this._pathCache.set(cacheKey, { path: null, at: Date.now() }); // Cache the miss to avoid repeated searches
 		return null;
 	},
-
+ 
 	// Search for a cover-art image path (string, not a loaded bitmap) with progressive fallback.
 	searchForCover(metadb, baseFolder) {
 		const cacheKey = 'cover:' + baseFolder;
@@ -1649,36 +1627,36 @@ const ImageLoader = {
 				}
 			}
 		}
-
+ 
 		const metadata = metadb
 			? this.getMetadataNames(metadb)
 			: { artist: '', album: '', title: '', folder: '', artistTitle: '', artistAlbum: '' };
-
+ 
 		const jsonArt = FileManager.searchLastFmJson(baseFolder);
 		if (jsonArt)        { this._pathCache.set(cacheKey, { path: jsonArt,        at: Date.now() }); return jsonArt; }
-
+ 
 		const trackMatch = this.searchInFolder(baseFolder, CONFIG.COVER_PATTERNS, metadata);
 		if (trackMatch)     { this._pathCache.set(cacheKey, { path: trackMatch,     at: Date.now() }); return trackMatch; }
-
+ 
 		const trackAnyMatch = this.searchInFolderAnyFile(baseFolder, CONFIG.COVER_PATTERNS);
 		if (trackAnyMatch)  { this._pathCache.set(cacheKey, { path: trackAnyMatch,  at: Date.now() }); return trackAnyMatch; }
-
+ 
 		const trackSubMatch = this._searchFolderTree(baseFolder, CONFIG.COVER_PATTERNS, CONFIG.MAX_SUBFOLDER_DEPTH, false, metadata);
 		if (trackSubMatch)  { this._pathCache.set(cacheKey, { path: trackSubMatch,  at: Date.now() }); return trackSubMatch; }
-
+ 
 		const customResult = this.searchCustomFolders(metadata, CONFIG.COVER_PATTERNS, false);
 		if (customResult)   { this._pathCache.set(cacheKey, { path: customResult,   at: Date.now() }); return customResult; }
-
+ 
 		this._pathCache.set(cacheKey, { path: null, at: Date.now() });
 		return null;
 	},
-
+ 
 	// Main entry point: load the best image for a metadb handle.
 	// If immediate=false the work is debounced to avoid thrashing during rapid track skipping.
 	loadForMetadb(metadb, immediate = false) {
 		if (!metadb) return;
 		const folderPath = this.tf_path.EvalWithMetadb(metadb);
-
+ 
 		// Skip reload if the track is in the same folder and an image is already shown.
 		if (!immediate && State.currentMetadb && State.img) {
 			if (this.tf_path.EvalWithMetadb(State.currentMetadb) === folderPath) {
@@ -1686,28 +1664,28 @@ const ImageLoader = {
 				return;
 			}
 		}
-
+ 
 		if (State.loadTimer) {
 			window.ClearTimeout(State.loadTimer);
 			State.loadTimer = null;
 		}
-
+ 
 		const doLoad = () => {
 			State.currentMetadb = metadb;
 			const myToken = ++State.loadToken;
-
+ 
 			// ── Phase A: path searches only (fast — uses FileManager cache, no gdi.Image).
 			// Running this synchronously is acceptable because FileManager.exists() is cached
 			// after the first lookup and returns near-instantly on subsequent calls.
 			const coverPath = this.searchForCover(metadb, folderPath);
-
+ 
 			// ── Phase B: image I/O deferred to next event-loop tick.
 			// Giving the JS engine a tick to process queued paint and timer callbacks
 			// means the disc keeps rotating visibly while we load/process the new image.
 			State.phaseBTimer = window.SetTimeout(() => {
 				State.phaseBTimer = null;
 				if (State.loadToken !== myToken) return; // Superseded by a newer load
-
+ 
 				// Pre-load cover as background blur source.
 				let bgOriginal = null;
 				let coverRaw   = null;
@@ -1721,7 +1699,7 @@ const ImageLoader = {
 						}
 					} catch (e) {}
 				}
-
+ 
 				// Re-check token after the synchronous gdi.Image calls above — a very fast
 				// track skip could have incremented loadToken between the outer check and here.
 				if (State.loadToken !== myToken) {
@@ -1729,7 +1707,7 @@ const ImageLoader = {
 					Utils.safeDispose(bgOriginal);
 					return;
 				}
-
+ 
 				// --- Priority 1: Real disc scan ---
 				if (!P.useAlbumArtOnly) {
 					const result = this.searchForDisc(metadb, folderPath);
@@ -1748,7 +1726,7 @@ const ImageLoader = {
 						return;
 					}
 				}
-
+ 
 				// --- Priority 2: Cover art found on disk ---
 				if (coverRaw) {
 					try {
@@ -1784,17 +1762,17 @@ const ImageLoader = {
 						Utils.safeDispose(bgOriginal);
 					}
 				}
-
+ 
 				// --- Priority 3: Async album art via foobar's built-in provider ---
 				State.pendingArtToken = myToken;
 				utils.GetAlbumArtAsync(window.ID, metadb, 0);
 			}, 0);
 		};
-
+ 
 		if (immediate) doLoad();
 		else State.loadTimer = window.SetTimeout(doLoad, CONFIG.LOAD_DEBOUNCE_MS);
 	},
-
+ 
 	// Called by on_get_album_art_done; validates the token before applying the image
 	// so that results from cancelled loads are silently discarded.
 	handleAlbumArt(metadb, image, image_path) {
@@ -1806,7 +1784,7 @@ const ImageLoader = {
 			Utils.safeDispose(image);
 			return;
 		}
-
+ 
 		if (!metadb) {
 			// Null metadb — treat as load failure (token already verified above).
 			// NOTE: State.currentMetadb is guaranteed non-null here; the `!State.currentMetadb`
@@ -1820,18 +1798,18 @@ const ImageLoader = {
 			State.updateTimer();
 			return;
 		}
-
+ 
 		const metadbMatches = metadb.Compare(State.currentMetadb);
-
+ 
 		if (image) {
 			let original = null;
 			try {
 				if (!metadbMatches) { Utils.safeDispose(image); return; }
-
+ 
 				original = image.Clone(0, 0, image.Width, image.Height);
 				_tagImg(original);
 				const targetSize = Utils.getPanelDiscSize();
-
+ 
 				if (P.useAlbumArtOnly) {
 					const scaled = ImageProcessor.scaleProportional(
 						image, CONFIG.MAX_STATIC_SIZE, P.interpolationMode
@@ -1867,14 +1845,14 @@ const ImageLoader = {
 				Utils.safeDispose(original);
 			}
 		}
-
+ 
 		// No image returned and the token is still current — use the default disc placeholder.
 		if (metadbMatches) {
 			this.loadDefaultDisc();
 			State.updateTimer();
 		}
 	},
-
+ 
 	// Load and display the static default disc placeholder image from the skins folder.
 	loadDefaultDisc() {
 		if (!FileManager.exists(CONFIG.PATHS.DEFAULT_DISC)) return;
@@ -1894,10 +1872,10 @@ const ImageLoader = {
 			// scaleToSquare already disposes raw in its catch; no explicit dispose needed here.
 		} catch (e) {}
 	},
-
+ 
 	cleanup() { this._pathCache.clear(); }
 };
-
+ 
 // ====================== ROTATION FRAME CACHE ======================
 // Pre-renders every rotation step into individual bitmaps so each paint call
 // only needs a DrawImage copy rather than an on-the-fly rotation.
@@ -1911,12 +1889,12 @@ const RotationCache = {
 	_pendingAngle:  0,    // Next angle to render in the current build
 	_pendingKey:    '',   // Key for the in-progress build
 	BATCH_SIZE:     8,    // Frames per tick (~5–10 ms per batch at 500px)
-
+ 
 	// Store the step used when frames were built so getFrame() uses the same granularity.
 	_builtStep: 2,
-
+ 
 	get step() { return P.rotationStep; },
-
+ 
 	// Cancel any in-flight build and dispose its resources.
 	_cancelBuild() {
 		if (this._buildTimer !== null) { window.ClearTimeout(this._buildTimer); this._buildTimer = null; }
@@ -1925,7 +1903,7 @@ const RotationCache = {
 		this._pendingAngle = 0;
 		this._pendingKey   = '';
 	},
-
+ 
 	// Wipe live frames and cancel any pending build.
 	clear() {
 		this._cancelBuild();
@@ -1934,7 +1912,7 @@ const RotationCache = {
 		this._sourceKey = '';
 		this._builtStep = 2;
 	},
-
+ 
 	// Schedule an incremental, non-blocking frame-cache build.
 	//
 	// Old frames in this.frames remain live and are served by getFrame() throughout
@@ -1946,7 +1924,7 @@ const RotationCache = {
 		// Never build rotation frames in static mode — they will never be read.
 		// This is the primary memory guard: frame bitmaps are the largest spin resource.
 		if (isStaticMode()) return;
-
+ 
 		// Re-resolve source: composite takes priority over the raw disc image.
 		const composite = (DiscComposite.valid && DiscComposite.img) ? DiscComposite.img : img;
 		const step      = this.step;
@@ -1954,18 +1932,18 @@ const RotationCache = {
 		const srcH      = Math.min(composite.Height, this.MAX_FRAME_SIZE);
 		const key       = (composite._uid !== undefined ? composite._uid : 'img') +
 		                  '|' + srcW + '|' + srcH + '|' + step;
-
+ 
 		// Skip if live frames already match this source.
 		if (this._sourceKey === key && this.frames.length > 0) return;
 		// Skip if a build for the same source is already in progress.
 		if (this._pendingKey === key && this._pendingFrames !== null) return;
-
+ 
 		this._cancelBuild();
 		const totalFrames   = Math.round(360 / step);
 		this._pendingFrames = new Array(totalFrames).fill(null);
 		this._pendingAngle  = 0;
 		this._pendingKey    = key;
-
+ 
 		// Downscale once up-front so each batch uses the smaller bitmap.
 		let src = composite;
 		if (srcW < composite.Width || srcH < composite.Height) {
@@ -1984,7 +1962,7 @@ const RotationCache = {
 				src = down;
 			} catch (e) { /* fall back to full-size */ }
 		}
-
+ 
 		const buildBatch = () => {
 			this._buildTimer = null;
 			if (!this._pendingFrames || this._pendingKey !== key) {
@@ -1999,7 +1977,7 @@ const RotationCache = {
 				this._cancelBuild();
 				return;
 			}
-
+ 
 			// Render up to BATCH_SIZE frames per tick.
 			const end = Math.min(this._pendingAngle + this.BATCH_SIZE * step, 360);
 			for (let a = this._pendingAngle; a < end; a += step) {
@@ -2020,7 +1998,7 @@ const RotationCache = {
 				}
 			}
 			this._pendingAngle = end;
-
+ 
 			if (this._pendingAngle < 360) {
 				// More batches remain — yield and continue.
 				this._buildTimer = window.SetTimeout(buildBatch, 0);
@@ -2075,11 +2053,11 @@ const RotationCache = {
 				if (isLive()) RepaintHelper.full();
 			}
 		};
-
+ 
 		// First batch fires next tick — old frames still serve any paint that fires first.
 		this._buildTimer = window.SetTimeout(buildBatch, 0);
 	},
-
+ 
 	// Return the pre-rendered frame closest to the given angle, or null if the slot
 	// failed during build (caller falls back to live DrawImage rotation).
 	// Uses _builtStep (the step captured at build time) rather than the live getter
@@ -2093,7 +2071,7 @@ const RotationCache = {
 		return frame || null; // Explicit null for empty slots (failed frames)
 	}
 };
-
+ 
 // ====================== DISC COMPOSITE CACHE ======================
 // Composites the disc image with the centre-hole rim overlay into a single bitmap.
 // Rebuilt only when the disc size, image content, or mask type changes.
@@ -2101,7 +2079,7 @@ const DiscComposite = {
 	img:       null,
 	valid:     false,
 	_cacheKey: '',
-
+ 
 	// Dispose the composite and clear the rotation frame cache that depends on it.
 	dispose() {
 		if (this.img) {
@@ -2112,7 +2090,7 @@ const DiscComposite = {
 		RepaintHelper._allValid = false;
 		RotationCache.clear(); // Frame cache is always derived from the composite
 	},
-
+ 
 	// Build the composite from discImg + rim overlay.
 	build(discImg, size, imageType) {
 		const uid = (discImg && discImg._uid !== undefined) ? discImg._uid : (discImg ? 'img' : 'null');
@@ -2121,9 +2099,9 @@ const DiscComposite = {
 		// Key changed — update it before dispose() so callers inspecting _cacheKey see the new one.
 		this._cacheKey = key;
 		this.dispose(); // Clear stale composite and rotation frames
-
+ 
 		if (!discImg || size <= 0) { this.valid = true; return; }
-
+ 
 		// No rim needed for vinyl or when using raw disc scans — just clone the source.
 		if (!AssetManager.shouldShowRim(imageType)) {
 			try {
@@ -2135,7 +2113,7 @@ const DiscComposite = {
 			}
 			return;
 		}
-
+ 
 		// Composite: draw the disc art then overlay the centre-hole rim.
 		let g = null, released = false;
 		try {
@@ -2159,28 +2137,28 @@ const DiscComposite = {
 		}
 	}
 };
-
+ 
 // ====================== BACKGROUND BLUR CACHE ======================
 // Renders (and blurs) the background bitmap once per unique source/size/settings combination.
 const BackgroundCache = {
 	_lru:       null, // initialised below after this declaration
 	_activeKey: '',
 	img:        null,
-
+ 
 	// The key encodes: source image identity, blur settings, and panel size.
 	_makeKey(w, h) {
 		const bgId = (State.bgImg && State.bgImg._bgId !== undefined)
 			? State.bgImg._bgId : 'none';
 		return `${bgId}|${P.blurRadius}|${P.blurEnabled ? 1 : 0}|${w}|${h}`;
 	},
-
+ 
 	invalidate() {
 		// Clear the active pointer so callers never draw a stale or evicted bitmap.
 		this._activeKey = '';
 		this.img = null;
 		RepaintHelper._allValid = false;
 	},
-
+ 
 	// Ensure a blurred background bitmap is ready for the given panel dimensions.
 	ensure(w, h) {
 		if (w <= 0 || h <= 0) return;
@@ -2190,13 +2168,13 @@ const BackgroundCache = {
 			if (this._activeKey !== 'none') { this._activeKey = 'none'; this.img = null; }
 			return;
 		}
-
+ 
 		const key = this._makeKey(w, h);
 		if (this._activeKey === key) return; // Already built and current
-
+ 
 		const cached = this._lru.get(key);
 		if (cached) { this._activeKey = key; this.img = cached; return; }
-
+ 
 		// Draw the source at panel size then apply a stack-blur pass.
 		let g = null, newImg = null, released = false;
 		try {
@@ -2220,10 +2198,10 @@ const BackgroundCache = {
 			if (newImg) Utils.safeDispose(newImg);
 		}
 	},
-
+ 
 	dispose() { this._lru.clear(); this.img = null; this._activeKey = ''; }
 };
-
+ 
 // Initialise _lru separately so the eviction callback can reference BackgroundCache.
 // The callback clears BackgroundCache.img when the currently-active bitmap is evicted,
 // preventing a use-after-free when LRU capacity is exceeded.
@@ -2287,12 +2265,12 @@ const OverlayInvalidator = (() => {
 		}
 	};
 })();
-
+ 
 // ====================== CACHE INVALIDATION HELPERS ======================
 // Three composable helpers covering the repeated invalidation patterns throughout
 // the script. Using named functions prevents individual calls from drifting out
 // of sync when a new cache layer is added in future.
-
+ 
 // Full reset: invalidates every visual cache layer.
 // Use when the disc image, mask, or panel size changes.
 function invalidateAllCaches() {
@@ -2302,31 +2280,31 @@ function invalidateAllCaches() {
 	OverlayInvalidator.request();
 	DiscComposite.dispose(); // also clears RotationCache internally
 }
-
+ 
 // Background-only reset: background art changed but overlay geometry is unchanged.
 // Use when blur radius, darken level, or background colour changes.
 function invalidateBgCaches() {
 	BackgroundCache.invalidate();
 	StaticBgLayer.invalidate();
 }
-
+ 
 // Top-layer reset: border or overlay effect changed but background is unchanged.
 // Use when overlay toggles, opacity, or border settings change.
 function invalidateTopCaches() {
 	StaticTopLayer.invalidate();
 	OverlayInvalidator.request();
 }
-
+ 
 // ====================== OVERLAY DRAW PRIMITIVES ======================
 // Each function writes into an existing graphics context; they are called by OverlayCache.build.
-
+ 
 // Draw horizontal scanlines at CONFIG.OVERLAY.SCANLINE_SPACING intervals.
 function drawScanlines(g, w, h) {
 	const s   = CONFIG.OVERLAY.SCANLINE_SPACING;
 	const col = MathX.setAlpha(DS_BLACK, P.opScanlines);
 	for (let y = 0; y < h; y += s) g.FillSolidRect(0, y, w, 1, col);
 }
-
+ 
 // Draw a radial glow centred on the disc using concentric filled ellipses.
 function drawGlow(g, w, h, pc) {
 	const discSz = State.isDiscImage ? pc.discSize : Math.max(pc.staticW, pc.staticH);
@@ -2349,7 +2327,7 @@ function drawGlow(g, w, h, pc) {
 		g.FillEllipse(cx - r, cy - r, r * 2, r * 2, MathX.setAlpha(DS_WHITE, alpha));
 	}
 }
-
+ 
 // Draw a smooth-step white gradient at the top of the panel to simulate a glass reflection.
 function drawReflection(g, w, h) {
 	const reflH = Math.floor(h * CONFIG.OVERLAY.REFLECTION_HEIGHT_RATIO);
@@ -2369,7 +2347,7 @@ function drawReflection(g, w, h) {
 	if (lastAlpha > 0)
 		g.FillSolidRect(0, bandStart, w, reflH - bandStart, MathX.setAlpha(DS_WHITE, lastAlpha));
 }
-
+ 
 // Draw alternating horizontal phosphor lines using the currently active theme colour.
 function drawPhosphor(g, w, h) {
 	const themeColor = PhosphorManager.getColor();
@@ -2384,21 +2362,21 @@ function drawPhosphor(g, w, h) {
 	for (let y = 1; y < h; y += CONFIG.OVERLAY.SCANLINE_SPACING)
 		g.FillSolidRect(0, y, w, 1, col);
 }
-
+ 
 // ====================== OVERLAY COMPOSITE CACHE ======================
 // Pre-builds all enabled overlay effects into a single bitmap.
 // Rebuilt only when an effect setting changes or the panel is resized.
 const OverlayCache = {
 	img:   null,
 	valid: false,
-
+ 
 	invalidate() { this.valid = false; RepaintHelper._allValid = false; },
-
+ 
 	dispose() {
 		if (this.img) { try { this.img.Dispose(); } catch (e) {} this.img = null; }
 		this.valid = false;
 	},
-
+ 
 	build(w, h, pc) {
 		this.dispose();
 		// Skip building the bitmap entirely if all effects are disabled.
@@ -2410,7 +2388,7 @@ const OverlayCache = {
 		);
 		this.valid = true;
 		if (!needsAny || w <= 0 || h <= 0) return;
-
+ 
 		let g = null, newImg = null, released = false;
 		try {
 			newImg = gdi.CreateImage(w, h);
@@ -2431,25 +2409,25 @@ const OverlayCache = {
 		}
 	}
 };
-
+ 
 // ====================== STATIC COMPOSITE LAYERS ======================
 // Both layers are built once per panel state and invalidated only when their inputs change,
 // so each paint call copies a pre-built bitmap rather than re-drawing from scratch.
-
+ 
 // Background layer: solid fill + optional blurred art + optional darken veil.
 const StaticBgLayer = {
 	img: null, valid: false, _w: 0, _h: 0,
-
+ 
 	invalidate() { this.valid = false; RepaintHelper._allValid = false; },
 	dispose()    { Utils.safeDispose(this.img); this.img = null; this.valid = false; RepaintHelper._allValid = false; },
-
+ 
 	build(w, h) {
 		this.dispose();
 		let g = null, newImg = null, released = false;
 		try {
 			newImg = gdi.CreateImage(w, h);
 			g = newImg.GetGraphics();
-
+ 
 			if (P.bgUseUIColor) {
 				// Use the host UI accent colour as a flat background.
 				g.FillSolidRect(0, 0, w, h, State.paintCache.bgColor);
@@ -2478,7 +2456,7 @@ const StaticBgLayer = {
 					g.FillSolidRect(0, 0, w, h, MathX.setAlpha(DS_BLACK, Math.floor(P.darkenValue * 2.55)));
 				}
 			}
-
+ 
 			newImg.ReleaseGraphics(g); released = true; g = null;
 			this.img = newImg; newImg = null;
 			this._w = w; this._h = h; this.valid = true;
@@ -2491,26 +2469,26 @@ const StaticBgLayer = {
 		}
 	}
 };
-
+ 
 // Top layer: border bars + overlay effects bitmap composited on top of the disc.
 const StaticTopLayer = {
 	img: null, valid: false, _w: 0, _h: 0,
-
+ 
 	invalidate() { this.valid = false; RepaintHelper._allValid = false; },
 	dispose()    { Utils.safeDispose(this.img); this.img = null; this.valid = false; RepaintHelper._allValid = false; },
-
+ 
 	build(w, h) {
 		this.dispose();
 		const hasBorder  = P.borderSize > 0;
 		const hasOverlay = OverlayCache.img !== null;
 		// Nothing to composite — mark valid without allocating a bitmap.
 		if (!hasBorder && !hasOverlay) { this._w = w; this._h = h; this.valid = true; return; }
-
+ 
 		let g = null, newImg = null, released = false;
 		try {
 			newImg = gdi.CreateImage(w, h);
 			g = newImg.GetGraphics();
-
+ 
 			if (hasBorder) {
 				// Draw border as four filled rectangles (top, bottom, left, right).
 				const bs    = P.borderSize;
@@ -2524,7 +2502,7 @@ const StaticTopLayer = {
 				const oi = OverlayCache.img;
 				g.DrawImage(oi, 0, 0, w, h, 0, 0, oi.Width, oi.Height);
 			}
-
+ 
 			newImg.ReleaseGraphics(g); released = true; g = null;
 			this.img = newImg; newImg = null;
 			this._w = w; this._h = h; this.valid = true;
@@ -2537,7 +2515,7 @@ const StaticTopLayer = {
 		}
 	}
 };
-
+ 
 // ====================== RENDERER ======================
 // Draws the current image (disc or static cover) into the panel's graphics context.
 const Renderer = {
@@ -2548,21 +2526,21 @@ const Renderer = {
 		if (!State.isDiscImage) this.paintStatic(gr, pc);
 		else                    this.paintDisc(gr, pc);
 	},
-
+ 
 	// Draw static cover art scaled to the pre-calculated layout rectangle.
 	paintStatic(gr, pc) {
 		if (!State.img) return;
 		gr.DrawImage(State.img, pc.staticX, pc.staticY, pc.staticW, pc.staticH,
 			0, 0, State.img.Width, State.img.Height);
 	},
-
+ 
 	// Draw the spinning disc using the pre-rendered rotation frame cache.
 	paintDisc(gr, pc) {
 		gr.SetSmoothingMode(CONFIG.SMOOTHING_MODE);
 		const size = pc.discSize;
 		const x    = pc.discX;
 		const y    = pc.discY;
-
+ 
 		// DiscComposite is guaranteed valid here — prepareLayers() builds it before on_paint.
 		const composite = DiscComposite.valid && DiscComposite.img ? DiscComposite.img : State.img;
 		if (composite) {
@@ -2579,13 +2557,13 @@ const Renderer = {
 		}
 	}
 };
-
+ 
 // ====================== PHOSPHOR COLOUR MANAGER ======================
 // Resolves the active phosphor theme colour with a one-level cache.
 const PhosphorManager = {
 	_cachedColor: null,
 	_cachedTheme: -1,
-
+ 
 	getColor() {
 		if (this._cachedTheme === P.phosphorTheme && this._cachedColor !== null) return this._cachedColor;
 		let color;
@@ -2599,9 +2577,9 @@ const PhosphorManager = {
 		this._cachedColor = color;
 		return color;
 	},
-
+ 
 	invalidateCache() { this._cachedColor = null; this._cachedTheme = -1; },
-
+ 
 	// Open the system colour picker so the user can choose a custom phosphor tint.
 	setCustomColor() {
 		try {
@@ -2616,7 +2594,7 @@ const PhosphorManager = {
 		} catch (e) {}
 	}
 };
-
+ 
 // ====================== PRESET MANAGER ======================
 // Saves and restores named snapshots of all visual settings (up to 3 slots).
 const PresetManager = {
@@ -2655,13 +2633,13 @@ const PresetManager = {
 			rotationStep:          props.rotationStep.value
 		};
 	},
-
+ 
 	// Serialise and persist a preset to a window property.
 	save(slot) {
 		if (!_.inRange(slot, 1, 4)) return;
 		try { window.SetProperty('Disc.Preset' + slot, JSON.stringify(this._capture())); } catch (e) {}
 	},
-
+ 
 	// Deserialise a preset and apply each property with bounds-checking.
 	load(slot) {
 		if (!_.inRange(slot, 1, 4)) return;
@@ -2669,14 +2647,14 @@ const PresetManager = {
 			const str = window.GetProperty('Disc.Preset' + slot, null);
 			if (!str) return;
 			const d = JSON.parse(str);
-
+ 
 			if (_.isBoolean(d.spinningEnabled))   props.spinningEnabled.enabled   = d.spinningEnabled;
 			if (_.isNumber(d.spinSpeed))           props.spinSpeed.value           = _.clamp(d.spinSpeed, CONFIG.MIN_SPIN_SPEED, CONFIG.MAX_SPIN_SPEED);
 			if (_.isBoolean(d.useAlbumArtOnly))    props.useAlbumArtOnly.enabled   = d.useAlbumArtOnly;
 			if (_.isBoolean(d.keepAspectRatio))    props.keepAspectRatio.enabled   = d.keepAspectRatio;
 			if (_.isNumber(d.interpolationMode))   props.interpolationMode.value   = d.interpolationMode;
 			if (_.isNumber(d.maxImageSize))        props.maxImageSize.value        = _.clamp(d.maxImageSize, CONFIG.MIN_DISC_SIZE, CONFIG.MAX_DISC_SIZE);
-
+ 
 			if (_.isNumber(d.maskType)) {
 				const maskIdx    = _.clamp(d.maskType, 0, 2);
 				const isOverride = _.isBoolean(d.userOverrideMask) ? d.userOverrideMask : true;
@@ -2687,7 +2665,7 @@ const PresetManager = {
 					props.userOverrideMask.enabled     = isOverride;
 				}
 			}
-
+ 
 			if (_.isBoolean(d.overlayAllOff))      props.overlayAllOff.enabled    = d.overlayAllOff;
 			if (_.isString(d.savedOverlay))        props.savedOverlay.value       = d.savedOverlay;
 			if (_.isBoolean(d.showReflection))     props.showReflection.enabled   = d.showReflection;
@@ -2701,11 +2679,11 @@ const PresetManager = {
 			if (_.isNumber(d.phosphorTheme))       props.phosphorTheme.value      = _.clamp(d.phosphorTheme, 0, DISC_CUSTOM_THEME_INDEX);
 			if (_.isNumber(d.customPhosphorColor)) props.customPhosphorColor.value = d.customPhosphorColor >>> 0;
 			PhosphorManager.invalidateCache();
-
+ 
 			if (_.isNumber(d.borderSize))  props.borderSize.value  = _.clamp(d.borderSize, 0, 50);
 			if (_.isNumber(d.borderColor)) props.borderColor.value  = d.borderColor >>> 0;
 			if (_.isNumber(d.padding))     props.padding.value      = _.clamp(d.padding, 0, 100);
-
+ 
 			if (_.isBoolean(d.backgroundEnabled))    props.backgroundEnabled.enabled    = d.backgroundEnabled;
 			if (_.isBoolean(d.bgUseUIColor))          props.bgUseUIColor.enabled          = d.bgUseUIColor;
 			if (_.isNumber(d.blurRadius))             props.blurRadius.value              = _.clamp(d.blurRadius, 0, 254);
@@ -2715,7 +2693,7 @@ const PresetManager = {
 			if (_.isNumber(d.rotationStep) && [2, 3, 4].includes(d.rotationStep)) {
 				props.rotationStep.value = d.rotationStep;
 			}
-
+ 
 			// Flush all dependent caches after a bulk property change.
 			ImageLoader.clearCache();
 			AssetManager.maskCache.clear();
@@ -2729,33 +2707,33 @@ const PresetManager = {
 		} catch (e) {}
 	}
 };
-
+ 
 // ====================== SLIDER STATE ======================
 // Tracks whether the mouse-wheel opacity slider UI is active and which effect is targeted.
 const Slider = {
 	active: false,
 	target: null,           // One of "Reflection" | "Glow" | "Scanlines" | "Phosphor"
 	timers: { overlayRebuild: null },
-
+ 
 	activate(target)  { this.active = true;  this.target = target; RepaintHelper.full(); },
 	deactivate()      { this.active = false; this.target = null;   RepaintHelper.full(); },
-
+ 
 	cleanup() {
 		if (this.timers.overlayRebuild) window.ClearTimeout(this.timers.overlayRebuild);
 		this.timers.overlayRebuild = null;
 	}
 };
-
+ 
 // ====================== SLIDER RENDERER ======================
 // Draws the opacity slider HUD (title label + value label + progress bar) onto the panel.
 const SliderRenderer = {
 	_font: null,
-
+ 
 	getFont() {
 		if (!this._font) this._font = gdi.Font('Segoe UI', 16, 0);
 		return this._font;
 	},
-
+ 
 	// Draw the filled progress bar and value label above it.
 	drawBar(gr, value, max, barY) {
 		const w     = window.Width;
@@ -2763,12 +2741,12 @@ const SliderRenderer = {
 		const barW  = Math.max(SLIDER_MIN_WIDTH, Math.floor(w * SLIDER_WIDTH_RATIO));
 		const barH  = SLIDER_HEIGHT;
 		const bx    = Math.floor((w - barW) / 2);
-
+ 
 		// Background track (dim white) then filled portion (bright white).
 		gr.FillSolidRect(bx, barY, barW, barH, MathX.setAlpha(DS_WHITE, 55));
 		const fillW = Math.floor(barW * (value / max));
 		if (fillW > 0) gr.FillSolidRect(bx, barY, fillW, barH, MathX.setAlpha(DS_WHITE, 185));
-
+ 
 		const font  = this.getFont();
 		const label = value.toString();
 		// Use a fixed height cap (64px) instead of window.Height to avoid
@@ -2780,7 +2758,7 @@ const SliderRenderer = {
 			labelY,
 			Math.ceil(sz.Width), Math.ceil(sz.Height));
 	},
-
+ 
 	// Draw the effect name above the value label.
 	drawTitle(gr, text, barY) {
 		const w     = window.Width;
@@ -2792,7 +2770,7 @@ const SliderRenderer = {
 			Math.floor((w - sz.Width) / 2), titleY,
 			Math.ceil(sz.Width), Math.ceil(sz.Height));
 	},
-
+ 
 	draw(gr) {
 		if (!Slider.active || !Slider.target) return;
 		const propMap = {
@@ -2808,20 +2786,20 @@ const SliderRenderer = {
 		this.drawBar(gr, prop.value, 255, barY);
 	}
 };
-
+ 
 // ====================== CONTEXT MENU MANAGER ======================
 // Builds and dispatches the right-click context menu.
 const MenuManager = {
 	show(x, y) {
 		const menu = window.CreatePopupMenu();
-
+ 
 		menu.AppendMenuItem(0, 1, "Album Art Only (Static)");
 		menu.CheckMenuItem(1, props.useAlbumArtOnly.enabled);
 		menu.AppendMenuItem(0, 2, "Spinning Enabled");
 		menu.CheckMenuItem(2, props.spinningEnabled.enabled);
 		menu.AppendMenuItem(0, 3, "Keep Aspect Ratio");
 		menu.CheckMenuItem(3, props.keepAspectRatio.enabled);
-
+ 
 		this.addImageSettingsMenu(menu);
 		menu.AppendMenuSeparator();
 		this.addOverlayMenu(menu);
@@ -2834,17 +2812,17 @@ const MenuManager = {
 		this.addPresetMenu(menu);
 		menu.AppendMenuSeparator();
 		this.addJSplitterMenu(menu);
-
+ 
 		const idx = menu.TrackPopupMenu(x, y);
 		this.handleSelection(idx);
 		return true;
 	},
-
+ 
 	// Overlay Effects sub-menu: per-effect toggles, opacity sliders, phosphor theme picker.
 	addOverlayMenu(parent) {
 		const overlay = window.CreatePopupMenu();
 		const grayed  = props.overlayAllOff.enabled; // Grey out individual toggles when master kill-switch is on
-
+ 
 		// Phosphor theme picker as a nested sub-menu.
 		const themeMenu = window.CreatePopupMenu();
 		_.forEach(CONFIG.PHOSPHOR_THEMES, (theme, i) => {
@@ -2856,12 +2834,12 @@ const MenuManager = {
 		themeMenu.AppendMenuItem(0, customMenuId, 'Custom...');
 		if (props.phosphorTheme.value === DISC_CUSTOM_THEME_INDEX) themeMenu.CheckMenuItem(customMenuId, true);
 		themeMenu.AppendTo(overlay, (grayed || !props.showPhosphor.enabled) ? 1 : 0, "Phosphor Theme");
-
+ 
 		overlay.AppendMenuSeparator();
 		overlay.AppendMenuItem(0, 199, "— All Effects Off");
 		if (props.overlayAllOff.enabled) overlay.CheckMenuItem(199, true);
 		overlay.AppendMenuSeparator();
-
+ 
 		// Individual effect toggles (greyed out when master kill-switch is active).
 		overlay.AppendMenuItem(grayed ? 1 : 0, 200, "Reflection");
 		if (!grayed && props.showReflection.enabled) overlay.CheckMenuItem(200, true);
@@ -2871,7 +2849,7 @@ const MenuManager = {
 		if (!grayed && props.showScanlines.enabled)  overlay.CheckMenuItem(220, true);
 		overlay.AppendMenuItem(grayed ? 1 : 0, 230, "Phosphor");
 		if (!grayed && props.showPhosphor.enabled)   overlay.CheckMenuItem(230, true);
-
+ 
 		overlay.AppendMenuSeparator();
 		// Opacity sub-menu (shows current value; launches scroll-wheel slider UI on select).
 		const opacityM = window.CreatePopupMenu();
@@ -2880,10 +2858,10 @@ const MenuManager = {
 		opacityM.AppendMenuItem((!grayed && props.showScanlines.enabled)  ? 0 : 1, 221, `Scanlines...  [${props.opScanlines.value}]`);
 		opacityM.AppendMenuItem((!grayed && props.showPhosphor.enabled)   ? 0 : 1, 231, `Phosphor...  [${props.opPhosphor.value}]`);
 		opacityM.AppendTo(overlay, 0, "Opacity Settings");
-
+ 
 		overlay.AppendTo(parent, 0, "Overlay Effects");
 	},
-
+ 
 	// Disc Settings sub-menu: rotation speed, image scaling, max disc size, mask type, rotation quality.
 	addImageSettingsMenu(parent) {
 		const settingsMenu = window.CreatePopupMenu();
@@ -2894,7 +2872,7 @@ const MenuManager = {
 		this.addRotationStepMenu(settingsMenu);
 		settingsMenu.AppendTo(parent, 0, "Disc Settings");
 	},
-
+ 
 	addSpeedMenu(parent) {
 		const speedMenu = window.CreatePopupMenu();
 		_.forEach(CONFIG.SPEED_PRESETS, (preset, i) => speedMenu.AppendMenuItem(0, 10 + i, preset.name));
@@ -2902,7 +2880,7 @@ const MenuManager = {
 		if (matchIdx !== -1) speedMenu.CheckMenuRadioItem(10, 10 + CONFIG.SPEED_PRESETS.length - 1, 10 + matchIdx);
 		speedMenu.AppendTo(parent, 0, "Rotation Speed");
 	},
-
+ 
 	addScalingMenu(parent) {
 		const scalingMenu = window.CreatePopupMenu();
 		_.forEach(CONFIG.INTERPOLATION_MODES, (mode, i) => {
@@ -2911,7 +2889,7 @@ const MenuManager = {
 		});
 		scalingMenu.AppendTo(parent, 0, "Image Scaling");
 	},
-
+ 
 	addSizeMenu(parent) {
 		const sizeMenu = window.CreatePopupMenu();
 		_.forEach(CONFIG.DISC_SIZE_PRESETS, (preset, i) => {
@@ -2920,7 +2898,7 @@ const MenuManager = {
 		});
 		sizeMenu.AppendTo(parent, 0, "Disc Resolution");
 	},
-
+ 
 	addMaskMenu(parent) {
 		const maskMenu = window.CreatePopupMenu();
 		_.forEach(CONFIG.MASK_TYPES, (mask, i) => {
@@ -2929,7 +2907,7 @@ const MenuManager = {
 		});
 		maskMenu.AppendTo(parent, 0, "Mask Type");
 	},
-
+ 
 	addRotationStepMenu(parent) {
 		const stepMenu = window.CreatePopupMenu();
 		stepMenu.AppendMenuItem(0, 80, "Smooth (2°)  — higher CPU");
@@ -2941,7 +2919,7 @@ const MenuManager = {
 		if (cur === 4) stepMenu.CheckMenuRadioItem(80, 82, 82);
 		stepMenu.AppendTo(parent, 0, "Rotation Quality");
 	},
-
+ 
 	// Custom Artwork Folders sub-menu: add new folder, remove existing ones, clear all.
 	addCustomFoldersMenu(parent) {
 		const customMenu = window.CreatePopupMenu();
@@ -2959,7 +2937,7 @@ const MenuManager = {
 		}
 		customMenu.AppendTo(parent, 0, "Custom Artwork Folders");
 	},
-
+ 
 	addPresetMenu(parent) {
 		const presetM = window.CreatePopupMenu();
 		const loadM   = window.CreatePopupMenu();
@@ -2973,7 +2951,7 @@ const MenuManager = {
 		saveM.AppendTo(presetM, 0, 'Save Preset');
 		presetM.AppendTo(parent, 0, 'Presets');
 	},
-
+ 
 	// JSplitter ONLY sub-menu: renderer toggle requires JSplitter to take effect on reload.
 	// Kept separate so users on other panel hosts are not confused by an irrelevant option.
 	addJSplitterMenu(parent) {
@@ -2985,7 +2963,7 @@ const MenuManager = {
 				: 'GDI+  ✓  →  Switch to D2D') + '  (reload)');
 		jsMenu.AppendTo(parent, 0, 'JSplitter ONLY');
 	},
-
+ 
 	addBorderPaddingMenu(parent) {
 		const bpMenu = window.CreatePopupMenu();
 		bpMenu.AppendMenuItem(0, 250, 'Set Border Size...');
@@ -2993,12 +2971,12 @@ const MenuManager = {
 		bpMenu.AppendMenuItem(0, 252, 'Set Padding...');
 		bpMenu.AppendTo(parent, 0, 'Border & Padding');
 	},
-
+ 
 	// Background sub-menu: UI colour toggle, blur settings, darken level, custom colour.
 	addBackgroundMenu(parent) {
 		const bgMenu        = window.CreatePopupMenu();
 		const uiColorActive = props.bgUseUIColor.enabled;
-
+ 
 		bgMenu.AppendMenuItem(0, 263, 'Use UI Color as Background');
 		if (uiColorActive) bgMenu.CheckMenuItem(263, true);
 		bgMenu.AppendMenuSeparator();
@@ -3007,7 +2985,7 @@ const MenuManager = {
 		if (!uiColorActive && props.backgroundEnabled.enabled) bgMenu.CheckMenuItem(260, true);
 		bgMenu.AppendMenuItem(uiColorActive ? 1 : 0, 261, 'Custom Background Color...');
 		bgMenu.AppendMenuSeparator();
-
+ 
 		const blurEnabled = !uiColorActive && props.backgroundEnabled.enabled && props.blurEnabled.enabled;
 		const blurMenu    = window.CreatePopupMenu();
 		blurMenu.AppendMenuItem(0, 270, 'Enable Blur');
@@ -3023,7 +3001,7 @@ const MenuManager = {
 		blurMenu.AppendMenuItem(0, 283, 'Max: 254');
 		if (props.blurRadius.value === 254) blurMenu.CheckMenuItem(283, true);
 		blurMenu.AppendTo(bgMenu, blurEnabled ? 0 : 1, 'Blur Settings');
-
+ 
 		const darkenMenu = window.CreatePopupMenu();
 		_.times(6, i => {
 			const value = i * 10;
@@ -3033,11 +3011,11 @@ const MenuManager = {
 		darkenMenu.AppendTo(bgMenu, uiColorActive ? 1 : 0, 'Darken Background');
 		bgMenu.AppendTo(parent, 0, 'Background');
 	},
-
+ 
 	// Route the menu selection to the appropriate action handler.
 	handleSelection(idx) {
 		let changed = false;
-
+ 
 		// --- Toggles (IDs 1–3): Album Art Only / Spinning / Keep Aspect Ratio ---
 		const toggles = {
 			1: { prop: props.useAlbumArtOnly, reload: true },
@@ -3073,7 +3051,7 @@ const MenuManager = {
 			if (toggles[idx].cache) State.paintCache.valid = false;
 			changed = true;
 		}
-
+ 
 		// --- Speed presets (IDs 10–12) ---
 		const speedPreset = _.find(CONFIG.SPEED_PRESETS, (p, i) => (i + 10) === idx);
 		if (speedPreset) {
@@ -3082,7 +3060,7 @@ const MenuManager = {
 			// so the new speed takes effect on the very next tick automatically.
 			changed = true;
 		}
-
+ 
 		// --- Interpolation modes (IDs 20–22): require full image reload ---
 		const interpMode = _.find(CONFIG.INTERPOLATION_MODES, (m, i) => (i + 20) === idx);
 		if (interpMode) {
@@ -3104,7 +3082,7 @@ const MenuManager = {
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
-
+ 
 		// --- Disc size presets (IDs 30–34): require full image reload at new resolution ---
 		const sizePreset = _.find(CONFIG.DISC_SIZE_PRESETS, (p, i) => (i + 30) === idx);
 		if (sizePreset) {
@@ -3128,13 +3106,13 @@ const MenuManager = {
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
-
+ 
 		// --- Mask type selection (IDs 40–42) ---
 		if (idx >= 40 && idx <= 42) {
 			AssetManager.setMaskType(idx - 40, true);
 			changed = true;
 		}
-
+ 
 		// --- Rotation step / quality (80=2°, 81=3°, 82=4°) ---
 		if (idx >= 80 && idx <= 82) {
 			const stepValues = { 80: 2, 81: 3, 82: 4 };
@@ -3148,7 +3126,7 @@ const MenuManager = {
 				changed = true;
 			}
 		}
-
+ 
 		// --- Custom folder management (50 = add, 60–64 = remove indexed, 70 = clear all) ---
 		if (idx === 50) {
 			try {
@@ -3171,7 +3149,7 @@ const MenuManager = {
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
-
+ 
 		// --- Clear all image caches (ID 900) ---
 		if (idx === 900) {
 			FileManager.clear();
@@ -3184,7 +3162,7 @@ const MenuManager = {
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
-
+ 
 		// --- Overlay master kill-switch (ID 199): saves and restores individual toggles ---
 		if (idx === 199) {
 			if (!props.overlayAllOff.enabled) {
@@ -3210,24 +3188,24 @@ const MenuManager = {
 			OverlayInvalidator.request();
 			changed = true;
 		}
-
+ 
 		// --- Per-effect toggles and opacity slider activations ---
 		// Reflection: 200 = toggle, 201 = opacity slider
 		if (idx === 200) { props.showReflection.toggle(); OverlayInvalidator.request(); changed = true; }
 		if (idx === 201) { Slider.activate("Reflection"); return; }
-
+ 
 		// Glow: 210 = toggle, 211 = opacity slider
 		if (idx === 210) { props.showGlow.toggle(); OverlayInvalidator.request(); changed = true; }
 		if (idx === 211) { Slider.activate("Glow"); return; }
-
+ 
 		// Scanlines: 220 = toggle, 221 = opacity slider
 		if (idx === 220) { props.showScanlines.toggle(); OverlayInvalidator.request(); changed = true; }
 		if (idx === 221) { Slider.activate("Scanlines"); return; }
-
+ 
 		// Phosphor: 230 = toggle, 231 = opacity slider, 600–610 = named themes
 		if (idx === 230) { props.showPhosphor.toggle(); OverlayInvalidator.request(); changed = true; }
 		if (idx === 231) { Slider.activate("Phosphor"); return; }
-
+ 
 		if (_.inRange(idx, 600, 600 + DISC_CUSTOM_THEME_INDEX)) {
 			props.phosphorTheme.value = idx - 600;
 			PhosphorManager.invalidateCache();
@@ -3238,7 +3216,7 @@ const MenuManager = {
 			PhosphorManager.setCustomColor(); // Opens the system colour picker
 			return;
 		}
-
+ 
 		// --- Full factory reset (ID 197) ---
 		if (idx === 197) {
 			props.spinningEnabled.enabled     = true;
@@ -3249,7 +3227,7 @@ const MenuManager = {
 			props.maxImageSize.value          = 500;
 			props.rotationStep.value          = 2;
 			AssetManager.setMaskType(0, false);
-
+ 
 			props.overlayAllOff.enabled       = false;
 			props.savedOverlay.value          = '';
 			props.showReflection.enabled      = true;
@@ -3263,18 +3241,18 @@ const MenuManager = {
 			props.phosphorTheme.value         = 8;
 			props.customPhosphorColor.value   = 0xFFFFFFFF;
 			PhosphorManager.invalidateCache();
-
+ 
 			props.borderSize.value            = 5;
 			props.borderColor.value           = 0xFF202020;
 			props.padding.value               = 10;
-
+ 
 			props.backgroundEnabled.enabled   = true;
 			props.bgUseUIColor.enabled        = false;
 			props.blurRadius.value            = 240;
 			props.blurEnabled.enabled         = true;
 			props.darkenValue.value           = 10;
 			props.customBackgroundColor.value = 0xFF191919;
-
+ 
 			ImageLoader.clearCache();
 			AssetManager.maskCache.clear();
 			AssetManager.rimCache.clear();
@@ -3285,7 +3263,7 @@ const MenuManager = {
 			if (State.currentMetadb) ImageLoader.loadForMetadb(State.currentMetadb, true);
 			changed = true;
 		}
-
+ 
 		// --- Border size / colour / padding (IDs 250–252) ---
 		if (idx === 250) {
 			const v = utils.InputBox(window.ID, 'Border Size', 'Enter size (0-50):', props.borderSize.value.toString(), false);
@@ -3301,7 +3279,7 @@ const MenuManager = {
 			const n = parseInt(v, 10);
 			if (!isNaN(n)) { props.padding.value = _.clamp(n, 0, 100); State.paintCache.valid = false; invalidateTopCaches(); changed = true; }
 		}
-
+ 
 		// --- Background controls (IDs 260–295) ---
 		if (idx === 263) { props.bgUseUIColor.toggle();        invalidateBgCaches(); changed = true; }
 		if (idx === 260) { props.backgroundEnabled.toggle();   invalidateBgCaches(); changed = true; }
@@ -3310,7 +3288,7 @@ const MenuManager = {
 			if (picked !== -1) { props.customBackgroundColor.value = picked; StaticBgLayer.invalidate(); RepaintHelper.background(); changed = true; }
 		}
 		if (idx === 270) { props.blurEnabled.toggle(); invalidateBgCaches(); changed = true; }
-
+ 
 		// Blur radius: IDs 271–281 map to 0, 20, 40, ..., 200; ID 282 = 240; ID 283 = 254 (max).
 		// IDs are now fully sequential (271→281→282→283) matching the visual menu order.
 		if (_.inRange(idx, 271, 282)) {
@@ -3326,18 +3304,18 @@ const MenuManager = {
 			invalidateBgCaches();
 			changed = true;
 		}
-
+ 
 		// Darken veil: IDs 290–295 map to 0%, 10%, ..., 50%.
 		if (_.inRange(idx, 290, 296)) {
 			props.darkenValue.value = (idx - 290) * 10;
 			invalidateBgCaches();
 			changed = true;
 		}
-
+ 
 		// --- Preset load (IDs 301–303) / save (IDs 401–403) ---
 		if (_.inRange(idx, 301, 304)) { PresetManager.load(idx - 300); return; }
 		if (_.inRange(idx, 401, 404)) { PresetManager.save(idx - 400); }
-
+ 
 		// --- Renderer toggle (ID 950): persist new draw mode and reload the panel ---
 		if (idx === 950) {
 			const next = window.GetProperty('RP.DrawMode', 0) === 1 ? 0 : 1;
@@ -3345,19 +3323,19 @@ const MenuManager = {
 			window.Reload();
 			return;
 		}
-
+ 
 		if (changed) RepaintHelper.full();
 	}
 };
-
+ 
 // ====================== ARTWORK DISPATCH QUEUE ======================
 // Coalesces rapid art-load requests by priority so only the highest-priority
 // pending request is dispatched after a short debounce window.
 const ArtDispatcher = {
 	_pending:  null,
 	_timer:    null,
-	_priority: { track: 4, stop: 3, selection: 2, folder: 2, playlist: 1 },
-
+	_priority: { track: 4, stop: 3, selection: 2, playlist: 1 },
+ 
 	// Queue an art-load request. Higher-priority requests preempt lower ones.
 	request(reason, metadb) {
 		const priority = this._priority[reason] || 0;
@@ -3370,14 +3348,14 @@ const ArtDispatcher = {
 		// Short debounce to merge bursts (e.g. rapid playlist changes).
 		this._timer = window.SetTimeout(() => { this._dispatch(); }, 50);
 	},
-
+ 
 	_dispatch() {
 		if (!this._pending) return;
 		if (!isLive()) { this._pending = null; this._timer = null; return; }
 		const { reason, metadb } = this._pending;
 		this._pending = null;
 		this._timer   = null;
-
+ 
 		switch (reason) {
 			case 'track':
 				// Skip reload if the new track's art is already displayed.
@@ -3413,7 +3391,7 @@ const ArtDispatcher = {
 				}
 				if (metadb) ImageLoader.loadForMetadb(metadb, true);
 				break;
-
+ 
 			case 'stop': {
 				// NOTE: for the 'stop' reason, the 'metadb' slot carries the foobar
 				// stop-reason integer (0=user stop, 1=EOF, 2=starting next track) — it is
@@ -3424,30 +3402,14 @@ const ArtDispatcher = {
 				RepaintHelper.full();
 				break;
 			}
-
+ 
 			case 'selection':
 				// Only act when nothing is playing; the playing track takes priority.
 				// Guard is re-checked here because dispatch is deferred 50ms — playback
 				// may have started in that window after on_selection_changed queued this.
 				if (!fb.IsPlaying && !isPaused && metadb) ImageLoader.loadForMetadb(metadb, false);
 				break;
-
-			case 'folder': {
-				// 'metadb' slot carries the folder path string here (see on_notify_data).
-				// Library/Playlist broadcast 'ArtFolder' only when nothing is playing and
-				// the user clicked/hovered an album, so mirror that art here too.
-				// Guard re-checked because dispatch is deferred 50ms.
-				if (fb.IsPlaying || isPaused) break;
-				const folderPath = metadb;
-				if (!folderPath) break;
-				const handle = ImageLoader.findHandleForFolder(folderPath);
-				// immediate=false (not true): lets loadForMetadb's own same-folder dedup
-				// check run, so re-notifications for the folder already on screen don't
-				// trigger a redundant filesystem search + GetAlbumArtAsync round-trip.
-				if (handle) ImageLoader.loadForMetadb(handle, false);
-				break;
-			}
-
+ 
 			case 'playlist':
 				if (fb.IsPlaying && fb.GetNowPlaying()) {
 					ImageLoader.loadForMetadb(fb.GetNowPlaying(), false);
@@ -3456,9 +3418,9 @@ const ArtDispatcher = {
 		}
 	}
 };
-
+ 
 // ====================== SMP EVENT CALLBACKS ======================
-
+ 
 // ====================== PRE-PAINT LAYER PREPARATION ======================
 // All GDI allocations and state mutations happen here, BEFORE on_paint is called.
 // on_paint itself is pure read-and-blit: no CreateImage, no StackBlur, no state writes.
@@ -3473,15 +3435,15 @@ function prepareLayers() {
 	// This check runs BEFORE any window property reads, making it truly zero-cost
 	// on the rare cases where prepareLayers() is still called while _allValid=true.
 	if (RepaintHelper._allValid) return;
-
+ 
 	const w = window.Width;
 	const h = window.Height;
 	if (w <= 0 || h <= 0) return;
-
+ 
 	// Store panel dimensions so on_paint can read them back without a second query.
 	State.paintCache.panelW = w;
 	State.paintCache.panelH = h;
-
+ 
 	// Secondary fast-path: sizes match and all layers are valid.
 	if (StaticBgLayer._w === w && StaticBgLayer._h === h &&
 	    StaticTopLayer._w === w && StaticTopLayer._h === h &&
@@ -3490,11 +3452,11 @@ function prepareLayers() {
 		RepaintHelper._allValid = true;
 		return;
 	}
-
+ 
 	// Update layout cache (pure arithmetic — no GDI).
 	State.updatePaintCache();
 	const pc = State.paintCache;
-
+ 
 	// Ensure DiscComposite is valid before paint reads it.
 	// Only built for disc images — static cover art uses paintStatic which never reads DiscComposite.
 	// In static mode the composite and rotation frames are never needed, so skip entirely.
@@ -3507,14 +3469,14 @@ function prepareLayers() {
 		// and prepareLayers doesn't re-enter this block on every paint frame.
 		DiscComposite.valid = true;
 	}
-
+ 
 	// Invalidate size-mismatched overlay before deciding to rebuild.
 	if (OverlayCache.valid && OverlayCache.img &&
 	    (OverlayCache.img.Width !== w || OverlayCache.img.Height !== h)) {
 		OverlayCache.invalidate();
 		StaticTopLayer.invalidate();
 	}
-
+ 
 	// Rebuild any stale composite bitmaps. Each build() is guarded by its own validity
 	// flag so it only allocates when the underlying data has actually changed.
 	if (!OverlayCache.valid) {
@@ -3527,21 +3489,21 @@ function prepareLayers() {
 	if (!StaticTopLayer.valid || StaticTopLayer._w !== w || StaticTopLayer._h !== h) {
 		StaticTopLayer.build(w, h);
 	}
-
+ 
 	// All caches are now valid and sized correctly — set the fast-path flag.
 	RepaintHelper._allValid = DiscComposite.valid &&
 	                          OverlayCache.valid   &&
 	                          StaticBgLayer.valid  &&
 	                          StaticTopLayer.valid;
 }
-
+ 
 // Re-entrancy guard: if on_paint is ever called while a previous on_paint frame
 // is still executing (e.g. a GDI allocation inside on_paint triggers a callback
 // that calls window.Repaint() synchronously), the inner call must not proceed —
 // it would read partially-built cache state and could corrupt bitmaps.
 // Under normal operation this flag is never set when on_paint is called.
 let _paintReentrant = false;
-
+ 
 function on_paint(gr) {
 	if (_paintReentrant) {
 		// Defensive: schedule a clean repaint for the next tick rather than
@@ -3557,33 +3519,33 @@ function on_paint(gr) {
 	const w  = pc.panelW || window.Width;
 	const h  = pc.panelH || window.Height;
 	if (w <= 0 || h <= 0) return;
-
+ 
 	// All preparation (GDI allocations, cache builds, state mutations) was done in
 	// prepareLayers(), which runs before on_paint via every RepaintHelper call.
 	// on_paint is intentionally pure: it only reads pre-built bitmaps and blits them.
-
+ 
 	// Layer 1: Background (blurred art, solid fill, or UI colour)
 	if (StaticBgLayer.img) {
 		gr.DrawImage(StaticBgLayer.img, 0, 0, w, h, 0, 0, w, h);
 	} else {
 		gr.FillSolidRect(0, 0, w, h, P.bgUseUIColor ? pc.bgColor : (P.customBackgroundColor >>> 0));
 	}
-
+ 
 	// Layer 2: Disc or static cover art (read-only — no build calls inside Renderer)
 	Renderer.paint(gr);
-
+ 
 	// Layer 3: Border strips and overlay effects
 	if (StaticTopLayer.img) {
 		gr.DrawImage(StaticTopLayer.img, 0, 0, w, h, 0, 0, w, h);
 	}
-
+ 
 	// Layer 4: Transient opacity slider HUD (only visible when slider is active)
 	SliderRenderer.draw(gr);
 	} finally {
 		_paintReentrant = false;
 	}
 }
-
+ 
 function on_size() {
 	// Stop the spin timer immediately — it must not fire during cache teardown.
 	// Also invalidate the layout cache so any paint during the debounce window
@@ -3591,7 +3553,7 @@ function on_size() {
 	State.stopTimer();
 	State.paintCache.valid = false;
 	RepaintHelper._allValid = false;
-
+ 
 	// Debounce the start of the rebuild pipeline. Continuous window dragging fires
 	// on_size many times per second; we wait for 50 ms of quiet before doing any work.
 	if (resizeTimer)        { window.ClearTimeout(resizeTimer);        resizeTimer        = null; }
@@ -3606,7 +3568,7 @@ function on_size() {
 		_runResizePipeline();
 	}, 50);
 }
-
+ 
 // ─── Staged resize rebuild pipeline ──────────────────────────────────────────
 // Spreads the post-resize work across multiple event-loop ticks so the JS engine
 // can process queued paint and timer callbacks between stages.  This prevents the
@@ -3629,7 +3591,7 @@ function _runResizePipeline() {
 	ImageLoader.clearCache();
 	// Trigger a repaint with fallback solid fills — panel looks correct immediately.
 	RepaintScheduler.request();
-
+ 
 	// ── Stage 1: background blur (deferred — StackBlur is the most expensive step).
 	_resizeStage1Timer = window.SetTimeout(() => {
 		_resizeStage1Timer = null;
@@ -3641,7 +3603,7 @@ function _runResizePipeline() {
 			StaticBgLayer.build(w, h);
 		}
 		RepaintScheduler.request();
-
+ 
 		// ── Stage 2: masks + composite + rotation (deferred after blur).
 		_resizeStage2Timer = window.SetTimeout(() => {
 			_resizeStage2Timer = null;
@@ -3666,7 +3628,7 @@ function _runResizePipeline() {
 				StaticTopLayer.build(w2, h2);
 			}
 			RepaintScheduler.request();
-
+ 
 			// ── Stage 3: image reload (deferred after composite — loadForMetadb is I/O).
 			_resizeStage3Timer = window.SetTimeout(() => {
 				_resizeStage3Timer = null;
@@ -3687,12 +3649,12 @@ function _runResizePipeline() {
 		}, 0);
 	}, 0);
 }
-
+ 
 function on_playback_new_track(metadb) {
 	if (!isLive()) return;
 	ArtDispatcher.request('track', metadb);
 }
-
+ 
 // Reload art if the metadata for the currently playing track is edited.
 function on_metadb_changed(metadb_list, fromhook) {
 	if (!isLive()) return;
@@ -3710,13 +3672,13 @@ function on_metadb_changed(metadb_list, fromhook) {
 		ImageLoader.loadForMetadb(nowPlaying, true);
 	}
 }
-
+ 
 function on_playback_pause(state) {
 	if (!isLive()) return;
 	isPaused = !!state;
 	State.updateTimer(); // Pause stops the spin; resume restarts it
 }
-
+ 
 function on_playback_stop(reason) {
 	if (!isLive()) return;
 	// reason=2 means "starting next track" — reset pause state but don't fully stop.
@@ -3724,18 +3686,18 @@ function on_playback_stop(reason) {
 	isPaused = false;
 	ArtDispatcher.request('stop', reason);
 }
-
+ 
 function on_playback_starting() {
 	if (!isLive()) return;
 	isPaused = false; // Reset pause state — new playback always starts un-paused
 	State.updateTimer();
 }
-
+ 
 function on_playback_seek() {
 	if (!isLive()) return;
 	State.updateTimer();
 }
-
+ 
 // Show art for the focused item when nothing is playing.
 function on_selection_changed() {
 	if (!isLive()) return;
@@ -3743,51 +3705,41 @@ function on_selection_changed() {
 	const sel = fb.GetSelection();
 	if (sel) ArtDispatcher.request('selection', sel);
 }
-
+ 
 function on_playlist_switch() {
 	if (!isLive()) return;
 	ArtDispatcher.request('playlist', null);
 }
-
+ 
 function on_playlist_items_added(playlist_index) {
 	if (!isLive()) return;
 	ArtDispatcher.request('playlist', null);
 }
-
+ 
 function on_playlist_items_removed(playlist_index) {
 	if (!isLive()) return;
 	ArtDispatcher.request('playlist', null);
 }
-
-// Library/Playlist panels broadcast 'ArtFolder' via NotifyOthers() whenever the user
-// clicks/hovers an album while nothing is playing. Mirror that selection here so the
-// disc/background shows the currently selected album instead of stale last-played art.
-function on_notify_data(name, info) {
-	if (!isLive()) return;
-	if (name === 'ArtFolder') {
-		ArtDispatcher.request('folder', info);
-	}
-}
-
+ 
 // Receives the result of utils.GetAlbumArtAsync(); stale results are discarded via token check.
 function on_get_album_art_done(metadb, art_id, image, image_path) {
 	if (!isLive()) { Utils.safeDispose(image); return; }
 	ImageLoader.handleAlbumArt(metadb, image, image_path);
 }
-
+ 
 // Right-click: show the context menu.
 function on_mouse_rbtn_up(x, y) { return MenuManager.show(x, y); }
-
+ 
 // Left-click down: claim keyboard focus so key events are routed to this panel.
 function on_mouse_lbtn_down(x, y) {
 	try { window.SetFocus(); } catch (e) {}
 }
-
+ 
 // Left-click up: dismiss the opacity slider HUD if it was open.
 function on_mouse_lbtn_up(x, y) {
 	if (Slider.active) Slider.deactivate();
 }
-
+ 
 // Mouse wheel: adjust the targeted opacity value when the slider HUD is active.
 function on_mouse_wheel(delta) {
 	if (!Slider.active || !Slider.target) return;
@@ -3801,7 +3753,7 @@ function on_mouse_wheel(delta) {
 	if (!prop) return;
 	prop.value = _.clamp(prop.value + delta * SLIDER_STEP, 0, 255);
 	RepaintHelper.full(); // Immediately update the slider bar value display
-
+ 
 	// Debounce the expensive overlay rebuild so it doesn't fire on every wheel notch.
 	if (Slider.timers.overlayRebuild) window.ClearTimeout(Slider.timers.overlayRebuild);
 	Slider.timers.overlayRebuild = window.SetTimeout(() => {
@@ -3811,12 +3763,12 @@ function on_mouse_wheel(delta) {
 		RepaintHelper.full();
 	}, 100);
 }
-
+ 
 // Tear-down: cancel all timers and release every GDI resource before the script exits.
 // This definition supersedes the on_script_unload registered by helpers.js (loaded earlier).
 function on_script_unload() {
 	phase = Phase.SHUTDOWN;
-
+ 
 	// Cancel ALL pending timers before freeing resources to prevent callbacks
 	// firing into a partially torn-down state.
 	RepaintScheduler.cancel();
@@ -3830,7 +3782,7 @@ function on_script_unload() {
 	if (State.phaseBTimer) { window.ClearTimeout(State.phaseBTimer); State.phaseBTimer = null; }
 	if (readyTimer)        { window.ClearTimeout(readyTimer);        readyTimer        = null; }
 	RotationCache._cancelBuild(); // Cancels timer + disposes _pendingFrames/_pendingScaled
-
+ 
 	OverlayInvalidator.cancel();
 	if (SliderRenderer._font) { try { SliderRenderer._font.Dispose(); } catch (e) {} SliderRenderer._font = null; }
 	Slider.cleanup();
@@ -3843,31 +3795,31 @@ function on_script_unload() {
 	StaticTopLayer.dispose();
 	DiscComposite.dispose();
 	FileManager.clear();
-
+ 
 	// Mirror the helpers.js teardown that our definition supersedes.
 	_tt('');
 	if (_gr) { try { if (_bmp) _bmp.ReleaseGraphics(_gr); } catch (e) {} }
 	_gr  = null;
 	_bmp = null;
 }
-
+ 
 // ====================== INITIALIZATION ======================
 function init() {
 	AssetManager.init();
 	CustomFolders.load();
-
+ 
 	const nowPlaying = fb.GetNowPlaying();
-
+ 
 	if (nowPlaying) {
 		// Normal path: load art for the currently playing track.
 		ImageLoader.loadForMetadb(nowPlaying, true);
-
+ 
 	} else if (props.savedPath.value && FileManager.exists(props.savedPath.value)) {
 		// Restore the last known image so the panel is not blank after a restart with no playback.
 		try {
 			const imageType = Utils.getImageType(props.savedPath.value);
 			const savedPath = props.savedPath.value;
-
+ 
 			if (imageType === CONFIG.IMAGE_TYPE.DEFAULT_DISC) {
 				ImageLoader.loadDefaultDisc();
 			} else {
@@ -3897,7 +3849,7 @@ function init() {
 				}
 			}
 		} catch (e) {}
-
+ 
 	} else {
 		// Last resort: try the shared folder property that PlayList panel may have set.
 		const sharedFolder = window.GetProperty('RP.SavedFolder', '');
@@ -3925,10 +3877,10 @@ function init() {
 			}
 		}
 	}
-
+ 
 	State.updateTimer();
 }
-
+ 
 // ====================== BOOT SEQUENCE ======================
 // Defer init() until the panel has a valid non-zero size.
 // SMP may call on_size before the window dimensions are finalised.
@@ -3949,3 +3901,4 @@ function init() {
 		}, 50);
 	}
 })();
+ 
