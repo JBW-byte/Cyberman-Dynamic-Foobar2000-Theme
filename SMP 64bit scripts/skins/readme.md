@@ -62,10 +62,10 @@ Recommended settings for large panels:
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 29 June 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 09 July 2026</summary>
 
 ### Update Overview
-Small fixs, hits marker on scroll or up/down keys. v2.3
+Small fixs, hits marker on scroll or up/down keys. v2.4
 
 ### Controls
 
@@ -84,10 +84,10 @@ Small fixs, hits marker on scroll or up/down keys. v2.3
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 27 June 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 09 July 2026</summary>
 
 ### Update Overview
-Bug Fix's. v3.6
+Bug Fix's. v3.7
 
 ### Features
 
@@ -111,10 +111,10 @@ Bug Fix's. v3.6
 </details>
 
 <details>
-<summary><strong>LCD TimerPro... ish</strong> — Updated 27 June 2026</summary>
+<summary><strong>LCD TimerPro... ish</strong> — Updated 09 July 2026</summary>
 
 ### Update Overview
-Bug Fix's. v1.2
+Bug Fix's. v1.3
 
 ### Features
 
