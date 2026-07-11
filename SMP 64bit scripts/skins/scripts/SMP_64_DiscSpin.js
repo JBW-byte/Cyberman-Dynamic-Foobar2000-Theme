@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V3.7 =======- \\
+		     // -======= SMP 64bit Disc Spin V3.8 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -12,7 +12,7 @@
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+  1 = D2D
 // DrawMode only changes on JSplitter currently; D2D offloads rendering to GPU, GDI+ uses CPU.
  
-window.DefineScript('SMP 64bit Disc Spin V3.7', { author: 'L.E.D.', grab_focus: true });
+window.DefineScript('SMP 64bit Disc Spin V3.8', { author: 'L.E.D.', grab_focus: true });
  
 // ====================== INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -3704,6 +3704,41 @@ function on_selection_changed() {
 	if (fb.IsPlaying || isPaused) return;
 	const sel = fb.GetSelection();
 	if (sel) ArtDispatcher.request('selection', sel);
+}
+
+// Resolve a metadb handle for a given folder path — mirrors the same
+// library-search fallback Playlist/Library use to find a track for a folder
+// they don't already have an entry for.
+function _findHandleForFolder(folderPath) {
+	if (!folderPath || !fb.IsLibraryEnabled()) return null;
+	const items = fb.GetLibraryItems();
+	if (!items) return null;
+	try {
+		for (let i = 0; i < items.Count; i++) {
+			const h = items.Item ? items.Item(i) : items[i];
+			if (h && ImageLoader.tf_path.EvalWithMetadb(h) === folderPath) return h;
+		}
+	} finally {
+		try { items.Dispose(); } catch (e) {}
+	}
+	return null;
+}
+
+// FIX: this panel never listened for the 'ArtFolder' broadcast that
+// Playlist_Omni.js and Library_Omni.js send each other when the user clicks
+// an album/disc/folder while nothing is playing. Playlist and Library stayed
+// in sync with each other, but this panel (and PanelArt) kept showing
+// whichever track's art last actually played, since there was no listener
+// here at all for a browse-only click to reach. Routes through the existing
+// 'selection' priority in ArtDispatcher so it's debounced the same way a
+// native on_selection_changed would be.
+function on_notify_data(name, info) {
+	if (name !== 'ArtFolder') return;
+	if (!isLive()) return;
+	if (fb.IsPlaying || isPaused) return; // now-playing art always takes priority
+	if (!info) return;
+	const handle = _findHandleForFolder(info);
+	if (handle) ArtDispatcher.request('selection', handle);
 }
  
 function on_playlist_switch() {
