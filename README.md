@@ -17,7 +17,8 @@ It features a **dynamic colour scheme based on album artwork**, custom playback 
 
 * Dynamic colour scheme derived from the currently playing album art
 * Multiple layouts with custom spectrum analyzer presets
-* Custom play buttons(4 styles) and volume knob
+* Custom play buttons(4 styles, can add custom sets, folder and 5 icons)
+* Volume Knob, custom colour themes
 * Disk spinner panel (album art or CD-style disc)
 * Artwork blur panel
 * Multiple VU meter skins
