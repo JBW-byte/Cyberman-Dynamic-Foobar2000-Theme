@@ -111,7 +111,7 @@ Bug Fix's. v3.9
 </details>
 
 <details>
-<summary><strong>LCD TimerPro... ish</strong> — Updated 29 Aug 2026</summary>
+<summary><strong>LCD TimerPro</strong> — Updated 29 Aug 2026</summary>
 
 ### Update Overview
 Bug Fix's. v1.5
