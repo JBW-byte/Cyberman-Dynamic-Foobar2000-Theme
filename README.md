@@ -87,7 +87,7 @@ Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music 
 
   * [https://www.last.fm/api](https://www.last.fm/api)
 
-* A 2nd minimal theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl
+* A 2nd modular theme * `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-V2.ftl
 * A 3rd OneRack theme, very minimal, low memory/resource usage* `File → Preferences → Display → Default User Interface → Import Theme` Cyberman-Dynamic-OneRack.ftl  
 <p float="left">
   <img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman-Dynamic%20V2.png" width="49%" alt="Cyberman-Dynamic_v2" title="Cyberman-Dynamic-v2"/>
