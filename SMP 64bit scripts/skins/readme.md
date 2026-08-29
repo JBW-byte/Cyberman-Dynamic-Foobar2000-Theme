@@ -32,10 +32,10 @@ For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable 
 # Components
 
 <details>
-<summary><strong>DiscSpin</strong> — Updated 20 Aug 2026</summary>
+<summary><strong>DiscSpin</strong> — Updated 29 Aug 2026</summary>
 
 ### Update Overview
-Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v3.9
+Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v4.0
 
 ### Features
 
@@ -62,10 +62,10 @@ Recommended settings for large panels:
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 09 July 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 29 Aug 2026</summary>
 
 ### Update Overview
-Small fixs, hits marker on scroll or up/down keys. v2.4
+Custom Themes and json save, bug fixes. v3.0
 
 ### Controls
 
@@ -84,10 +84,10 @@ Small fixs, hits marker on scroll or up/down keys. v2.4
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 20 Aug 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 29 Aug 2026</summary>
 
 ### Update Overview
-Bug Fix's. v3.8
+Bug Fix's. v3.9
 
 ### Features
 
@@ -111,10 +111,10 @@ Bug Fix's. v3.8
 </details>
 
 <details>
-<summary><strong>LCD TimerPro... ish</strong> — Updated 20 Aug 2026</summary>
+<summary><strong>LCD TimerPro... ish</strong> — Updated 29 Aug 2026</summary>
 
 ### Update Overview
-Bug Fix's. v1.4
+Bug Fix's. v1.5
 
 ### Features
 
