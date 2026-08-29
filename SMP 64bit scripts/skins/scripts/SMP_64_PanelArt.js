@@ -1,7 +1,7 @@
 'use strict';
            // ============== AUTHOR L.E.D. ============== \\
           // ==-== Panel Artwork and Trackinfo v3.9  ==-== \\
-         // ========== Blur Artwork + Trackinfo =========== \\
+         // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
  // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
@@ -224,7 +224,12 @@ const _fso = (function () {
 
 // ====================== FILE MANAGER ======================
 const FileManager = {
-    cache: new Map(),
+    cache:          new Map(),
+    subfolderCache: new Map(),
+    fileListCache:  new Map(),
+
+    FILE_EXIST_TTL: 5 * 60 * 1000,
+    FILE_LIST_TTL:  2 * 60 * 1000,
 
     _sanitise(str) {
         if (!str) return '';
@@ -258,10 +263,14 @@ const FileManager = {
 
     exists(path) {
         if (!path) return false;
-        if (this.cache.has(path)) return this.cache.get(path);
+        if (this.cache.has(path)) {
+            const entry = this.cache.get(path);
+            if (Date.now() - entry.at < this.FILE_EXIST_TTL) return entry.result;
+            this.cache.delete(path);
+        }
         const result = _isFile(path);
         if (result) {
-            this.cache.set(path, true);
+            this.cache.set(path, { result: true, at: Date.now() });
             if (this.cache.size > MAX_FILE_CACHE) this.cache.delete(this.cache.keys().next().value);
         }
         return result;
@@ -269,17 +278,45 @@ const FileManager = {
 
     isDirectory: _isFolder,
 
+    getImageFiles(folder) {
+        if (!folder) return [];
+        if (this.fileListCache.has(folder)) {
+            const entry = this.fileListCache.get(folder);
+            if (Date.now() - entry.at < this.FILE_LIST_TTL) return entry.files;
+            this.fileListCache.delete(folder);
+        }
+        const files = [];
+        try {
+            if (_fso && _fso.FolderExists(folder)) {
+                const en = new Enumerator(_fso.GetFolder(folder).Files);
+                for (; !en.atEnd(); en.moveNext()) {
+                    const file = en.item();
+                    const ext = file.Path.toLowerCase().match(/\.[^.]+$/);
+                    if (ext && EXTENSIONS.includes(ext[0])) files.push(file.Path);
+                }
+            }
+        } catch (e) {}
+        this.fileListCache.set(folder, { files, at: Date.now() });
+        if (this.fileListCache.size > 30) this.fileListCache.delete(this.fileListCache.keys().next().value);
+        return files;
+    },
+
     getSubfolders(folder) {
         if (folder.length > 3) folder = folder.replace(/\\+$/, '');
-        if (!_isFolder(folder)) return [];
+        if (this.subfolderCache.has(folder)) return this.subfolderCache.get(folder);
         const subfolders = [];
-        try {
-            if (!_fso || !_fso.FolderExists(folder)) return [];
-            const en = new Enumerator(_fso.GetFolder(folder).SubFolders);
-            for (; !en.atEnd(); en.moveNext()) subfolders.push(en.item().Path);
-        } catch (e) {
-            console.log('PanelArt: getSubfolders error:', e);
+        if (this.isDirectory(folder)) {
+            try {
+                if (_fso && _fso.FolderExists(folder)) {
+                    const en = new Enumerator(_fso.GetFolder(folder).SubFolders);
+                    for (; !en.atEnd(); en.moveNext()) subfolders.push(en.item().Path);
+                }
+            } catch (e) {
+                console.log('PanelArt: getSubfolders error:', e);
+            }
         }
+        this.subfolderCache.set(folder, subfolders);
+        if (this.subfolderCache.size > 50) this.subfolderCache.delete(this.subfolderCache.keys().next().value);
         return subfolders;
     },
 
@@ -306,7 +343,11 @@ const FileManager = {
 
     findImageInPaths(paths) { return _.find(paths, p => this.exists(p)) || null; },
 
-    clear() { this.cache.clear(); }
+    clear() {
+        this.cache.clear();
+        this.subfolderCache.clear();
+        this.fileListCache.clear();
+    }
 };
 
 // ====================== CUSTOM FOLDERS ======================
@@ -698,6 +739,7 @@ const TextManager = {
 // ====================== IMAGE SEARCH ======================
 const ImageSearch = {
     _pathCache: new Map(),
+    PATH_HIT_TTL:  5 * 60 * 1000,
     PATH_MISS_TTL: 30 * 1000,
 
     clearCache() { this._pathCache.clear(); },
@@ -734,13 +776,14 @@ const ImageSearch = {
         if (data.album && data.album.image)                      imageFields.push(data.album.image);
         if (data.track && data.track.album && data.track.album.image)
             imageFields.push(data.track.album.image);
+        const sep = folder.endsWith('\\') ? '' : '\\';
         for (const field of imageFields) {
             const candidates = _.isArray(field) ? field : [field];
             for (const entry of candidates) {
                 const ref = (entry && (entry['#text'] || entry.url || entry)) || '';
                 const str = _.isString(ref) ? _.trim(ref) : '';
                 if (!str || str.startsWith('http')) continue;
-                const abs = (str.includes('\\') || str.includes('/')) ? str : (folder.endsWith('\\') ? folder : folder + '\\') + str;
+                const abs = (str.includes('\\') || str.includes('/')) ? str : folder + sep + str;
                 if (_isFile(abs)) return abs;
             }
         }
@@ -853,10 +896,19 @@ const ImageSearch = {
             if (!cached.path) {
                 if (age < this.PATH_MISS_TTL) return null;
                 this._pathCache.delete(baseFolder);
-            } else if (!FileManager.exists(cached.path)) {
-                this._pathCache.delete(baseFolder);
+            } else if (age < this.PATH_HIT_TTL) {
+                if (!FileManager.exists(cached.path)) {
+                    this._pathCache.delete(baseFolder);
+                } else {
+                    return cached.path;
+                }
             } else {
-                return cached.path;
+                if (!FileManager.exists(cached.path)) {
+                    this._pathCache.delete(baseFolder);
+                } else {
+                    cached.at = Date.now();
+                    return cached.path;
+                }
             }
         }
 
@@ -872,7 +924,7 @@ const ImageSearch = {
         const trackSub = this._searchFolderTree(baseFolder, COVER_PATTERNS, MAX_SUBFOLDER_DEPTH);
         if (trackSub)   { this._setCache(baseFolder, trackSub);   return trackSub; }
 
-        const artistAlbumSpace = (metadata.artist && metadata.album) ? metadata.artist + ' ' + metadata.album : '';
+        const artistAlbumSpace = (metadata.artist && metadata.album) ? metadata.artist + ' ' + metadata.album   : '';
         const simpleNames = _.compact([metadata.title, metadata.artist, metadata.album, metadata.artistAlbum, artistAlbumSpace]);
         const nameVariations = [];
         _.forEach(simpleNames, name => {
@@ -1923,16 +1975,51 @@ const ArtController = {
         PanelArt.dimensions.width  = window.Width;
         PanelArt.dimensions.height = window.Height;
 
-        PanelArt.timers.resize = Utils.clearTimer(PanelArt.timers.resize);
+        if (PanelArt.timers.resize)         { window.ClearTimeout(PanelArt.timers.resize);         PanelArt.timers.resize         = null; }
+        if (PanelArt.timers.resizeStage1)   { window.ClearTimeout(PanelArt.timers.resizeStage1);   PanelArt.timers.resizeStage1   = null; }
+        if (PanelArt.timers.resizeStage2)   { window.ClearTimeout(PanelArt.timers.resizeStage2);   PanelArt.timers.resizeStage2   = null; }
+        if (PanelArt.timers.resizeStage3)   { window.ClearTimeout(PanelArt.timers.resizeStage3);   PanelArt.timers.resizeStage3   = null; }
+
         PanelArt.timers.resize = window.SetTimeout(() => {
             PanelArt.timers.resize = null;
-            PanelArt.dimensions.width  = window.Width;
-            PanelArt.dimensions.height = window.Height;
-            OverlayCache.invalidate();
-            ArtCache.clearScaledCache();
-            ImageManager.scheduleBlurRebuild();
-            RepaintScheduler.immediate();
+            if (!isLive()) return;
+            this._runResizePipeline();
         }, 50);
+    },
+
+    // --- STAGED RESIZE PIPELINE ---
+    _runResizePipeline() {
+        // Stage 0: Synchronously flush size-dependent caches & trigger instant basic repaint
+        PanelArt.dimensions.width  = window.Width;
+        PanelArt.dimensions.height = window.Height;
+        ArtCache.clearScaledCache();
+        TextHeightCache.clear();
+        TextManager.invalidateCache();
+        OverlayCache.invalidate();
+        RepaintScheduler.request();
+
+        // Stage 1: Build Full-Panel Blur Background (Heavy StackBlur on deferred tick)
+        PanelArt.timers.resizeStage1 = window.SetTimeout(() => {
+            PanelArt.timers.resizeStage1 = null;
+            if (!isLive()) return;
+            ImageManager.buildBlur();
+            RepaintScheduler.request();
+
+            // Stage 2: Pre-compute text metrics and rebuild Overlay effects at new aspect ratio
+            PanelArt.timers.resizeStage2 = window.SetTimeout(() => {
+                PanelArt.timers.resizeStage2 = null;
+                if (!isLive()) return;
+                OverlayCache.invalidate();
+                RepaintScheduler.request();
+
+                // Stage 3: Reload/Scale art images & blit final high-quality composition
+                PanelArt.timers.resizeStage3 = window.SetTimeout(() => {
+                    PanelArt.timers.resizeStage3 = null;
+                    if (!isLive()) return;
+                    RepaintScheduler.immediate();
+                }, 0);
+            }, 0);
+        }, 0);
     },
 
     onMouseWheel(delta) {
@@ -1980,10 +2067,14 @@ const ArtController = {
     onUnload() {
         PanelArt.timers.blurRebuild    = Utils.clearTimer(PanelArt.timers.blurRebuild);
         PanelArt.timers.overlayRebuild = Utils.clearTimer(PanelArt.timers.overlayRebuild);
-        if (PanelArt.timers.glitch) { window.ClearInterval(PanelArt.timers.glitch); PanelArt.timers.glitch = null; }
-        if (PanelArt.slideTimer)    { window.ClearInterval(PanelArt.slideTimer);     PanelArt.slideTimer    = null; }
-        if (PanelArt.slideImage)    { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
-        if (PanelArt.imageImage)    { try { PanelArt.imageImage.Dispose(); } catch (e) {} PanelArt.imageImage = null; }
+        if (PanelArt.timers.resize)       { window.ClearTimeout(PanelArt.timers.resize);       PanelArt.timers.resize       = null; }
+        if (PanelArt.timers.resizeStage1) { window.ClearTimeout(PanelArt.timers.resizeStage1); PanelArt.timers.resizeStage1 = null; }
+        if (PanelArt.timers.resizeStage2) { window.ClearTimeout(PanelArt.timers.resizeStage2); PanelArt.timers.resizeStage2 = null; }
+        if (PanelArt.timers.resizeStage3) { window.ClearTimeout(PanelArt.timers.resizeStage3); PanelArt.timers.resizeStage3 = null; }
+        if (PanelArt.timers.glitch)       { window.ClearInterval(PanelArt.timers.glitch);       PanelArt.timers.glitch       = null; }
+        if (PanelArt.slideTimer)          { window.ClearInterval(PanelArt.slideTimer);          PanelArt.slideTimer          = null; }
+        if (PanelArt.slideImage)          { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
+        if (PanelArt.imageImage)          { try { PanelArt.imageImage.Dispose(); } catch (e) {} PanelArt.imageImage = null; }
         if (StateManager._saveTimer) {
             window.ClearTimeout(StateManager._saveTimer);
             StateManager._saveTimer      = null;
@@ -2310,13 +2401,39 @@ function on_selection_changed() {
     if (item) { TextManager.update(item); OverlayCache.invalidate(); ImageManager.loadAlbumArt(item); }
 }
 
+function _findHandleForFolder(folderPath) {
+    if (!folderPath || !fb.IsLibraryEnabled()) return null;
+    let items = null, matches = null;
+    try {
+        items = fb.GetLibraryItems();
+        if (!items || !items.Count) return null;
+        matches = fb.GetQueryItems(items, '"%directory_path%" IS "' + folderPath.replace(/"/g, '""') + '"');
+        if (matches && matches.Count > 0) {
+            return matches.Item ? matches.Item(0) : matches[0];
+        }
+    } catch (e) {
+    } finally {
+        if (matches) { try { matches.Dispose(); } catch (e) {} }
+        if (items)   { try { items.Dispose(); }   catch (e) {} }
+    }
+    return null;
+}
+
+function on_notify_data(name, info) {
+    if (name !== 'ArtFolder') return;
+    if (!isLive()) return;
+    if (fb.IsPlaying || fb.IsPaused) return;
+    if (!info) return;
+    const handle = _findHandleForFolder(info);
+    if (handle) ArtDispatcher.request('track', handle);
+}
+
 function on_script_unload() {
     phase = Phase.SHUTDOWN;
     if (_startupTimer) { window.ClearTimeout(_startupTimer); _startupTimer = null; }
     RepaintScheduler.cancel();
     ArtQueue.clear();
     ArtController.onUnload();
-    if (PanelArt.timers.resize) { window.ClearTimeout(PanelArt.timers.resize); PanelArt.timers.resize = null; }
     ArtDispatcher._unloaded = true;
     if (ArtDispatcher._trackTimer) { window.ClearTimeout(ArtDispatcher._trackTimer); ArtDispatcher._trackTimer = null; }
     if (ArtDispatcher._timer)      { window.ClearTimeout(ArtDispatcher._timer);      ArtDispatcher._timer      = null; }
