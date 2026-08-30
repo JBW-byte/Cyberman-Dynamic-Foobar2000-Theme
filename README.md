@@ -9,7 +9,7 @@
 
 It features a **dynamic colour scheme based on album artwork**, custom playback controls, multiple VU meter skins, and configurable spectrum and layout presets.
 
-> **Last updated:** 29 Aug 2026 Added MilkDrop2 and ESLyric. Updated componets/scripts
+> **Last updated:** 29 Aug 2026 Added MilkDrop2 and ESLyric. Updated componets/scripts. V2 Theme changes.
 
 ---
 
