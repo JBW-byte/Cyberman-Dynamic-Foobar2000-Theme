@@ -140,7 +140,7 @@ This theme includes and depends on community-developed components and scripts fr
   [https://github.com/regorxxx/Library-Tree-SMP](https://github.com/regorxxx/Library-Tree-SMP)
 
 * **Biography** — regor
-  [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1078388.html#msg1078388)
+  [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1084983.html#msg1084983)
 
 ### Optional Components
 
