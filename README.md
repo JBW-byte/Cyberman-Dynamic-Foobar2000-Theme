@@ -124,7 +124,7 @@ This theme includes and depends on community-developed components and scripts fr
 * **MilkDrop 2 Visualisation** — oops
   [https://www.foobar2000.org/components/view/foo_vis_milk2](https://www.foobar2000.org/components/view/foo_vis_milk2)
 
-* **ESLyric* — ESLyric
+* **ESLyric** — ESLyric
   [https://github.com/ESLyric/release](https://github.com/ESLyric/release)
 
 * **Spectrum Analyzer** — pqyt
