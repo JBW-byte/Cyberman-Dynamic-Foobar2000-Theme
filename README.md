@@ -121,6 +121,12 @@ This theme includes and depends on community-developed components and scripts fr
 * **Analog VU Meter Visualization** — oops
   [https://www.foobar2000.org/components/view/foo_vis_vumeter](https://www.foobar2000.org/components/view/foo_vis_vumeter)
 
+* **MilkDrop 2 Visualisation** — oops
+  [https://www.foobar2000.org/components/view/foo_vis_milk2](https://www.foobar2000.org/components/view/foo_vis_milk2)
+
+* **https://github.com/ESLyric/release** — ESLyric
+  [https://github.com/ESLyric/release](https://github.com/ESLyric/release)
+
 * **Spectrum Analyzer** — pqyt
   [https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer](https://www.foobar2000.org/components/view/foo_vis_spectrum_analyzer)
 
