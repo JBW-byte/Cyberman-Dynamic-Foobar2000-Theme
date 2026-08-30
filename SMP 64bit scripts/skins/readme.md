@@ -32,10 +32,10 @@ For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable 
 # Components
 
 <details>
-<summary><strong>DiscSpin</strong> — Updated 29 Aug 2026</summary>
+<summary><strong>DiscSpin</strong> — Updated 30 Aug 2026</summary>
 
 ### Update Overview
-Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v4.0
+Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v4.1
 
 ### Features
 
@@ -62,10 +62,10 @@ Recommended settings for large panels:
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 29 Aug 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 30 Aug 2026</summary>
 
 ### Update Overview
-Custom Themes and json save, bug fixes. v3.0
+Custom Themes and json save, bug fixes. v3.1
 
 ### Controls
 
