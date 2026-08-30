@@ -1,6 +1,6 @@
 'use strict';
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V3.0  ========\\
+		 // ========  SMP 64bit Volume Knob V3.1  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -8,7 +8,7 @@
 
 window.DrawMode = 0; // 0 - default GDI+ mode. 1 - D2D
 
-window.DefineScript('SMP 64bit Volume Knob V3.0', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit Volume Knob V3.1', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // ====================== HELPER INCLUDES ======================
 include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
@@ -335,14 +335,12 @@ class PropertyManager {
     constructor() {
         this.keys = {
             theme:           'VolumeKnob.ThemeName',
-            customThemeFile: 'VolumeKnob.CustomThemeFile',
-            snapEnabled:     'VolumeKnob.SnapEnabled'
+            customThemeFile: 'VolumeKnob.CustomThemeFile'
         };
 
         this.defaults = {
             theme:           'Classic Gray',
-            customThemeFile: fb.ProfilePath + 'volumeknob_custom_themes.json',
-            snapEnabled:     true
+            customThemeFile: fb.ProfilePath + 'volumeknob_custom_themes.json'
         };
 
         // Migration from legacy integer index property
@@ -358,8 +356,7 @@ class PropertyManager {
 
         this.values = {
             theme:           initialTheme,
-            customThemeFile: window.GetProperty(this.keys.customThemeFile, this.defaults.customThemeFile),
-            snapEnabled:     Boolean(window.GetProperty(this.keys.snapEnabled, this.defaults.snapEnabled))
+            customThemeFile: window.GetProperty(this.keys.customThemeFile, this.defaults.customThemeFile)
         };
 
         this._lastFinalizedTheme = this.values.theme !== '~Preview' ? this.values.theme : this.defaults.theme;
@@ -377,7 +374,6 @@ class PropertyManager {
 
     reset() {
         this.setTheme(this.defaults.theme);
-        this.set('snapEnabled', this.defaults.snapEnabled);
     }
 }
 
@@ -489,9 +485,8 @@ const VolumeConverter = {
         return CONFIG.VOL_BREAKPOINT_2 + (angle - mid) / SWEEP_HALF * VOL_RANGE_2;
     },
     applySnap(db) {
-        if (!properties.values.snapEnabled) return db;
         if (Math.abs(db) <= CONFIG.SNAP_TOLERANCE_DB) return 0;
-        if (Math.abs(db + 10) <= CONFIG.SNAP_TOLERANCE_DB) return -10;
+        if (Math.abs(db - CONFIG.DB_BREAKPOINT_2) <= CONFIG.SNAP_TOLERANCE_DB) return CONFIG.DB_BREAKPOINT_2;
         return db;
     }
 };
@@ -614,9 +609,7 @@ const InputHandler = {
     handleDragEnd() {
         if (!State.dragging) return false;
         State.dragging = false;
-        if (properties.values.snapEnabled) {
-            VolumeSync.setFoobarVolume(State.uiVolume, false);
-        }
+        VolumeSync.setFoobarVolume(State.uiVolume, false);
         State.targetAngle = State.dragTargetAngle;
         State.requestRepaint();
         return true;
@@ -842,7 +835,6 @@ const MenuManager = {
         const CREATOR_MARKER_ID        = THEME_CREATOR_BASE + 5;
         const CREATOR_SAVE_ID          = THEME_CREATOR_BASE + 6;
         const THEME_REMOVE_CUSTOM_BASE = 800;
-        const SNAP_TOGGLE_ID           = 900;
         const RESET_ID                 = 950;
 
         let id = THEME_BASE;
@@ -889,8 +881,6 @@ const MenuManager = {
 
         themeMenu.AppendTo(menu, MENU_STRING, 'Theme');
         menu.AppendMenuSeparator();
-        menu.AppendMenuItem(MENU_STRING, SNAP_TOGGLE_ID, mark(props.snapEnabled) + 'Snap to 0 dB && -10 dB');
-        menu.AppendMenuSeparator();
         menu.AppendMenuItem(MENU_STRING, RESET_ID, 'Reset Defaults');
 
         const selected = menu.TrackPopupMenu(x, y);
@@ -899,9 +889,6 @@ const MenuManager = {
             const chosen = names[selected - THEME_BASE];
             themes.clearPreview();
             properties.setTheme(chosen);
-            State.requestRepaint();
-        } else if (selected === SNAP_TOGGLE_ID) {
-            properties.set('snapEnabled', !props.snapEnabled);
             State.requestRepaint();
         } else if (selected === RESET_ID) {
             properties.reset();
@@ -990,7 +977,6 @@ let _unloaded = false;
 
 // ====================== INITIALIZATION ======================
 function init() {
-    // Load custom themes from JSON on startup
     const customThemeFile = properties.values.customThemeFile;
     try {
         const result = themes.loadFromFile(customThemeFile);
@@ -1045,7 +1031,6 @@ function on_paint(gr) {
     const w = window.Width, h = window.Height;
     if (!w || !h) return;
 
-    // Fill themed background
     const theme = themes.get(properties.values.theme);
     if (theme && theme.bg !== undefined) {
         gr.FillSolidRect(0, 0, w, h, theme.bg);
