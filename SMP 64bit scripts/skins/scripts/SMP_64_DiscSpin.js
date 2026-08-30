@@ -1,6 +1,6 @@
 'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V4.0 =======- \\
+		     // -======= SMP 64bit Disc Spin V4.1 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -11,7 +11,7 @@
 
 /*
  * ============================================================================================
- * SMP 64-bit Disc Spin V4.0 — High-Performance Vinyl / CD Rotation & Artwork Engine
+ * SMP 64-bit Disc Spin V4.1 — High-Performance Vinyl / CD Rotation & Artwork Engine
  * ============================================================================================
  *
  * ARCHITECTURE OVERVIEW:
@@ -36,7 +36,7 @@
 
 window.DrawMode = window.GetProperty('RP.DrawMode', 0); // 0 = GDI+ (CPU), 1 = D2D (GPU on JSplitter)
 
-window.DefineScript('SMP 64bit Disc Spin V4.0', { author: 'L.E.D.', options: { grab_focus: true } });
+window.DefineScript('SMP 64bit Disc Spin V4.1', { author: 'L.E.D.', options: { grab_focus: true } });
 
 // --------------------------------------------------------------------------------------------
 // 2. HELPER INCLUDES & UTILITY WRAPPERS
@@ -3289,7 +3289,7 @@ function on_metadb_changed(metadb_list, fromhook) {
 
 function on_playback_pause(state) {
     if (!isLive()) return;
-    isPaused = !state;
+    isPaused = Boolean(state);
     State.updateTimer();
 }
 
@@ -3300,9 +3300,9 @@ function on_playback_stop(reason) {
     ArtDispatcher.request('stop', reason);
 }
 
-function on_playback_starting() {
+function on_playback_starting(cmd, is_paused) {
     if (!isLive()) return;
-    isPaused = false;
+    isPaused = !!is_paused;
     State.updateTimer();
 }
 
@@ -3447,6 +3447,8 @@ function on_script_unload() {
 function init() {
     AssetManager.init();
     CustomFolders.load();
+	
+	isPaused = fb.IsPaused;
 
     const nowPlaying = fb.GetNowPlaying();
 
