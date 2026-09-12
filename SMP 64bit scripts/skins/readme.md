@@ -170,9 +170,28 @@ Foobar2000 64Bit/
 
 Your welcome to use in your non-commercial(paid or subscription services, bundled cloud service) theme for foobar2000, Please Credit Me.
 
+
 ## License
 
-These Scripts and Images are Shared for Personal Use Only. Individual components remain licensed under their respective authors.
+Custom Software License for foobar2000 Themes
+Copyright (c) 2026 [L.E.D.]
 
+1. Grant of License
+You are welcome to use, modify, and distribute these JavaScript (.js) scripts 
+solely for NON-COMMERCIAL purposes within themes for foobar2000. 
 
-        
+2. Restrictions
+Commercial use of this software is strictly prohibited. You may NOT include, 
+bundle, or use this software in any of the following:
+* Paid products, paid themes, or paid software.
+* Subscription-based services or premium features.
+* Cloud-bundled services or paid hosting platforms.
+
+3. Attribution
+You MUST give clear credit to the original author (L.E.D.) 
+in your theme's documentation, code comments, or user interface.
+
+4. Termination & Liability
+Any violation of these terms immediately voids your permission to use this software. 
+The author reserves the right to take legal action for unauthorized commercial use. 
+This software is provided "as is", without warranty of any kind.
