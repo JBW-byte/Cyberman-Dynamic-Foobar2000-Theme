@@ -2,9 +2,9 @@
 
 ![Foobar2000](https://img.shields.io/badge/Foobar2000-v2.x-blue)
 ![Component](https://img.shields.io/badge/Spider%20Monkey%20Panel-x64-green)
-![License](https://img.shields.io/badge/License-Personal%20Use-lightgrey)
+[![License: Custom](https://img.shields.io/badge/license-peronsal)](LICENSE)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/led_jbw)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/led_jbw)
 
 Custom **Spider Monkey Panel / JSplitter scripts** designed for **Foobar2000 v2 64bit** providing animated visuals, album-art driven UI elements, and interactive controls.
 
