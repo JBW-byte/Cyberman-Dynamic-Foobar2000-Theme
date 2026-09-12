@@ -166,6 +166,10 @@ Foobar2000 64Bit/
         └── default_disc.png
 </pre>
 
+## Usage
+
+Your welcome to use in your non-commercial theme for foobar2000, Please Credit Me.
+
 ## License
 
 These Scripts and Images are Shared for Personal Use Only. Individual components remain licensed under their respective authors.
