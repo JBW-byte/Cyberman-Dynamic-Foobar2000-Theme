@@ -168,7 +168,7 @@ Foobar2000 64Bit/
 
 ## Usage
 
-Your welcome to use in your non-commercial(paid or subscription services, bundled cloud service) theme for foobar2000, Please Credit Me.
+Your welcome to use in your non-commercial theme for foobar2000, Please Credit Me.
 
 
 ## License
