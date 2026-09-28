@@ -1,2480 +1,2704 @@
-'use strict';
+﻿'use strict';
+
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== Panel Artwork and Trackinfo v3.9  ==-== \\
+          // ==-== Panel Artwork and Trackinfo v4.0  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
  // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
 // === SMP 64bit script samples StackBlur+Panel, author:marc2003 === \\
 
-window.DrawMode = 0; // 0 = GDI+  1 = D2D
+/* 
+ * Custom License for foobar2000 Themes
+ * Copyright (c) 2026 [L.E.D.]
+ * Allowed: Non-commercial use and modification.
+ * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ */
 
-window.DefineScript("SMP 64bit PanelArt V3.9", { author: "L.E.D.", options: { grab_focus: true } });
+window.DefineScript('SMP 64bit PanelArt', { 
+    author: 'L.E.D.', 
+    version: '4.0',
+    features: { grab_focus: true } 
+});
 
-// ====================== INCLUDES ======================
-include(fb.ComponentPath + 'samples\\complete\\js\\lodash.min.js');
-include(fb.ComponentPath + 'samples\\complete\\js\\helpers.js');
+window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
+window.DlgCode = 0x0004; // DLGC_WANTALLKEYS: Captures arrow keys and modifier shortcuts
 
-// ====================== LIFECYCLE ======================
-const Phase = { BOOT: 0, LIVE: 1, SHUTDOWN: 2 };
-let phase = Phase.BOOT;
-function isLive() { return phase === Phase.LIVE; }
-
-// ====================== USER DEFAULTS ======================
-const USER_DEFAULTS = {
-    ALBUM_ART_PADDING:    40,
-    ALBUM_ART_BORDER:     10,
-    ALBUM_ART_BORDER_COLOR: _RGB(32, 32, 32),
-    BLUR_RADIUS:          240,
-    DARKEN_VALUE:         10,
-    BACKGROUND_COLOR:     _RGB(25, 25, 25),
-    REFLECTION_OPACITY:   25,
-    GLOW_OPACITY:         80,
-    SCANLINES_OPACITY:    100,
-    PHOSPHOR_OPACITY:     20,
-    TITLE_FONT:  "Segoe UI", TITLE_SIZE:  42,
-    ARTIST_FONT: "Segoe UI", ARTIST_SIZE: 28,
-    EXTRA_FONT:  "Segoe UI", EXTRA_SIZE:  20
-};
-
-// ====================== CONSTANTS ======================
-const STATE_KEY      = "SMP_64_PANELART_STATE";
-const STATE_VERSION  = 3;
-
-const ALBUM_ART_MAX_WIDTH_RATIO  = 0.65;
-const ALBUM_ART_MIN_HEIGHT_RATIO = 0.45;
-const REFLECTION_HEIGHT_RATIO    = 0.45;
-const DARKEN_ALPHA_MULTIPLIER    = 2.55;
-const DEFAULT_OVERLAY_PADDING    = 6;
-const TEXT_SHADOW_OFFSET         = 2;
-const SCANLINE_SPACING           = 3;
-
-const MAX_SUBFOLDER_DEPTH   = 4;
-const MAX_CUSTOM_FOLDERS    = 5;
-const MAX_FILE_CACHE        = 200;
-const MAX_FONT_CACHE        = 50;
-const MAX_TEXT_HEIGHT_CACHE = 100;
-const MAX_BG_CACHE          = 12;
-
-const BLUR_DEBOUNCE_MS = 150;
-const SLIDER_MIN_WIDTH = 220;
-const SLIDER_WIDTH_RATIO = 0.6;
-const SLIDER_HEIGHT    = 6;
-const SLIDER_STEP      = 5;
-const GAP_TITLE_ARTIST = 2;
-const GAP_ARTIST_EXTRA = 6;
-const MIN_FONT_SIZE    = 6;
-const MAX_FONT_SIZE    = 200;
-
-const COVER_PATTERNS = ["cover","front","folder","albumart","album","artwork","art","front cover"];
-const EXTENSIONS     = [".png",".jpg",".jpeg",".webp",".bmp",".gif"];
-const JSON_ART_FILES = [
-    "lastfm_artist_getSimilar.json","lastfm_album_getInfo.json",
-    "lastfm_track_getInfo.json","lastfm.json"
-];
-
-const MF_CHECKED = 0x00000008;
-
-// ====================== COLOUR HELPERS ======================
-function PanelArt_SetAlpha(col, a) { return ((col & 0x00FFFFFF) | (a << 24)) >>> 0; }
-
-function PanelArt_BlendWithWhite(col, ratio) {
-    const r = Math.floor(((col >>> 16) & 255) + (255 - ((col >>> 16) & 255)) * ratio);
-    const g = Math.floor(((col >>> 8) & 255) + (255 - ((col >>> 8) & 255)) * ratio);
-    const b = Math.floor((col & 255) + (255 - (col & 255)) * ratio);
-    return (0xFF000000 | (r << 16) | (g << 8) | b) >>> 0;
-}
-
-const PA_BLACK        = _RGB(0, 0, 0);
-const PA_WHITE        = _RGB(255, 255, 255);
-const PA_GREY200      = _RGB(200, 200, 200);
-const PA_GREY180      = _RGB(180, 180, 180);
-const PA_BORDER_LIGHT = _RGB(80, 80, 80);
-const PA_BORDER_DARK  = _RGB(20, 20, 20);
-const PA_MODE_BG      = _RGB(5, 5, 5);
-const PA_GLITCH_BASE  = _RGB(5, 5, 15);
-const PA_GLITCH_CHROMA = _RGB(220, 225, 230);
-const PA_GLITCH_FLASH  = _RGB(200, 210, 230);
-
-const GLITCH_SHIFT_COLORS = [
-    _RGB(100,200,255),_RGB(180,200,230),_RGB(150,255,150),
-    _RGB(255,255,100),_RGB(255,100,100)
-];
-const GLITCH_SLICE_COLORS = [
-    _RGB(100,180,255),_RGB(180,200,230),_RGB(200,210,220),
-    _RGB(120,160,220),_RGB(150,255,150),_RGB(255,255,100),_RGB(255,100,100)
-];
-const GLITCH_TINT_COLORS = [
-    _RGB(100,180,255),_RGB(180,200,230),_RGB(200,210,220),
-    _RGB(150,170,210),_RGB(100,255,100),_RGB(255,255,100),_RGB(255,100,100)
-];
-const GLITCH_TRACK_COLORS = [
-    _RGB(100,150,200),_RGB(80,200,80),_RGB(200,200,80),_RGB(255,80,80)
-];
-const GLITCH_BLOCK_COLORS = [
-    _RGB(0x64,0xB4,0xFF),_RGB(0xB4,0xC8,0xE6),_RGB(0xD2,0xDA,0xE6),
-    _RGB(0x78,0x88,0xB8),_RGB(0xA0,0xB0,0xC8),_RGB(0xC8,0xD0,0xE0),
-    _RGB(0x50,0xFF,0x50),_RGB(0xFF,0xFF,0x50),_RGB(0xFF,0x50,0x50)
-];
-
-// ====================== PHOSPHOR THEMES ======================
-const PHOSPHOR_THEMES = [
-    { name: "Classic",  color: _RGB(0,255,0)    },
-    { name: "Neo",      color: _RGB(0,255,255)  },
-    { name: "Dark",     color: _RGB(0,200,0)    },
-    { name: "Bright",   color: _RGB(255,255,0)  },
-    { name: "Retro",    color: _RGB(0,255,100)  },
-    { name: "Minimal",  color: _RGB(0,180,0)    },
-    { name: "Matrix",   color: _RGB(0,255,50)   },
-    { name: "Vapor",    color: _RGB(255,180,255) },
-    { name: "Cyber",    color: _RGB(0,255,255)  },
-    { name: "Magenta",  color: _RGB(255,0,255)  }
-];
-const CUSTOM_THEME_INDEX = PHOSPHOR_THEMES.length;
-
-// ====================== DEFAULT STATE ======================
-function getDefaultState() {
-    return {
-        showReflection: true,  showGlow: false,  showScanlines: false,  showPhosphor: true,
-        overlayAllOff:  false, savedOverlay: null,
-        opReflection:   USER_DEFAULTS.REFLECTION_OPACITY,
-        opGlow:         USER_DEFAULTS.GLOW_OPACITY,
-        opScanlines:    USER_DEFAULTS.SCANLINES_OPACITY,
-        opPhosphor:     USER_DEFAULTS.PHOSPHOR_OPACITY,
-        currentPhosphorTheme: 8,  customPhosphorColor: 0xffffffff,
-        blurRadius:     USER_DEFAULTS.BLUR_RADIUS,
-        blurEnabled:    true,
-        darkenValue:    USER_DEFAULTS.DARKEN_VALUE,
-        borderSize:     USER_DEFAULTS.ALBUM_ART_BORDER,
-        borderColor:    USER_DEFAULTS.ALBUM_ART_BORDER_COLOR,
-        layout:         0,
-        textShadowEnabled: true,  extraInfoEnabled: true,
-        backgroundEnabled: true,  customBackgroundColor: USER_DEFAULTS.BACKGROUND_COLOR,
-        albumArtEnabled: true,    albumArtFloat: "left",
-        albumArtPadding: USER_DEFAULTS.ALBUM_ART_PADDING,
-        titleFontName:  USER_DEFAULTS.TITLE_FONT,   titleFontSize:  USER_DEFAULTS.TITLE_SIZE,
-        artistFontName: USER_DEFAULTS.ARTIST_FONT,  artistFontSize: USER_DEFAULTS.ARTIST_SIZE,
-        extraFontName:  USER_DEFAULTS.EXTRA_FONT,   extraFontSize:  USER_DEFAULTS.EXTRA_SIZE,
-        glitchEnabled:  true,
-        imageFolder:    "",  customFolders: "",
-        imageMode:      false, slideMode: false, slideIndex: 0
-    };
-}
-
-// ====================== STATE MIGRATION ======================
-function migrateState(oldState, oldVersion) {
-    let state = _.assign({}, oldState);
-    if (oldVersion < 2) {
-        const migrations = {
-            blur_strength: 'blurRadius',  blur_enabled: 'blurEnabled',
-            darken_value:  'darkenValue', border_size:  'borderSize',
-            border_color:  'borderColor', text_shadow_enabled: 'textShadowEnabled',
-            extra_info_enabled: 'extraInfoEnabled'
-        };
-        _.forEach(migrations, (newKey, oldKey) => {
-            if (!_.isUndefined(state[oldKey])) { state[newKey] = state[oldKey]; delete state[oldKey]; }
-        });
-        _.defaults(state, { currentPhosphorTheme: 0 });
+// ============================================================================================
+// 1. HELPERS & MATH UTILITIES
+// ============================================================================================
+class GdiUtils {
+    static clamp(val, min, max) {
+        const n = Number(val);
+        return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : min;
     }
-    if (oldVersion < 3) {
-        _.defaults(state, { backgroundEnabled: true, customBackgroundColor: USER_DEFAULTS.BACKGROUND_COLOR });
-        delete state.customBackgroundPath;
+
+    static RGB(r, g, b) {
+        return (0xFF000000 | ((r & 0xFF) << 16) | ((g & 0xFF) << 8) | (b & 0xFF)) >>> 0;
     }
-    _.defaults(state, { imageMode: false, slideMode: false, slideIndex: 0 });
-    return state;
-}
 
-// ====================== VALIDATION ======================
-const Validator = {
-    validateConfig(config) {
-        const def = getDefaultState();
-        const v   = _.assign({}, def, config);
-        v.blurRadius    = _.clamp(v.blurRadius   ?? def.blurRadius,   0, 254);
-        v.darkenValue   = _.clamp(v.darkenValue  ?? def.darkenValue,  0, 100);
-        v.borderSize    = _.clamp(v.borderSize   ?? def.borderSize,   0, 50);
-        v.layout        = _.clamp(v.layout       ?? def.layout,       0, 2);
-        v.opReflection  = _.clamp(v.opReflection ?? def.opReflection, 0, 255);
-        v.opGlow        = _.clamp(v.opGlow       ?? def.opGlow,       0, 255);
-        v.opScanlines   = _.clamp(v.opScanlines  ?? def.opScanlines,  0, 255);
-        v.opPhosphor    = _.clamp(v.opPhosphor   ?? def.opPhosphor,   0, 255);
-        v.currentPhosphorTheme = _.clamp(v.currentPhosphorTheme ?? def.currentPhosphorTheme, 0, CUSTOM_THEME_INDEX);
-        v.albumArtPadding      = _.clamp(v.albumArtPadding      ?? def.albumArtPadding,      0, 100);
-        v.titleFontSize  = _.clamp(v.titleFontSize  ?? def.titleFontSize,  MIN_FONT_SIZE, MAX_FONT_SIZE);
-        v.artistFontSize = _.clamp(v.artistFontSize ?? def.artistFontSize, MIN_FONT_SIZE, MAX_FONT_SIZE);
-        v.extraFontSize  = _.clamp(v.extraFontSize  ?? def.extraFontSize,  MIN_FONT_SIZE, MAX_FONT_SIZE);
-        v.titleFontName  = v.titleFontName  || def.titleFontName;
-        v.artistFontName = v.artistFontName || def.artistFontName;
-        v.extraFontName  = v.extraFontName  || def.extraFontName;
-        v.albumArtFloat  = _.includes(["left","right","top","bottom"], v.albumArtFloat) ? v.albumArtFloat : def.albumArtFloat;
-        v.borderColor           = (!_.isNumber(v.borderColor)           || isNaN(v.borderColor))           ? def.borderColor           : v.borderColor           >>> 0;
-        v.customBackgroundColor = (!_.isNumber(v.customBackgroundColor) || isNaN(v.customBackgroundColor)) ? def.customBackgroundColor : v.customBackgroundColor >>> 0;
-        v.customPhosphorColor   = (!_.isNumber(v.customPhosphorColor)   || isNaN(v.customPhosphorColor))   ? def.customPhosphorColor   : v.customPhosphorColor   >>> 0;
-        v.imageMode  = !!v.imageMode;
-        v.slideMode  = !!v.slideMode;
-        if (v.imageMode && v.slideMode) v.imageMode = false;
-        v.slideIndex = _.clamp(v.slideIndex ?? def.slideIndex, 0, 9999);
-        return v;
+    static setAlpha(col, a) {
+        const clampedA = (a < 0 ? 0 : a > 255 ? 255 : a) & 0xFF;
+        return ((clampedA << 24) | (col & 0x00FFFFFF)) >>> 0;
     }
-};
 
-// ====================== FSO SINGLETON ======================
-const _fso = (function () {
-    try { return new ActiveXObject('Scripting.FileSystemObject'); } catch (e) { return null; }
-})();
+    static blendWithWhite(col, ratio) {
+        const r = Math.floor(((col >>> 16) & 255) + (255 - ((col >>> 16) & 255)) * ratio);
+        const g = Math.floor(((col >>> 8) & 255) + (255 - ((col >>> 8) & 255)) * ratio);
+        const b = Math.floor((col & 255) + (255 - (col & 255)) * ratio);
+        return this.RGB(r, g, b);
+    }
 
-// ====================== FILE MANAGER ======================
-const FileManager = {
-    cache:          new Map(),
-    subfolderCache: new Map(),
-    fileListCache:  new Map(),
+    static sanitizePath(str) {
+        if (!str || typeof str !== 'string') return '';
+        const clean = str.replace(/^["']+|["']+$/g, '').trim();
+        // Preserve Windows drive root (e.g. "C:\") and UNC root (e.g. "\\server\share\")
+        if (/^[a-zA-Z]:[\\\/]?$/.test(clean)) return clean.substring(0, 2) + '\\';
+        if (/^\\\\[^\\]+\\[^\\]+[\\\/]?$/.test(clean)) return clean.replace(/[\\\/]+$/, '') + '\\';
+        return clean.replace(/[\/\\]+$/, '');
+    }
 
-    FILE_EXIST_TTL: 5 * 60 * 1000,
-    FILE_LIST_TTL:  2 * 60 * 1000,
-
-    _sanitise(str) {
+    static normalize(str) {
         if (!str) return '';
-        return utils.ReplaceIllegalChars(str, true);
-    },
+        return str.toLowerCase()
+            .replace(/[\(\[\{][^\)\]\}]*[\)\]\}]/g, ' ')
+            .replace(/[\/\\:*?"<>|\-_.,;!+=&^%$#@~`]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
 
-    sanitizeMetadata(str) {
-        if (!str) return "";
-        return _.trim(
-            str.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '')
-               .replace(/\{.*?\}/g, '').replace(/<.*?>/g, '')
-               .replace(/^(The|A|An)\s+/i, '')
-               .replace(/[^\w\s\-&'+]/g, ' ')
-               .replace(/_/g, ' ')
-               .replace(/\s+/g, ' ')
-        );
-    },
-
-    createSearchVariations(str) {
-        if (!str) return [];
-        const c = this.sanitizeMetadata(str);
-        return _.uniq([
-            c,
-            c.replace(/\s+/g, '-'),
-            c.replace(/\s+/g, '_'),
-            _.toLower(c),
-            _.toLower(c.replace(/\s+/g, '-')),
-            _.toLower(c.replace(/\s+/g, '_'))
-        ]).filter(v => v && v.length > 0);
-    },
-
-    exists(path) {
-        if (!path) return false;
-        if (this.cache.has(path)) {
-            const entry = this.cache.get(path);
-            if (Date.now() - entry.at < this.FILE_EXIST_TTL) return entry.result;
-            this.cache.delete(path);
-        }
-        const result = _isFile(path);
-        if (result) {
-            this.cache.set(path, { result: true, at: Date.now() });
-            if (this.cache.size > MAX_FILE_CACHE) this.cache.delete(this.cache.keys().next().value);
-        }
-        return result;
-    },
-
-    isDirectory: _isFolder,
-
-    getImageFiles(folder) {
-        if (!folder) return [];
-        if (this.fileListCache.has(folder)) {
-            const entry = this.fileListCache.get(folder);
-            if (Date.now() - entry.at < this.FILE_LIST_TTL) return entry.files;
-            this.fileListCache.delete(folder);
-        }
-        const files = [];
+    static prompt(promptText, titleText, defaultVal) {
         try {
-            if (_fso && _fso.FolderExists(folder)) {
-                const en = new Enumerator(_fso.GetFolder(folder).Files);
-                for (; !en.atEnd(); en.moveNext()) {
-                    const file = en.item();
-                    const ext = file.Path.toLowerCase().match(/\.[^.]+$/);
-                    if (ext && EXTENSIONS.includes(ext[0])) files.push(file.Path);
-                }
-            }
-        } catch (e) {}
-        this.fileListCache.set(folder, { files, at: Date.now() });
-        if (this.fileListCache.size > 30) this.fileListCache.delete(this.fileListCache.keys().next().value);
-        return files;
-    },
+            const res = utils.InputBox(window.ID, promptText, titleText, String(defaultVal ?? ''), true);
+            return (res === null || res === undefined) ? null : res;
+        } catch {
+            return null;
+        }
+    }
+}
 
-    getSubfolders(folder) {
-        if (folder.length > 3) folder = folder.replace(/\\+$/, '');
-        if (this.subfolderCache.has(folder)) return this.subfolderCache.get(folder);
-        const subfolders = [];
-        if (this.isDirectory(folder)) {
+// ============================================================================================
+// 2. FONT MANAGEMENT (LRU CACHED WITH DEFENSIVE DISPOSAL)
+// ============================================================================================
+class FontRegistry {
+    #cache = new Map();
+    #maxSize;
+
+    constructor(maxSize = 150) {
+        this.#maxSize = maxSize;
+    }
+
+    get(name, size, style = 0) {
+        const s = Math.max(4, Math.round(size));
+        const fontName = (typeof name === 'string' && name.trim().length > 0) ? name : 'Segoe UI';
+        const key = `${fontName}_${s}_${style}`;
+
+        let f = this.#cache.get(key);
+        if (!f) {
             try {
-                if (_fso && _fso.FolderExists(folder)) {
-                    const en = new Enumerator(_fso.GetFolder(folder).SubFolders);
-                    for (; !en.atEnd(); en.moveNext()) subfolders.push(en.item().Path);
+                f = gdi.Font(fontName, s, style);
+            } catch {
+                f = gdi.Font('Segoe UI', s, style);
+            }
+            this.#cache.set(key, f);
+            if (this.#cache.size > this.#maxSize) {
+                const oldestKey = this.#cache.keys().next().value;
+                const evicted = this.#cache.get(oldestKey);
+                if (evicted && typeof evicted.Dispose === 'function') {
+                    try { evicted.Dispose(); } catch {}
                 }
-            } catch (e) {
-                console.log('PanelArt: getSubfolders error:', e);
+                this.#cache.delete(oldestKey);
             }
         }
-        this.subfolderCache.set(folder, subfolders);
-        if (this.subfolderCache.size > 50) this.subfolderCache.delete(this.subfolderCache.keys().next().value);
-        return subfolders;
-    },
+        return f;
+    }
 
-    buildSearchPaths(folder, patterns, metadataNames = [], useVariations = false) {
-        const allPatterns = [...patterns];
-        _.forEach(metadataNames, name => {
-            if (useVariations) {
-                _.forEach(this.createSearchVariations(name), v => {
-                    const s = this._sanitise(v);
-                    if (s) allPatterns.push(s);
-                });
+    fitSize(gr, text, fontName, fontStyle, maxW, maxH, startSize, minSize = 8) {
+        const minBound = Math.max(4, Math.round(minSize));
+        let low = minBound;
+        let high = Math.max(minBound, Math.round(startSize));
+        let best = minBound;
+        const testText = text && text.trim().length > 0 ? text : 'Sample Text';
+
+        while (low <= high) {
+            const mid = (low + high) >>> 1;
+            const font = this.get(fontName, mid, fontStyle);
+            const m = gr.MeasureString(testText, font, 0, 0, 10000, 10000);
+            if (m.Width <= maxW && m.Height <= maxH) {
+                best = mid;
+                low = mid + 1;
             } else {
-                const s = this._sanitise(this.sanitizeMetadata(name));
-                if (s) allPatterns.push(s);
+                high = mid - 1;
             }
-        });
-        const paths = [];
-        const sep = folder.endsWith('\\') ? '' : '\\';
-        _.forEach(allPatterns, pattern => {
-            _.forEach(EXTENSIONS, ext => paths.push(folder + sep + pattern + ext));
-        });
-        return paths;
-    },
-
-    findImageInPaths(paths) { return _.find(paths, p => this.exists(p)) || null; },
+        }
+        return Math.max(minBound, best);
+    }
 
     clear() {
-        this.cache.clear();
-        this.subfolderCache.clear();
-        this.fileListCache.clear();
-    }
-};
-
-// ====================== CUSTOM FOLDERS ======================
-const CustomFolders = {
-    folders: [],
-
-    load() {
-        try {
-            const saved = StateManager.get().customFolders || "";
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                this.folders = _.isArray(parsed)
-                    ? _.filter(parsed, f => _.isString(f) && f.length > 0)
-                    : [];
-            } else {
-                this.folders = [];
-            }
-        } catch (e) { this.folders = []; }
-    },
-
-    save() {
-        try { StateManager.get().customFolders = JSON.stringify(this.folders); StateManager.save(); } catch (e) {}
-    },
-
-    add(folder) {
-        if (!folder || !_isFolder(folder)) return false;
-        if (_.includes(this.folders, folder)) return false;
-        if (this.folders.length >= MAX_CUSTOM_FOLDERS) this.folders.shift();
-        this.folders.push(folder);
-        this.save();
-        return true;
-    },
-
-    remove(index) {
-        if (_.inRange(index, 0, this.folders.length)) { this.folders.splice(index, 1); this.save(); return true; }
-        return false;
-    },
-
-    clear()  { this.folders = []; this.save(); },
-    getAll() { return [...this.folders]; }
-};
-
-// ====================== RUNTIME STATE ======================
-const PanelArt = {
-    loadToken:        0,
-    pendingArtToken:  0,
-
-    images: {
-        source:         null,
-        blur:           null,
-        currentMetadb:  null,
-        currentPath:    '',
-        folderPath:     ''
-    },
-
-    text:   { title: '', artist: '', extra: '' },
-
-    fonts:  { title: null, artist: null, extra: null, cache: new Map() },
-
-    dimensions: { width: 0, height: 0 },
-
-    slider: { active: false, target: null, paddingActive: false },
-
-    titleFormats: {
-        title:  fb.TitleFormat('%title%'),
-        artist: fb.TitleFormat('%artist%'),
-        album:  fb.TitleFormat('%album%'),
-        date:   fb.TitleFormat('%date%'),
-        length: fb.TitleFormat('%length%'),
-        path:   fb.TitleFormat("$directory_path(%path%)"),
-        folder: fb.TitleFormat("$directory(%path%)")
-    },
-
-    timers: { blurRebuild: null, overlayRebuild: null, glitch: null, resize: null },
-
-    imageMode:    false, imageImage:  null,
-    glitchFrame:  0,
-    slideMode:    false, slideImages: [], slideIndex: 0,
-    slideImage:   null,  slideTimer:  null
-};
-
-// ====================== ART CACHE ======================
-const ArtCache = {
-    _scaledCache: new Map(),
-    _nextId:      0,
-
-    getScaledImage(srcImg, targetW, targetH) {
-        if (!srcImg || targetW <= 0 || targetH <= 0) return null;
-        if (srcImg._id === undefined) srcImg._id = this._nextId++;
-        const key = srcImg._id + ':' + targetW + 'x' + targetH;
-        let entry = this._scaledCache.get(key);
-        if (entry) { entry.refCount++; return entry.image; }
-        let scaled = null;
-        try { scaled = srcImg.Resize(targetW, targetH); } catch (e) { return null; }
-        this._scaledCache.set(key, { image: scaled, refCount: 2 });
-        if (this._scaledCache.size > 20) {
-            let evicted = false;
-            for (const [k, v] of this._scaledCache) {
-                if (v.refCount <= 1) {
-                    this._scaledCache.delete(k);
-                    const doomed = v.image;
-                    window.SetTimeout(() => {
-                        if (phase === Phase.SHUTDOWN) return;
-                        try { doomed.Dispose(); } catch (e) {}
-                    }, 16);
-                    evicted = true;
-                    if (this._scaledCache.size <= 20) break;
-                } else {
-                    v.refCount--;
-                }
-            }
-            if (!evicted && this._scaledCache.size > 20) {
-                const oldest = this._scaledCache.entries().next();
-                if (!oldest.done) {
-                    this._scaledCache.delete(oldest.value[0]);
-                    const doomed = oldest.value[1].image;
-                    window.SetTimeout(() => {
-                        if (phase === Phase.SHUTDOWN) return;
-                        try { doomed.Dispose(); } catch (e) {}
-                    }, 16);
-                }
+        for (const font of this.#cache.values()) {
+            if (font && typeof font.Dispose === 'function') {
+                try { font.Dispose(); } catch {}
             }
         }
-        return scaled;
-    },
-
-    clearScaledCache() {
-        const entries = [...this._scaledCache.values()];
-        this._scaledCache.clear();
-        window.SetTimeout(() => {
-            if (phase === Phase.SHUTDOWN) return;
-            for (const v of entries) { try { v.image.Dispose(); } catch (e) {} }
-        }, 16);
-    },
-
-    clearScaledCacheSync() {
-        for (const v of this._scaledCache.values()) { try { v.image.Dispose(); } catch (e) {} }
-        this._scaledCache.clear();
-    },
-
-    clearAll() { this.clearScaledCacheSync(); }
-};
-
-// ====================== TEXT HEIGHT CACHE ======================
-const TextHeightCache = {
-    _heights: new Map(),
-
-    _key(text, font, width) { return `${text}\x00${font.Name}\x00${font.Size}\x00${font.Style}\x00${width}`; },
-
-    get(text, font, width)         { return this._heights.get(this._key(text, font, width)); },
-
-    set(text, font, width, height) {
-        this._heights.set(this._key(text, font, width), height);
-        if (this._heights.size > MAX_TEXT_HEIGHT_CACHE)
-            this._heights.delete(this._heights.keys().next().value);
-    },
-
-    clear() { this._heights.clear(); },
-
-    calcTextHeight(gr, text, font, width) {
-        const cached = this.get(text, font, width);
-        if (!_.isUndefined(cached)) return cached;
-        const h = Math.ceil(gr.CalcTextHeight(text, font, width));
-        this.set(text, font, width, h);
-        return h;
+        this.#cache.clear();
     }
-};
+}
 
-// ====================== REPAINT SCHEDULER ======================
-const RepaintScheduler = (() => {
-    let _pending = false;
-    let _timer   = null;
-    return {
-        request() {
-            if (_pending) return;
-            _pending = true;
-            _timer = window.SetTimeout(() => {
-                _pending = false;
-                _timer   = null;
-                if (phase === Phase.SHUTDOWN) return;
-                window.Repaint();
-            }, 0);
-        },
-        immediate() {
-            if (phase === Phase.SHUTDOWN) return;
-            if (_timer) { window.ClearTimeout(_timer); _timer = null; }
-            _pending = false;
-            window.Repaint();
-        },
-        cancel() {
-            if (_timer) { window.ClearTimeout(_timer); _timer = null; }
-            _pending = false;
-        }
-    };
-})();
+// ============================================================================================
+// 3. ARTWORK DISCOVERY & FILE CACHE
+// ============================================================================================
+class ArtScanner {
+    static EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'];
+    static FAST_NAMES = ['cover', 'front', 'folder', 'albumart'];
+    static BLACKLIST  = ['back', 'rear', 'tray', 'inlay', 'booklet', 'case', 'matrix', 'spine', 'inside', 'digipak'];
+    static DISC_REGEX = /^(?:cd|disc|disk|side|vinyl|disque|vol|part|volume)[\s_.\-]*\d+$/i;
+    static ART_SUBDIRS = ['artwork', 'scans', 'art', 'covers', 'cover', 'images', 'scan', 'disc', 'discs', 'extra', 'extras', 'cd1', 'cd2', 'disc1', 'disc2'];
 
-// ====================== REPAINT HELPER ======================
-const RepaintHelper = {
-    full()              { RepaintScheduler.request(); },
-    region(x, y, w, h) { (w > 0 && h > 0) ? window.RepaintRect(x, y, w, h) : RepaintScheduler.request(); },
-    albumArt() {
-        const d = PanelArt.dimensions, b = StateManager.get().borderSize || 0;
-        this.region(b, b, d.width - b * 2, d.height - b * 2);
-    },
-    text() {
-        RepaintScheduler.request();
+    #subfolderCache = new Map();
+    #dirScanCache   = new Map();
+    #artPathCache   = new Map();
+
+    clearCaches() {
+        this.#subfolderCache.clear();
+        this.#dirScanCache.clear();
+        this.#artPathCache.clear();
     }
-};
 
-// ====================== UTILITIES ======================
-const Utils = {
-    disposeImage(img) {
-        if (img && _.isFunction(img.Dispose)) { try { img.Dispose(); } catch (e) {} }
+    getArtworkIdentityKey(trackDir, album, disc) {
+        return `${trackDir || ''}|${(album || '').trim().toLowerCase()}|${(disc || '').trim().toLowerCase()}`;
+    }
+
+    getArtFromMemoryCache(key) {
+        if (!this.#artPathCache.has(key)) return null;
+        const cachedPath = this.#artPathCache.get(key);
+        if (cachedPath && utils.IsFile(cachedPath)) return cachedPath;
+        this.#artPathCache.delete(key);
         return null;
-    },
-
-    validateNumber(input, defaultValue, min, max) {
-        const v = parseInt(input, 10);
-        return isNaN(v) ? defaultValue : _.clamp(v, min, max);
-    },
-
-    clearTimer(timer)    { if (timer) window.ClearTimeout(timer);  return null; },
-    clearInterval(timer) { if (timer) window.ClearInterval(timer); return null; }
-};
-
-// ====================== FONT MANAGER ======================
-const FontManager = {
-    getFont(name, size, style = 0) {
-        const key = `${name}\x00${size}\x00${style}`;
-        if (PanelArt.fonts.cache.has(key)) {
-            const cached = PanelArt.fonts.cache.get(key);
-            PanelArt.fonts.cache.delete(key);
-            PanelArt.fonts.cache.set(key, cached);
-            return cached;
-        }
-        try {
-            let font = gdi.Font(name, size, style);
-            if (!font) font = gdi.Font("Segoe UI", size, style);
-            PanelArt.fonts.cache.set(key, font);
-            if (PanelArt.fonts.cache.size > MAX_FONT_CACHE) {
-                const firstKey = PanelArt.fonts.cache.keys().next().value;
-                const oldFont  = PanelArt.fonts.cache.get(firstKey);
-                if (oldFont && _.isFunction(oldFont.Dispose)) { try { oldFont.Dispose(); } catch (e) {} }
-                PanelArt.fonts.cache.delete(firstKey);
-            }
-            return font;
-        } catch (e) {
-            return gdi.Font("Segoe UI", size, style);
-        }
-    },
-
-    clearCache() {
-        PanelArt.fonts.cache.forEach(font => {
-            if (font && _.isFunction(font.Dispose)) { try { font.Dispose(); } catch (e) {} }
-        });
-        PanelArt.fonts.cache.clear();
-    },
-
-    rebuildFonts() {
-        this.clearCache();
-        const fl  = PanelArt.fonts;
-        const cfg = StateManager.get();
-        if (fl.title  && typeof fl.title.Dispose  === 'function') { try { fl.title.Dispose();  } catch (e) {} }
-        if (fl.artist && typeof fl.artist.Dispose === 'function') { try { fl.artist.Dispose(); } catch (e) {} }
-        if (fl.extra  && typeof fl.extra.Dispose  === 'function') { try { fl.extra.Dispose();  } catch (e) {} }
-        fl.title = fl.artist = fl.extra = null;
-        try {
-            fl.title  = gdi.Font(cfg.titleFontName,  cfg.titleFontSize,  1)  || gdi.Font("Segoe UI", cfg.titleFontSize, 1);
-            fl.artist = gdi.Font(cfg.artistFontName, cfg.artistFontSize, 0)  || gdi.Font("Segoe UI", cfg.artistFontSize, 0);
-            fl.extra  = gdi.Font(cfg.extraFontName,  cfg.extraFontSize,  0)   || gdi.Font("Segoe UI", cfg.extraFontSize, 0);
-        } catch (e) {
-            fl.title  = gdi.Font("Segoe UI", 42, 1);
-            fl.artist = gdi.Font("Segoe UI", 28, 0);
-            fl.extra  = gdi.Font("Segoe UI", 20, 0);
-        }
-        TextManager.invalidateCache();
     }
-};
 
-// ====================== TEXT MANAGER ======================
-const TextManager = {
-    _scaledCache: null,
-    _scaledKey:   null,
-
-    invalidateCache() { this._scaledCache = null; this._scaledKey = null; },
-
-    _buildScaledKey(maxWidth, maxHeight) {
-        const t = PanelArt.text, f = PanelArt.fonts;
-        return [
-            maxWidth, maxHeight,
-            t.title, t.artist, t.extra,
-            f.title  ? f.title.Name  + '\x00' + f.title.Size  + '\x00' + f.title.Style  : '',
-            f.artist ? f.artist.Name + '\x00' + f.artist.Size + '\x00' + f.artist.Style : '',
-            f.extra  ? f.extra.Name  + '\x00' + f.extra.Size  + '\x00' + f.extra.Style  : ''
-        ].join('\x00');
-    },
-
-    update(metadb) {
-        if (metadb === undefined) return;
-        if (!metadb) {
-            PanelArt.text.title  = 'No track playing';
-            PanelArt.text.artist = '';
-            PanelArt.text.extra  = '';
-            TextHeightCache.clear();
-            this.invalidateCache();
-            return;
+    setArtMemoryCache(key, path) {
+        if (this.#artPathCache.size > 500) {
+            this.#artPathCache.delete(this.#artPathCache.keys().next().value);
         }
-        const tf        = PanelArt.titleFormats;
-        const newTitle  = tf.title.EvalWithMetadb(metadb);
-        const newArtist = tf.artist.EvalWithMetadb(metadb);
-        if (newTitle !== PanelArt.text.title || newArtist !== PanelArt.text.artist) TextHeightCache.clear();
-        PanelArt.text.title  = newTitle;
-        PanelArt.text.artist = newArtist;
-        PanelArt.text.extra  = '';
-        if (StateManager.get().extraInfoEnabled) {
-            const parts = _.compact([
-                tf.album.EvalWithMetadb(metadb),
-                tf.date.EvalWithMetadb(metadb),
-                tf.length.EvalWithMetadb(metadb)
-            ]);
-            PanelArt.text.extra = parts.join(' | ');
-        }
-        this.invalidateCache();
-    },
-
-    scaleAndClip(gr, maxWidth, maxHeight) {
-        const key = this._buildScaledKey(maxWidth, maxHeight);
-        if (this._scaledCache && key === this._scaledKey) return this._scaledCache;
-
-        const text  = PanelArt.text;
-        const fonts = PanelArt.fonts;
-
-        const fitToWidth = (font, content) => {
-            if (!content || !font) return font;
-            if (gr.CalcTextWidth(content, font) <= maxWidth) return font;
-            let lo = MIN_FONT_SIZE, hi = font.Size;
-            while (lo < hi) {
-                const mid = (lo + hi + 1) >> 1;
-                if (gr.CalcTextWidth(content, FontManager.getFont(font.Name, mid, font.Style)) <= maxWidth) lo = mid;
-                else hi = mid - 1;
-            }
-            return FontManager.getFont(font.Name, lo, font.Style);
-        };
-
-        let titleFont  = fitToWidth(fonts.title,  text.title);
-        let artistFont = fitToWidth(fonts.artist, text.artist);
-        let extraFont  = (StateManager.get().extraInfoEnabled && text.extra)
-            ? fitToWidth(fonts.extra, text.extra) : null;
-
-        const calcTotalH = () => {
-            let h = TextHeightCache.calcTextHeight(gr, text.title,  titleFont,  maxWidth) + GAP_TITLE_ARTIST
-                  + TextHeightCache.calcTextHeight(gr, text.artist, artistFont, maxWidth);
-            if (extraFont) h += GAP_ARTIST_EXTRA + TextHeightCache.calcTextHeight(gr, text.extra, extraFont, maxWidth);
-            return h;
-        };
-
-        while (calcTotalH() > maxHeight &&
-               (titleFont.Size > MIN_FONT_SIZE || artistFont.Size > MIN_FONT_SIZE ||
-                (extraFont && extraFont.Size > MIN_FONT_SIZE))) {
-            if (titleFont.Size  > MIN_FONT_SIZE) titleFont  = FontManager.getFont(titleFont.Name,  titleFont.Size  - 1, titleFont.Style);
-            if (artistFont.Size > MIN_FONT_SIZE) artistFont = FontManager.getFont(artistFont.Name, artistFont.Size - 1, artistFont.Style);
-            if (extraFont && extraFont.Size > MIN_FONT_SIZE) extraFont = FontManager.getFont(extraFont.Name, extraFont.Size - 1, extraFont.Style);
-        }
-
-        const result = {
-            titleFont, artistFont, extraFont,
-            titleText:  this.clipText(gr, text.title,  titleFont,  maxWidth),
-            artistText: this.clipText(gr, text.artist, artistFont, maxWidth),
-            extraText:  extraFont ? this.clipText(gr, text.extra, extraFont, maxWidth) : null
-        };
-        this._scaledCache = result;
-        this._scaledKey   = key;
-        return result;
-    },
-
-    clipText(gr, content, font, maxWidth) {
-        if (!content || !font) return "";
-        if (gr.CalcTextWidth(content, font) <= maxWidth) return content;
-        let lo = 0, hi = content.length;
-        while (lo < hi) {
-            const mid = (lo + hi + 1) >> 1;
-            if (gr.CalcTextWidth(content.substring(0, mid) + '\u2026', font) <= maxWidth) lo = mid;
-            else hi = mid - 1;
-        }
-        return content.substring(0, lo) + '\u2026';
+        this.#artPathCache.set(key, path);
     }
-};
 
-// ====================== IMAGE SEARCH ======================
-const ImageSearch = {
-    _pathCache: new Map(),
-    PATH_HIT_TTL:  5 * 60 * 1000,
-    PATH_MISS_TTL: 30 * 1000,
+    getSubfolders(dirPath) {
+        if (!dirPath || !utils.IsDirectory(dirPath)) return [];
+        if (this.#subfolderCache.has(dirPath)) return this.#subfolderCache.get(dirPath);
 
-    clearCache() { this._pathCache.clear(); },
+        const sep = dirPath.endsWith('\\') ? '' : '\\';
+        try {
+            const items = utils.Glob(`${dirPath}${sep}*`, 0);
+            if (!Array.isArray(items)) return [];
+            const dirs = [];
+            for (let i = 0; i < items.length; i++) {
+                const name = items[i].substring(items[i].lastIndexOf('\\') + 1);
+                if (name === '.' || name === '..') continue;
+                if (utils.IsDirectory(items[i])) dirs.push(items[i]);
+            }
+            if (this.#subfolderCache.size > 200) {
+                this.#subfolderCache.delete(this.#subfolderCache.keys().next().value);
+            }
+            this.#subfolderCache.set(dirPath, dirs);
+            return dirs;
+        } catch {
+            return [];
+        }
+    }
 
-    _setCache(baseFolder, path) { this._pathCache.set(baseFolder, { path, at: Date.now() }); },
+    getFolderImagesList(dirPath) {
+        if (!dirPath || !utils.IsDirectory(dirPath)) return [];
+        if (this.#dirScanCache.has(dirPath)) return this.#dirScanCache.get(dirPath);
 
-    _toTitleCase(str) {
-        return str.replace(/\w\S*/g, t => t.charAt(0).toUpperCase() + t.substring(1).toLowerCase());
-    },
+        const sep = dirPath.endsWith('\\') ? '' : '\\';
+        try {
+            const files = utils.Glob(`${dirPath}${sep}*.*`);
+            if (!Array.isArray(files)) return [];
+            const result = [];
+            for (let i = 0; i < files.length; i++) {
+                const dot = files[i].lastIndexOf('.');
+                if (dot === -1) continue;
+                const ext = files[i].substring(dot).toLowerCase();
+                if (ArtScanner.EXTENSIONS.includes(ext)) {
+                    result.push({
+                        path: files[i],
+                        name: files[i].substring(files[i].lastIndexOf('\\') + 1, dot).toLowerCase()
+                    });
+                }
+            }
+            if (this.#dirScanCache.size > 100) {
+                this.#dirScanCache.delete(this.#dirScanCache.keys().next().value);
+            }
+            this.#dirScanCache.set(dirPath, result);
+            return result;
+        } catch {
+            return [];
+        }
+    }
 
-    getMetadataNames(metadb) {
-        const tf     = PanelArt.titleFormats;
-        const artist = tf.artist.EvalWithMetadb(metadb);
-        const album  = tf.album.EvalWithMetadb(metadb);
-        const title  = tf.title.EvalWithMetadb(metadb);
-        const folder = tf.folder.EvalWithMetadb(metadb);
+    getFastCover(dirPath) {
+        if (!dirPath || !utils.IsDirectory(dirPath)) return null;
+        const sep = dirPath.endsWith('\\') ? '' : '\\';
+        for (const name of ArtScanner.FAST_NAMES) {
+            for (const ext of ArtScanner.EXTENSIONS) {
+                const p = `${dirPath}${sep}${name}${ext}`;
+                if (utils.IsFile(p)) return p;
+            }
+        }
+        return null;
+    }
+
+    inspectScoredImages(dirPath, specificPatterns) {
+        const images = this.getFolderImagesList(dirPath);
+        if (images.length === 0) return { bestMatch: null, fallbackImage: null };
+
+        let bestMatch = null;
+        let highestScore = -1;
+        let bestFallback = null;
+
+        const lowerSpecs = specificPatterns?.map(p => p.toLowerCase().trim()).filter(Boolean) ?? [];
+
+        for (const img of images) {
+            let score = 0;
+            if (ArtScanner.FAST_NAMES.includes(img.name)) {
+                score = 100;
+            } else if (lowerSpecs.includes(img.name)) {
+                score = 80;
+            } else if (img.name.startsWith('cover') || img.name.startsWith('front') || img.name.startsWith('folder')) {
+                score = 60;
+            } else if (lowerSpecs.some(spec => img.name.startsWith(spec))) {
+                score = 50;
+            } else {
+                const blacklisted = ArtScanner.BLACKLIST.some(kw => img.name.includes(kw));
+                if (!blacklisted && !bestFallback) bestFallback = img.path;
+                score = blacklisted ? 5 : 20;
+            }
+
+            if (score > highestScore) {
+                highestScore = score;
+                bestMatch = img.path;
+            }
+        }
+
         return {
-            artist, album, title, folder,
-            artistAlbum: (artist && album) ? `${artist} - ${album}` : ""
+            bestMatch: (highestScore >= 50) ? bestMatch : null,
+            fallbackImage: bestFallback
         };
-    },
+    }
 
-    isLastFmFormat(data, jsonPath) {
-        const fname = _.toLower(jsonPath.split('\\').pop());
-        if (_.includes(fname, 'lastfm')) return true;
-        if (data.similarartists && data.similarartists.artist) return true;
-        if (data.url && _.isString(data.url) && _.includes(data.url, 'last.fm')) return true;
-        return false;
-    },
+    searchDirectory(dirPath, specificCover, allowFallback = true, isRootCustom = false, maxDepth = 2, _depth = 0) {
+        if (!dirPath || !utils.IsDirectory(dirPath)) return null;
 
-    _extractLocalImageFromLastFm(data, folder) {
-        const imageFields = [];
-        if (data.image)                                          imageFields.push(data.image);
-        if (data.album && data.album.image)                      imageFields.push(data.album.image);
-        if (data.track && data.track.album && data.track.album.image)
-            imageFields.push(data.track.album.image);
-        const sep = folder.endsWith('\\') ? '' : '\\';
-        for (const field of imageFields) {
-            const candidates = _.isArray(field) ? field : [field];
-            for (const entry of candidates) {
-                const ref = (entry && (entry['#text'] || entry.url || entry)) || '';
-                const str = _.isString(ref) ? _.trim(ref) : '';
-                if (!str || str.startsWith('http')) continue;
-                const abs = (str.includes('\\') || str.includes('/')) ? str : folder + sep + str;
-                if (_isFile(abs)) return abs;
+        const inspect = this.inspectScoredImages(dirPath, specificCover);
+        if (inspect.bestMatch) return inspect.bestMatch;
+        if (isRootCustom && _depth === 0) return null;
+
+        if (_depth < maxDepth) {
+            const subDirs = this.getSubfolders(dirPath);
+            for (const sub of subDirs) {
+                const name = sub.substring(sub.lastIndexOf('\\') + 1).toLowerCase().trim();
+                if (ArtScanner.ART_SUBDIRS.includes(name) || ArtScanner.DISC_REGEX.test(name)) {
+                    const found = this.searchDirectory(sub, specificCover, allowFallback, false, maxDepth, _depth + 1);
+                    if (found) return found;
+                }
+            }
+            if (subDirs.length <= 60 && _depth < 1) {
+                for (const sub of subDirs) {
+                    const name = sub.substring(sub.lastIndexOf('\\') + 1).toLowerCase().trim();
+                    if (!ArtScanner.ART_SUBDIRS.includes(name) && !ArtScanner.DISC_REGEX.test(name)) {
+                        const found = this.searchDirectory(sub, specificCover, false, false, maxDepth, _depth + 1);
+                        if (found) return found;
+                    }
+                }
             }
         }
-        return null;
-    },
+        return allowFallback ? inspect.fallbackImage : null;
+    }
 
-    searchJsonArtwork(folder) {
-        const sep = folder.endsWith('\\') ? '' : '\\';
-        for (const jsonFile of JSON_ART_FILES) {
-            const jsonPath = folder + sep + jsonFile;
-            try {
-                if (!_isFile(jsonPath)) continue;
-                const content = utils.ReadUTF8(jsonPath);
-                if (!content) continue;
-                const data = JSON.parse(content);
-                if (!data || !_.isObject(data)) continue;
-                if (!this.isLastFmFormat(data, jsonPath)) continue;
+    findInCustomFolder(cFolder, artistVariants, albumVariants, folderVariants, specificCover, maxDepth) {
+        const sep = cFolder.endsWith('\\') ? '' : '\\';
+        const candidateSubfolders = [];
 
-                const localRef = this._extractLocalImageFromLastFm(data, folder);
-                if (localRef) return localRef;
+        for (const art of artistVariants) {
+            for (const alb of albumVariants) {
+                candidateSubfolders.push(`${cFolder}${sep}${art} - ${alb}`, `${cFolder}${sep}${art}\\${alb}`, `${cFolder}${sep}${art}_${alb}`, `${cFolder}${sep}${art} ${alb}`);
+            }
+        }
+        for (const art of artistVariants) candidateSubfolders.push(`${cFolder}${sep}${art}`);
+        for (const alb of albumVariants) candidateSubfolders.push(`${cFolder}${sep}${alb}`);
+        for (const f of folderVariants) candidateSubfolders.push(`${cFolder}${sep}${f}`);
 
-                const found = FileManager.findImageInPaths(
-                    FileManager.buildSearchPaths(folder, COVER_PATTERNS, [])
-                );
+        for (const subDir of Array.from(new Set(candidateSubfolders))) {
+            if (utils.IsDirectory(subDir)) {
+                const found = this.searchDirectory(subDir, specificCover, true, false, maxDepth);
                 if (found) return found;
-            } catch (e) {}
-        }
-        return null;
-    },
-
-    searchInFolder(folder, patterns, metadata, useVariations = false) {
-        const jsonArt = this.searchJsonArtwork(folder);
-        if (jsonArt) return jsonArt;
-
-        const metadataNames = _.compact([
-            metadata.album, metadata.artist, metadata.title, metadata.folder,
-            metadata.artistAlbum,
-            (metadata.artist && metadata.title) ? metadata.artist + ' - ' + metadata.title : '',
-            (metadata.album  && metadata.title) ? metadata.album  + ' - ' + metadata.title : '',
-            (metadata.artist && metadata.album && metadata.title)
-                ? metadata.artist + ' ' + metadata.album + ' ' + metadata.title : ''
-        ]);
-        const paths = FileManager.buildSearchPaths(folder, patterns, metadataNames, useVariations);
-        return FileManager.findImageInPaths(paths);
-    },
-
-    searchInFolderAnyFile(folder, patterns) {
-        const regexes = patterns.map(p =>
-            new RegExp('(^|[._\\\\/ -])' + _.escapeRegExp(p) + '([._\\\\/ -]|$)', 'i')
-        );
-        const paths = FileManager.buildSearchPaths(folder, patterns, []);
-        const exact = FileManager.findImageInPaths(paths);
-        if (exact) return exact;
-        if (!_fso || !_fso.FolderExists(folder)) return null;
-        try {
-            const filesEnum = new Enumerator(_fso.GetFolder(folder).Files);
-            for (; !filesEnum.atEnd(); filesEnum.moveNext()) {
-                const filePath = filesEnum.item().Path;
-                const ext = filePath.toLowerCase().match(/\.[^.]+$/);
-                if (!ext || !EXTENSIONS.includes(ext[0])) continue;
-                const baseName = filePath.split('\\').pop().replace(/\.[^.]+$/, '');
-                for (const re of regexes) {
-                    if (re.test(baseName)) return filePath;
-                }
-            }
-        } catch (e) {}
-        return null;
-    },
-
-    _searchFolderTree(folder, patterns, maxLevels, visited = new Set()) {
-        if (maxLevels <= 0 || !folder) return null;
-        if (visited.has(folder)) return null;
-        visited.add(folder);
-        const found = this.searchInFolderAnyFile(folder, patterns);
-        if (found) return found;
-        for (const sub of FileManager.getSubfolders(folder)) {
-            const r = this._searchFolderTree(sub, patterns, maxLevels - 1, visited);
-            if (r) return r;
-        }
-        return null;
-    },
-
-    _searchCustomFolderTree(folder, patterns, metadata, folderMatchNames, levelsLeft, visited = new Set()) {
-        if (levelsLeft <= 0 || !FileManager.isDirectory(folder)) return null;
-        if (visited.has(folder)) return null;
-        visited.add(folder);
-        const subfolders = FileManager.getSubfolders(folder);
-        for (const sub of subfolders) {
-            const subName = _.last(sub.split('\\')).toLowerCase();
-            const matched = folderMatchNames.some(n =>
-                subName === n || subName.includes(n) || n.includes(subName) ||
-                subName.replace(/\s+/g, '-') === n || subName.replace(/\s+/g, '_') === n
-            );
-            if (matched) {
-                const img = this.searchInFolder(sub, patterns, metadata, true)
-                         || this._searchFolderTree(sub, patterns, levelsLeft - 1, visited);
-                if (img) return img;
-            } else {
-                const img = this._searchCustomFolderTree(sub, patterns, metadata, folderMatchNames, levelsLeft - 1, visited);
-                if (img) return img;
-            }
-        }
-        return null;
-    },
-
-    searchForCover(metadb, baseFolder) {
-        if (this._pathCache.has(baseFolder)) {
-            const cached = this._pathCache.get(baseFolder);
-            const age    = Date.now() - (cached.at || 0);
-            if (!cached.path) {
-                if (age < this.PATH_MISS_TTL) return null;
-                this._pathCache.delete(baseFolder);
-            } else if (age < this.PATH_HIT_TTL) {
-                if (!FileManager.exists(cached.path)) {
-                    this._pathCache.delete(baseFolder);
-                } else {
-                    return cached.path;
-                }
-            } else {
-                if (!FileManager.exists(cached.path)) {
-                    this._pathCache.delete(baseFolder);
-                } else {
-                    cached.at = Date.now();
-                    return cached.path;
-                }
             }
         }
 
-        const metadata = metadb ? this.getMetadataNames(metadb)
-            : { artist: '', album: '', title: '', folder: '', artistAlbum: '' };
-
-        const trackMatch = this.searchInFolder(baseFolder, COVER_PATTERNS, metadata, false);
-        if (trackMatch) { this._setCache(baseFolder, trackMatch); return trackMatch; }
-
-        const trackAny = this.searchInFolderAnyFile(baseFolder, COVER_PATTERNS);
-        if (trackAny)   { this._setCache(baseFolder, trackAny);   return trackAny; }
-
-        const trackSub = this._searchFolderTree(baseFolder, COVER_PATTERNS, MAX_SUBFOLDER_DEPTH);
-        if (trackSub)   { this._setCache(baseFolder, trackSub);   return trackSub; }
-
-        const artistAlbumSpace = (metadata.artist && metadata.album) ? metadata.artist + ' ' + metadata.album   : '';
-        const simpleNames = _.compact([metadata.title, metadata.artist, metadata.album, metadata.artistAlbum, artistAlbumSpace]);
-        const nameVariations = [];
-        _.forEach(simpleNames, name => {
-            const lower = name.toLowerCase();
-            nameVariations.push(lower, lower.replace(/\s+/g, '-'), lower.replace(/\s+/g, '_'));
-            const title = this._toTitleCase(name);
-            nameVariations.push(title, title.replace(/\s+/g, '-'), title.replace(/\s+/g, '_'));
-        });
-        const folderMatchNames = _.uniq(nameVariations);
-
-        const customFolders = CustomFolders.getAll();
-        if (customFolders.length === 0) { this._setCache(baseFolder, null); return null; }
-
-        for (const cf of customFolders) {
-            if (!FileManager.isDirectory(cf)) continue;
-            const hit = this.searchInFolder(cf, COVER_PATTERNS, metadata, true);
-            if (hit) { this._setCache(baseFolder, hit); return hit; }
+        if (specificCover?.length) {
+            const rootRes = this.searchDirectory(cFolder, specificCover, false, true, maxDepth);
+            if (rootRes) return rootRes;
         }
 
-        for (const cf of customFolders) {
-            if (!FileManager.isDirectory(cf)) continue;
-            const hit = this._searchCustomFolderTree(cf, COVER_PATTERNS, metadata, folderMatchNames, MAX_SUBFOLDER_DEPTH);
-            if (hit) { this._setCache(baseFolder, hit); return hit; }
-        }
-
-        this._setCache(baseFolder, null);
-        return null;
-    }
-};
-
-// ====================== BLUR CACHE ======================
-const BlurCache = {
-    _cache: new Map(),
-    _srcIdCounter: 0,
-
-    _makeKey(src, w, h, radius) {
-        return `${(src && src._srcId !== undefined) ? src._srcId : 'none'}|${radius}|${w}|${h}`;
-    },
-
-    getOrBuild(w, h, src, radius) {
-        if (!src || radius <= 0 || w <= 0 || h <= 0) return null;
-        const key = this._makeKey(src, w, h, radius);
-        if (this._cache.has(key)) {
-            const c = this._cache.get(key);
-            this._cache.delete(key);
-            this._cache.set(key, c);
-            return c === 'null' ? null : c;
-        }
-        if (this._cache.size >= MAX_BG_CACHE) {
-            const oldKey = this._cache.keys().next().value;
-            const old    = this._cache.get(oldKey);
-            if (old && old !== 'null' && typeof old.Dispose === 'function') {
-                if (PanelArt.images.blur === old) PanelArt.images.blur = null;
-                try { old.Dispose(); } catch (e) {}
+        const matchTargets = [];
+        for (const art of artistVariants) {
+            for (const alb of albumVariants) {
+                matchTargets.push(`${art} - ${alb}`, `${art}_${alb}`, `${art} ${alb}`, `${alb} - ${art}`);
             }
-            this._cache.delete(oldKey);
         }
-        let g = null, newImg = null;
-        try {
-            newImg = gdi.CreateImage(w, h);
-            g      = newImg.GetGraphics();
-            g.DrawImage(src, 0, 0, w, h, 0, 0, src.Width, src.Height);
-            newImg.ReleaseGraphics(g); g = null;
-            newImg.StackBlur(radius);
-            this._cache.set(key, newImg);
-            newImg = null;
-            return this._cache.get(key);
-        } catch (e) {
-            this._cache.set(key, 'null');
-            return null;
-        } finally {
-            if (g && newImg) { try { newImg.ReleaseGraphics(g); } catch (e2) {} }
-            if (newImg)      { try { newImg.Dispose(); }          catch (e2) {} }
-        }
-    },
+        matchTargets.push(...albumVariants, ...artistVariants);
 
-    dispose() {
-        this._cache.forEach(bmp => {
-            if (bmp && bmp !== 'null' && typeof bmp.Dispose === 'function') { try { bmp.Dispose(); } catch (e) {} }
-        });
-        this._cache.clear();
-    }
-};
+        let foundPath = null;
+        const scanStart = Date.now();
 
-// ====================== IMAGE MANAGER ======================
-const ImageManager = {
-    loadAlbumArt(metadb) {
-        if (!metadb) return;
-        const folderPath = PanelArt.titleFormats.path.EvalWithMetadb(metadb);
+        const scanLevel = (dir, depth) => {
+            if (depth > maxDepth || !utils.IsDirectory(dir) || foundPath) return;
+            if (Date.now() - scanStart > 35) return;
 
-        if (PanelArt.images.source && PanelArt.images.folderPath === folderPath) {
-            TextManager.update(metadb);
-            OverlayCache.invalidate();
-            RepaintHelper.text();
-            return;
-        }
+            const subs = this.getSubfolders(dir);
+            if (!subs?.length) return;
+            const limit = Math.min(subs.length, 120);
 
-        PanelArt.loadToken++;
-        PanelArt.images.source       = Utils.disposeImage(PanelArt.images.source);
-        PanelArt.images.blur         = null;
-        PanelArt.images.currentMetadb = null;
-        PanelArt.images.currentPath  = '';
-        PanelArt.images.folderPath   = folderPath;
-        ArtCache.clearScaledCache();
-        OverlayCache.invalidate();
-        TextManager.update(metadb);
+            for (let i = 0; i < limit; i++) {
+                const fName = subs[i].substring(subs[i].lastIndexOf('\\') + 1);
+                if (this.#matchesList(fName, matchTargets) || this.#matchesList(fName, artistVariants)) {
+                    foundPath = this.searchDirectory(subs[i], specificCover, true, false, maxDepth);
+                    if (foundPath) return;
 
-        const foundPath = ImageSearch.searchForCover(metadb, folderPath);
-        if (foundPath && FileManager.exists(foundPath)) {
-            const capturedToken = PanelArt.loadToken;
-            ArtQueue.enqueue(done => {
-                if (PanelArt.loadToken !== capturedToken) { done(); return; }
-                let art = null;
-                try { art = gdi.Image(foundPath); } catch (e) {}
-                if (PanelArt.loadToken !== capturedToken) {
-                    Utils.disposeImage(art);
-                    done();
-                    return;
-                }
-                if (art) {
-                    PanelArt.images.source = art;
-                    if (art._srcId === undefined) art._srcId = BlurCache._srcIdCounter++;
-                    PanelArt.images.currentPath = foundPath;
-                    OverlayCache.invalidate();
-                    this.scheduleBlurRebuild();
-                    RepaintHelper.full();
-                } else {
-                    PanelArt.images.currentMetadb = metadb;
-                    PanelArt.pendingArtToken = PanelArt.loadToken;
-                    utils.GetAlbumArtAsync(window.ID, metadb, 0);
-                }
-                done();
-            });
-            return;
-        }
-
-        PanelArt.images.currentMetadb = metadb;
-        PanelArt.pendingArtToken = PanelArt.loadToken;
-        utils.GetAlbumArtAsync(window.ID, metadb, 0);
-    },
-
-    buildBlur() {
-        const cfg = StateManager.get();
-        if (!cfg.blurEnabled || !cfg.backgroundEnabled || !PanelArt.images.source ||
-            PanelArt.dimensions.width <= 0 || PanelArt.dimensions.height <= 0) {
-            PanelArt.images.blur = null;
-            return;
-        }
-        PanelArt.images.blur = BlurCache.getOrBuild(
-            PanelArt.dimensions.width, PanelArt.dimensions.height,
-            PanelArt.images.source, cfg.blurRadius
-        );
-    },
-
-    scheduleBlurRebuild() {
-        PanelArt.timers.blurRebuild = Utils.clearTimer(PanelArt.timers.blurRebuild);
-        PanelArt.timers.blurRebuild = window.SetTimeout(() => {
-            this.buildBlur();
-            RepaintHelper.full();
-        }, BLUR_DEBOUNCE_MS);
-    },
-
-    cleanup() {
-        PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
-        PanelArt.images.blur   = null;
-        BlurCache.dispose();
-        ArtCache.clearScaledCacheSync();
-    }
-};
-
-// ====================== OVERLAY CACHE ======================
-const OverlayCache = {
-    img: null, valid: false,
-
-    invalidate() { this.valid = false; },
-
-    dispose() {
-        if (this.img) { try { this.img.Dispose(); } catch (e) {} this.img = null; }
-        this.valid = false;
-    },
-
-    build(w, h, artInfo, textArea) {
-        this.dispose();
-        const cfg = StateManager.get();
-        const needsAny = !cfg.overlayAllOff && (
-            (cfg.showGlow       && cfg.opGlow > 0)       ||
-            (cfg.showScanlines  && cfg.opScanlines > 0)  ||
-            (cfg.showReflection && cfg.opReflection > 0) ||
-            (cfg.showPhosphor   && cfg.opPhosphor > 0)
-        );
-        this.valid = true;
-        if (!needsAny || w <= 0 || h <= 0) return;
-
-        let g = null, newImg = null;
-        try {
-            newImg = gdi.CreateImage(w, h);
-            g      = newImg.GetGraphics();
-
-            // 1. SCANLINES
-            if (cfg.showScanlines && cfg.opScanlines > 0) {
-                const col = PanelArt_SetAlpha(PA_BLACK, cfg.opScanlines);
-                for (let y = 0; y < h; y += SCANLINE_SPACING) {
-                    g.FillSolidRect(0, y, w, 1, col);
-                }
-            }
-
-            // 2. GLOW
-            if (cfg.showGlow && cfg.opGlow > 0) {
-                const op = cfg.opGlow;
-                const bloomMult = 0.03;
-
-                // Glow around Album Art
-                if (artInfo && artInfo.artW > 0 && cfg.albumArtEnabled) {
-                    const cx = artInfo.artX + artInfo.artW / 2;
-                    const cy = artInfo.artY + artInfo.artH / 2;
-                    const maxR = Math.max(artInfo.artW, artInfo.artH) * 0.75;
-                    const steps = 30;
-                    const minStep = Math.min(steps - 1, Math.ceil(1 / (op * bloomMult)));
-                    for (let i = minStep; i < steps; i++) {
-                        const progress = i / steps, alpha = Math.floor(op * progress * bloomMult);
-                        if (alpha <= 0) continue;
-                        const r = maxR * (1 - progress);
-                        g.FillEllipse(cx - r, cy - r, r * 2, r * 2, PanelArt_SetAlpha(PA_WHITE, alpha));
-                    }
-                }
-                // Glow around Text Area
-                if (textArea && textArea.textW > 0) {
-                    const cx = textArea.textX + textArea.textW / 2;
-                    const cy = textArea.textY + textArea.textH / 2;
-                    const maxR = Math.max(textArea.textW, textArea.textH);
-                    const steps = 25;
-                    const minStep = Math.min(steps - 1, Math.ceil(1 / (op * bloomMult)));
-                    for (let i = minStep; i < steps; i++) {
-                        const progress = i / steps, alpha = Math.floor(op * progress * bloomMult);
-                        if (alpha <= 0) continue;
-                        const r = maxR * (1 - progress);
-                        g.FillEllipse(cx - r, cy - r, r * 2, r * 2, PanelArt_SetAlpha(PA_WHITE, alpha));
+                    const aSubs = this.getSubfolders(subs[i]);
+                    const aLimit = Math.min(aSubs.length, 60);
+                    for (let j = 0; j < aLimit; j++) {
+                        const aName = aSubs[j].substring(aSubs[j].lastIndexOf('\\') + 1);
+                        if (this.#matchesList(aName, matchTargets) || this.#matchesList(aName, albumVariants)) {
+                            foundPath = this.searchDirectory(aSubs[j], specificCover, true, false, maxDepth);
+                            if (foundPath) return;
+                        }
                     }
                 }
             }
 
-            // 3. REFLECTION
-            if (cfg.showReflection && cfg.opReflection > 0) {
-                const reflH = Math.floor(h * REFLECTION_HEIGHT_RATIO);
+            if (depth < maxDepth && subs.length <= 60) {
+                for (const sub of subs) {
+                    const fName = sub.substring(sub.lastIndexOf('\\') + 1).toLowerCase();
+                    if (!ArtScanner.ART_SUBDIRS.includes(fName)) {
+                        scanLevel(sub, depth + 1);
+                        if (foundPath) return;
+                    }
+                }
+            }
+        };
+
+        scanLevel(cFolder, 1);
+        return foundPath;
+    }
+
+    #matchesList(folderName, variants) {
+        if (!folderName || !variants?.length) return false;
+        return variants.some(v => this.#isNameMatch(folderName, v));
+    }
+
+    #isNameMatch(folderName, targetName) {
+        if (!folderName || !targetName) return false;
+        const fRaw = folderName.toLowerCase().trim();
+        const tRaw = targetName.toLowerCase().trim();
+        if (fRaw === tRaw) return true;
+
+        const f = GdiUtils.normalize(folderName);
+        const t = GdiUtils.normalize(targetName);
+        if (!f || !t) return false;
+        if (f === t) return true;
+
+        if (f.startsWith(`${t} `) || f.endsWith(` ${t}`) || f.includes(` ${t} `)) return true;
+        if (t.startsWith(`${f} `) || t.endsWith(` ${f}`) || (t.length >= 3 && f.includes(t)) || (f.length >= 3 && t.includes(f))) return true;
+
+        return false;
+    }
+
+    cleanVariants(str) {
+        if (!str || !str.trim()) return [];
+        const base = str.trim();
+        const set = new Set([base]);
+
+        try {
+            const cleanUnder = utils.ReplaceIllegalChars(base, true)?.trim();
+            if (cleanUnder) set.add(cleanUnder);
+        } catch {}
+
+        const cleanDash = base.replace(/[\/\\:*?"<>|]/g, '-').trim();
+        if (cleanDash) set.add(cleanDash);
+
+        const cleanSpace = base.replace(/[\/\\:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (cleanSpace) set.add(cleanSpace);
+
+        const cleanNone = base.replace(/[\/\\:*?"<>|]/g, '').trim();
+        if (cleanNone) set.add(cleanNone);
+
+        const noParen = base.replace(/\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*/g, ' ').trim();
+        if (noParen && noParen !== base) {
+            set.add(noParen);
+            try {
+                const noParenClean = utils.ReplaceIllegalChars(noParen, true)?.trim();
+                if (noParenClean) set.add(noParenClean);
+            } catch {}
+        }
+        return Array.from(set).filter(Boolean);
+    }
+}
+
+// ============================================================================================
+// 4. OVERLAY & BACKDROP ENGINE
+// ============================================================================================
+class VisualBackdrop {
+    #bgBlurredBmp = null;
+    #bgCacheBmp   = null;
+    #overlayBmp   = null;
+    #glowBmp      = null;
+    #glowSize     = 0;
+    #glowOp       = 0;
+    #lastBlurSrc  = null;
+    #lastBlurRad  = -1;
+
+    static #disposeBmp(bmp) {
+        if (bmp) {
+            try { bmp.Dispose(); } catch {}
+        }
+        return null;
+    }
+
+    rebuildBlur(activeImg, w, h, enabled, blurRadius, useUIColor) {
+        if (!enabled || useUIColor || !activeImg || w <= 0 || h <= 0) {
+            this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
+            this.#lastBlurSrc = null;
+            this.#lastBlurRad = -1;
+            return;
+        }
+
+        const blurR = GdiUtils.clamp(blurRadius, 0, 254);
+        if (blurR <= 0) {
+            if (this.#bgBlurredBmp && this.#lastBlurSrc === activeImg && this.#lastBlurRad === -1) return;
+            this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
+            try {
+                this.#bgBlurredBmp = activeImg.Clone(0, 0, activeImg.Width, activeImg.Height);
+            } catch {
+                this.#bgBlurredBmp = null;
+            }
+            this.#lastBlurSrc = activeImg;
+            this.#lastBlurRad = -1;
+            return;
+        }
+
+        if (this.#bgBlurredBmp && this.#lastBlurSrc === activeImg && this.#lastBlurRad === blurR) return;
+
+        let thumb = null, g = null;
+        try {
+            const scale = blurR > 60 ? 4 : (blurR > 20 ? 2 : 1);
+            const tw = Math.max(32, Math.floor(w / scale));
+            const th = Math.max(32, Math.floor(h / scale));
+
+            thumb = gdi.CreateImage(tw, th);
+            g = thumb.GetGraphics();
+            g.SetInterpolationMode(0);
+            g.DrawImage(activeImg, 0, 0, tw, th, 0, 0, activeImg.Width, activeImg.Height);
+            thumb.ReleaseGraphics(g);
+            g = null;
+
+            const maxSafeRadius = Math.max(1, Math.min(Math.floor(tw / 2) - 1, Math.floor(th / 2) - 1));
+            const effectiveRadius = GdiUtils.clamp(Math.round(blurR / scale), 1, Math.min(120, maxSafeRadius));
+            thumb.StackBlur(effectiveRadius);
+
+            this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
+            this.#bgBlurredBmp = thumb;
+            this.#lastBlurSrc = activeImg;
+            this.#lastBlurRad = blurR;
+        } catch {
+            if (g && thumb) { try { thumb.ReleaseGraphics(g); } catch {} }
+            if (thumb) { try { thumb.Dispose(); } catch {} }
+            this.#bgBlurredBmp = null;
+        }
+    }
+
+    rebuildCache(w, h, useUIColor, customBgColor, bgEnabled, darkenPct, uiColour) {
+        this.#bgCacheBmp = VisualBackdrop.#disposeBmp(this.#bgCacheBmp);
+        if (w <= 0 || h <= 0) return;
+
+        let bmp = null, g = null;
+        try {
+            bmp = gdi.CreateImage(w, h);
+            g = bmp.GetGraphics();
+
+            if (useUIColor) {
+                g.FillSolidRect(0, 0, w, h, uiColour);
+            } else {
+                g.FillSolidRect(0, 0, w, h, customBgColor >>> 0);
+                if (bgEnabled && this.#bgBlurredBmp) {
+                    g.SetInterpolationMode(2);
+                    g.DrawImage(this.#bgBlurredBmp, 0, 0, w, h, 0, 0, this.#bgBlurredBmp.Width, this.#bgBlurredBmp.Height);
+                }
+                if (darkenPct > 0 && this.#bgBlurredBmp) {
+                    g.FillSolidRect(0, 0, w, h, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), Math.floor(darkenPct * 2.55)));
+                }
+            }
+            bmp.ReleaseGraphics(g);
+            this.#bgCacheBmp = bmp;
+        } catch {
+            if (g && bmp) { try { bmp.ReleaseGraphics(g); } catch {} }
+            if (bmp) { try { bmp.Dispose(); } catch {} }
+            this.#bgCacheBmp = null;
+        }
+    }
+
+    rebuildOverlay(w, h, config, bezelImg, dpiScale) {
+        this.#overlayBmp = VisualBackdrop.#disposeBmp(this.#overlayBmp);
+        if (w <= 0 || h <= 0) return;
+
+        let bmp = null, g = null;
+        try {
+            bmp = gdi.CreateImage(w, h);
+            g = bmp.GetGraphics();
+
+            if (config.showPhosphor && config.opPhosphor > 0 && !config.overlayAllOff) {
+                const blended = GdiUtils.blendWithWhite(config.phosphorColor, 0.25);
+                g.FillSolidRect(0, 0, w, h, GdiUtils.setAlpha(blended, Math.floor(config.opPhosphor * 0.3)));
+            }
+
+            if (config.showScanlines && config.opScanlines > 0 && !config.overlayAllOff) {
+                const scanCol = GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), config.opScanlines);
+                const lineH = Math.max(1, Math.round(1 * dpiScale));
+                const stepH = Math.max(2, Math.round(3 * dpiScale));
+                for (let y = 0; y < h; y += stepH) {
+                    g.FillSolidRect(0, y, w, lineH, scanCol);
+                }
+            }
+
+            if (config.showReflection && config.opReflection > 0 && !config.overlayAllOff) {
+                const reflH = Math.floor(h * 0.45);
                 for (let y = 0; y < reflH; y++) {
                     const t = 1 - (y / reflH);
-                    const s = t * t * (3 - 2 * t);
-                    const alpha = Math.floor(cfg.opReflection * s * 0.40);
-                    if (alpha > 0) {
-                        g.FillSolidRect(0, y, w, 1, PanelArt_SetAlpha(PA_WHITE, alpha));
-                    }
+                    const a = Math.floor(config.opReflection * (t * t * (3 - 2 * t)) * 0.4);
+                    if (a > 0) g.FillSolidRect(0, y, w, 1, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), a));
                 }
             }
 
-            // 4. PHOSPHOR
-            if (cfg.showPhosphor && cfg.opPhosphor > 0) {
-                const tc = PhosphorManager.getColor();
-                const blended = PanelArt_BlendWithWhite(tc, 0.25);
-                const bgAlpha = Math.floor(cfg.opPhosphor * 0.3);
-                if (bgAlpha > 0) {
-                    g.FillSolidRect(0, 0, w, h, PanelArt_SetAlpha(blended, bgAlpha));
-                } 
+            const b = Math.round(config.borderSize * dpiScale);
+            if (b > 0) {
+                const col = config.borderColor >>> 0;
+                g.FillSolidRect(0, 0, w, b, col);
+                g.FillSolidRect(0, h - b, w, b, col);
+                const sideH = Math.max(0, h - b * 2);
+                if (sideH > 0) {
+                    g.FillSolidRect(0, b, b, sideH, col);
+                    g.FillSolidRect(w - b, b, b, sideH, col);
+                }
             }
 
-            newImg.ReleaseGraphics(g); g = null;
-            this.img = newImg; newImg = null;
-        } catch (e) {
-            this.valid = true;
-        } finally {
-            if (g && newImg) { try { newImg.ReleaseGraphics(g); } catch (e2) {} g = null; }
-            if (newImg) Utils.disposeImage(newImg);
+            if (config.bezelEnabled && bezelImg) {
+                g.SetInterpolationMode(7);
+                g.DrawImage(bezelImg, 0, 0, w, h, 0, 0, bezelImg.Width, bezelImg.Height);
+            }
+
+            bmp.ReleaseGraphics(g);
+            this.#overlayBmp = bmp;
+        } catch {
+            if (g && bmp) { try { bmp.ReleaseGraphics(g); } catch {} }
+            if (bmp) { try { bmp.Dispose(); } catch {} }
+            this.#overlayBmp = null;
         }
     }
-};
 
-// ====================== GLITCH RENDERER ======================
-const GlitchRenderer = {
-    run() {
-        const cfg = StateManager.get();
-        if (!cfg.glitchEnabled) { RepaintScheduler.request(); return; }
-        if (PanelArt.timers.glitch) window.ClearInterval(PanelArt.timers.glitch);
-        let count = 0;
-        PanelArt.timers.glitch = window.SetInterval(() => {
-            PanelArt.glitchFrame = Math.random();
-            window.Repaint();
-            if (++count >= 4) {
-                PanelArt.glitchFrame = 0;
-                window.ClearInterval(PanelArt.timers.glitch);
-                PanelArt.timers.glitch = null;
-            }
-        }, 20);
-    },
-
-    paint(gr, w, h, intensity, pad, suppressBase) {
-        const gx = Math.max(pad, 0), gy = Math.max(pad, 0);
-        const gw = Math.max(w - pad * 2, 1), gh = Math.max(h - pad * 2, 1);
-
-        if (!suppressBase) gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(PA_GLITCH_BASE, 220));
-
-        const scanOff = Math.floor(Math.random() * 3);
-        for (let y = gy + scanOff; y < gy + gh; y += 3) {
-            gr.FillSolidRect(gx, y, gw, 1, PanelArt_SetAlpha(PA_BLACK, Math.floor(Math.random() * 40) + 30));
+    checkGlow(w, h, showGlow, opGlow, overlayAllOff) {
+        if (!showGlow || opGlow <= 0 || overlayAllOff || w <= 0 || h <= 0) {
+            this.#glowBmp = VisualBackdrop.#disposeBmp(this.#glowBmp);
+            this.#glowSize = 0;
+            this.#glowOp = 0;
+            return;
         }
 
-        const maxShift = Math.floor(gw * 0.1);
+        const maxR = Math.max(w, h) * 0.7;
+        const sz = Math.ceil(maxR * 2);
+        if (this.#glowBmp && this.#glowSize === sz && this.#glowOp === opGlow) return;
+
+        this.#glowBmp = VisualBackdrop.#disposeBmp(this.#glowBmp);
+        try {
+            const bmp = gdi.CreateImage(sz, sz);
+            const g = bmp.GetGraphics();
+            const center = sz / 2;
+            for (let i = 1; i <= 6; i++) {
+                const a = Math.floor(opGlow * (1 - i / 6) * 0.2);
+                const r = maxR * (i / 6);
+                g.FillEllipse(center - r, center - r, r * 2, r * 2, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), a));
+            }
+            bmp.ReleaseGraphics(g);
+            this.#glowBmp = bmp;
+            this.#glowSize = sz;
+            this.#glowOp = opGlow;
+        } catch {
+            this.#glowBmp = null;
+        }
+    }
+
+    get cacheBmp()   { return this.#bgCacheBmp; }
+    get overlayBmp() { return this.#overlayBmp; }
+    get glowBmp()    { return this.#glowBmp; }
+    get glowSize()   { return this.#glowSize; }
+
+    dispose() {
+        this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
+        this.#bgCacheBmp   = VisualBackdrop.#disposeBmp(this.#bgCacheBmp);
+        this.#overlayBmp   = VisualBackdrop.#disposeBmp(this.#overlayBmp);
+        this.#glowBmp      = VisualBackdrop.#disposeBmp(this.#glowBmp);
+        this.#lastBlurSrc  = null;
+        this.#lastBlurRad  = -1;
+    }
+}
+
+// ============================================================================================
+// 5. MAIN CONTROLLER & APPLICATION ENGINE (PART 1)
+// ============================================================================================
+class PanelArtController {
+    static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
+    static VALID_FLOATS = ['left', 'right', 'top', 'bottom', 'stretch'];
+    static BEZEL_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
+
+    static DIRTY = {
+        NONE:       0,
+        BACKGROUND: 1 << 0,
+        OVERLAY:    1 << 1,
+        LAYOUT:     1 << 2,
+        TEXT:       1 << 3,
+        ALL:        ~0
+    };
+
+    static PERSISTED_KEYS = [
+        'albumArtEnabled', 'albumArtFloat', 'albumArtPadding', 'padLeft', 'padRight',
+        'padTop', 'padBottom', 'borderSize', 'borderColor', 'customFolderDepth',
+        'backgroundEnabled', 'blurEnabled', 'blurRadius', 'darkenValue', 'customBgColor',
+        'bgUseUIColor', 'showReflection', 'opReflection', 'showGlow', 'opGlow',
+        'showScanlines', 'opScanlines', 'showPhosphor', 'opPhosphor', 'phosphorTheme',
+        'customPhosphorColor', 'overlayAllOff', 'layoutAlignV', 'layoutAlignH',
+        'textShadowEnabled', 'extraInfoEnabled', 'glitchEnabled', 'titleFontName',
+        'titleFontSize', 'artistFontName', 'artistFontSize', 'extraFontName',
+        'extraFontSize', 'imageFolder', 'bezelFolder', 'bezelEnabled', 'bezelFile'
+    ];
+
+    static MENU_ID = {
+        BEZEL_ENABLE:        970,
+        BEZEL_FOLDER:        972,
+        BEZEL_RELOAD:        973,
+        BEZEL_NONE:          975,
+        BEZEL_BASE:          976,
+        PHOSPHOR_THEME_BASE: 600,
+        OVERLAY_ALL_OFF:     199,
+        SHOW_REFLECTION:     200,
+        SHOW_GLOW:           210,
+        SHOW_SCANLINES:      220,
+        SHOW_PHOSPHOR:       230,
+        OPACITY_REFL:        201,
+        OPACITY_GLOW:        211,
+        OPACITY_SCAN:        221,
+        OPACITY_PHOS:        231,
+        ALBUM_ART_ENABLE:    800,
+        FLOAT_BASE:          801,
+        ART_PADDING:         806,
+        ALIGN_H_LEFT:        563,
+        ALIGN_H_CENTER:      564,
+        ALIGN_H_RIGHT:       565,
+        ALIGN_V_CENTER:      560,
+        ALIGN_V_BOTTOM:      561,
+        ALIGN_V_TOP:         562,
+        TEXT_SHADOW:         570,
+        EXTRA_INFO:          571,
+        FONT_TITLE:          540,
+        FONT_ARTIST:         541,
+        FONT_EXTRA:          542,
+        BORDER_SIZE:         250,
+        BORDER_COLOR:        251,
+        PAD_LEFT:            252,
+        PAD_RIGHT:           253,
+        PAD_TOP:             254,
+        PAD_BOTTOM:          255,
+        BG_USE_UI_COLOR:     263,
+        BG_ENABLE:           260,
+        BG_BLUR_ENABLE:      270,
+        BG_CUSTOM_COLOR:     261,
+        BLUR_RADIUS_BASE:    271,
+        DARKEN_BASE:         290,
+        CUSTOM_FOLDER_ADD:   50,
+        FOLDER_DEPTH_BASE:   51,
+        CLEAR_CUSTOM_FOLDERS:2000,
+        REMOVE_FOLDER_BASE:  2100,
+        IMAGE_FOLDER_SET:    950,
+        SHOW_SINGLE_IMAGE:   951,
+        SLIDE_SHOW:          952,
+        PRESET_LOAD_BASE:    301,
+        PRESET_SAVE_BASE:    401,
+        GLITCH_ENABLE:       545,
+        RELOAD_ART:          900,
+        RESET_DEFAULTS:      5000,
+        FACTORY_RESET:       5001
+    };
+
+    static PHOSPHOR_THEMES = [
+        { name: 'Classic', color: GdiUtils.RGB(0, 255, 0) },
+        { name: 'Neo',     color: GdiUtils.RGB(0, 255, 255) },
+        { name: 'Dark',    color: GdiUtils.RGB(0, 200, 0) },
+        { name: 'Bright',  color: GdiUtils.RGB(255, 255, 0) },
+        { name: 'Retro',   color: GdiUtils.RGB(0, 255, 100) },
+        { name: 'Minimal', color: GdiUtils.RGB(0, 180, 0) },
+        { name: 'Matrix',  color: GdiUtils.RGB(0, 255, 50) },
+        { name: 'Vapor',   color: GdiUtils.RGB(255, 180, 255) },
+        { name: 'Cyber',   color: GdiUtils.RGB(0, 255, 255) },
+        { name: 'Magenta', color: GdiUtils.RGB(255, 0, 255) }
+    ];
+
+    static GLITCH_CHROMA = GdiUtils.RGB(220, 225, 230);
+    static GLITCH_SHIFT_COLORS = [
+        GdiUtils.RGB(100, 200, 255), GdiUtils.RGB(180, 200, 230),
+        GdiUtils.RGB(150, 255, 150), GdiUtils.RGB(255, 255, 100),
+        GdiUtils.RGB(255, 100, 100)
+    ];
+    static GLITCH_SLICE_COLORS = [
+        GdiUtils.RGB(100, 180, 255), GdiUtils.RGB(180, 200, 230),
+        GdiUtils.RGB(200, 210, 220), GdiUtils.RGB(120, 160, 220),
+        GdiUtils.RGB(150, 255, 150), GdiUtils.RGB(255, 255, 100),
+        GdiUtils.RGB(255, 100, 100)
+    ];
+    static GLITCH_TINT_COLORS = [
+        GdiUtils.RGB(100, 180, 255), GdiUtils.RGB(180, 200, 230),
+        GdiUtils.RGB(200, 210, 220), GdiUtils.RGB(150, 170, 210),
+        GdiUtils.RGB(100, 255, 100), GdiUtils.RGB(255, 255, 100),
+        GdiUtils.RGB(255, 100, 100)
+    ];
+    static GLITCH_BLOCK_COLORS = [
+        GdiUtils.RGB(0x64, 0xB4, 0xFF), GdiUtils.RGB(0xB4, 0xC8, 0xE6),
+        GdiUtils.RGB(0xD2, 0xDA, 0xE6), GdiUtils.RGB(0x78, 0x88, 0xB8),
+        GdiUtils.RGB(0xA0, 0xB0, 0xC8), GdiUtils.RGB(0xC8, 0xD0, 0xE0),
+        GdiUtils.RGB(0x50, 0xFF, 0x50), GdiUtils.RGB(0xFF, 0xFF, 0x50),
+        GdiUtils.RGB(0xFF, 0x50, 0x50)
+    ];
+
+    #lifecycle = PanelArtController.LIFECYCLE.BOOT;
+    #dpiScale  = 1;
+    #dirtyFlags = PanelArtController.DIRTY.ALL;
+
+    #artSearchToken     = 0;
+    #expectedAsyncToken = 0;
+    #pendingSearchTimer = null;
+    #glitchTimer        = null;
+    #slideTimer         = null;
+    #saveTimeout        = null;
+    #bezelNotifyTimeout = null;
+
+    #fonts    = new FontRegistry(150);
+    #scanner  = new ArtScanner();
+    #backdrop = new VisualBackdrop();
+
+    #coverImg = null;
+    #modeImg  = null;
+    #bezelBmp = null;
+    #hudFont  = null;
+
+    #currentCoverPath  = '';
+    #currentTrackPath  = '';
+    #currentArtKey     = '';
+    #profileBase       = '';
+    #customFolders     = [];
+    #bezelNotifyText   = '';
+    #opacityTarget     = null;
+    #cachedBezelImages = null;
+    #cachedBezelFolder = null;
+    #slideImages       = null;
+
+    #glitchFrame    = 0;
+    #glitchBlackout = false;
+
+    #textBlockBmp = null;
+    #textBlockX   = 0;
+    #textBlockY   = 0;
+    #textBlockW   = 0;
+    #textBlockH   = 0;
+
+    #compoundTf = fb.TitleFormat('$directory_path(%path%)\x01%artist%\x01%album%\x01$directory(%path%)\x01%title%\x01%date%\x01%length%\x01%album artist%\x01%discnumber%');
+
+    #trackInfo = { title: 'No track playing', artist: '', extra: '' };
+    #layout = {
+        artRect: { x: 0, y: 0, w: 0, h: 0 }
+    };
+
+    config = {
+        albumArtEnabled: true,
+        albumArtFloat: 'left',
+        albumArtPadding: 0,
+        padLeft: 10,
+        padRight: 10,
+        padTop: 10,
+        padBottom: 10,
+        borderSize: 10,
+        borderColor: GdiUtils.RGB(32, 32, 32),
+        customFolderDepth: 2,
+        backgroundEnabled: true,
+        blurEnabled: true,
+        blurRadius: 240,
+        darkenValue: 10,
+        customBgColor: GdiUtils.RGB(25, 25, 25),
+        bgUseUIColor: false,
+        showReflection: true,
+        opReflection: 25,
+        showGlow: false,
+        opGlow: 80,
+        showScanlines: false,
+        opScanlines: 100,
+        showPhosphor: true,
+        opPhosphor: 20,
+        phosphorTheme: 8,
+        customPhosphorColor: 0xFFFFFFFF,
+        overlayAllOff: false,
+        layoutAlignV: 0,
+        layoutAlignH: 1,
+        textShadowEnabled: true,
+        extraInfoEnabled: true,
+        glitchEnabled: true,
+        titleFontName: 'Segoe UI',
+        titleFontSize: 42,
+        artistFontName: 'Segoe UI',
+        artistFontSize: 28,
+        extraFontName: 'Segoe UI',
+        extraFontSize: 20,
+        imageFolder: '',
+        imageMode: false,
+        slideMode: false,
+        bezelFolder: '',
+        bezelEnabled: false,
+        bezelFile: ''
+    };
+
+    constructor() {
+        const sysDpi = (typeof window.DPI === 'number' && window.DPI > 0) ? window.DPI : 96;
+        this.#dpiScale = sysDpi / 96;
+
+        let p = fb.ProfilePath || '';
+        if (p && !p.endsWith('\\') && !p.endsWith('/')) p += '\\';
+        this.#profileBase = p;
+
+        this.#loadProperties();
+        this.#loadCustomFolders();
+    }
+
+    scale(size) {
+        return Math.round(size * this.#dpiScale);
+    }
+
+    init() {
+        this.#lifecycle = PanelArtController.LIFECYCLE.INIT;
+        this.loadBezel();
+        this.#rebuildOverlay();
+        this.#lifecycle = PanelArtController.LIFECYCLE.LIVE;
+        window.Repaint();
+
+        // Defer artwork resolution and slideshow initialization past first paint
+        window.SetTimeout(() => {
+            if (this.#lifecycle === PanelArtController.LIFECYCLE.SHUTDOWN) return;
+            if (this.config.slideMode) {
+                this.startSlideMode(false);
+            } else if (this.config.imageMode) {
+                this.startImageMode(false);
+            } else {
+                try {
+                    if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                    else this.clearTrackDisplay();
+                } catch {
+                    this.clearTrackDisplay();
+                }
+            }
+        }, 0);
+    }
+
+    #loadProperties() {
+        const cfg = this.config;
+        cfg.albumArtEnabled     = window.GetProperty('PA.AlbumArtEnabled', true);
+        const floatProp         = window.GetProperty('PA.AlbumArtFloat', 'left');
+        cfg.albumArtFloat       = PanelArtController.VALID_FLOATS.includes(floatProp) ? floatProp : 'left';
+        cfg.albumArtPadding     = GdiUtils.clamp(window.GetProperty('PA.AlbumArtPadding', 0), 0, 100);
+        cfg.padLeft             = GdiUtils.clamp(window.GetProperty('PA.PadLeft', 10), 0, 100);
+        cfg.padRight            = GdiUtils.clamp(window.GetProperty('PA.PadRight', 10), 0, 100);
+        cfg.padTop              = GdiUtils.clamp(window.GetProperty('PA.PadTop', 10), 0, 100);
+        cfg.padBottom           = GdiUtils.clamp(window.GetProperty('PA.PadBottom', 10), 0, 100);
+        cfg.borderSize          = GdiUtils.clamp(window.GetProperty('PA.BorderSize', 10), 0, 50);
+        cfg.borderColor         = window.GetProperty('PA.BorderColor', GdiUtils.RGB(32, 32, 32));
+        cfg.customFolderDepth   = GdiUtils.clamp(window.GetProperty('PA.CustomFolderDepth', 2), 1, 4);
+
+        cfg.backgroundEnabled   = window.GetProperty('PA.BackgroundEnabled', true);
+        cfg.blurEnabled         = window.GetProperty('PA.BlurEnabled', true);
+        cfg.blurRadius          = GdiUtils.clamp(window.GetProperty('PA.BlurRadius', 240), 0, 254);
+        cfg.darkenValue         = GdiUtils.clamp(window.GetProperty('PA.DarkenValue', 10), 0, 50);
+        cfg.customBgColor       = window.GetProperty('PA.CustomBgColor', window.GetProperty('PA.CustomBackgroundColor', GdiUtils.RGB(25, 25, 25)));
+        cfg.bgUseUIColor        = window.GetProperty('PA.BgUseUIColor', false);
+
+        cfg.showReflection      = window.GetProperty('PA.ShowReflection', true);
+        cfg.opReflection        = GdiUtils.clamp(window.GetProperty('PA.OpReflection', 25), 0, 255);
+        cfg.showGlow            = window.GetProperty('PA.ShowGlow', false);
+        cfg.opGlow              = GdiUtils.clamp(window.GetProperty('PA.OpGlow', 80), 0, 255);
+        cfg.showScanlines       = window.GetProperty('PA.ShowScanlines', false);
+        cfg.opScanlines         = GdiUtils.clamp(window.GetProperty('PA.OpScanlines', 100), 0, 255);
+        cfg.showPhosphor        = window.GetProperty('PA.ShowPhosphor', true);
+        cfg.opPhosphor          = GdiUtils.clamp(window.GetProperty('PA.OpPhosphor', 20), 0, 255);
+        cfg.phosphorTheme       = GdiUtils.clamp(window.GetProperty('PA.PhosphorTheme', 8), 0, PanelArtController.PHOSPHOR_THEMES.length);
+        cfg.customPhosphorColor = window.GetProperty('PA.CustomPhosphorColor', 0xFFFFFFFF);
+        cfg.overlayAllOff       = window.GetProperty('PA.OverlayAllOff', false);
+
+        cfg.layoutAlignV        = GdiUtils.clamp(window.GetProperty('PA.LayoutAlignV', window.GetProperty('PA.LayoutAlign', 0)), 0, 2);
+        cfg.layoutAlignH        = GdiUtils.clamp(window.GetProperty('PA.LayoutAlignH', 1), 0, 2);
+        cfg.textShadowEnabled   = window.GetProperty('PA.TextShadowEnabled', true);
+        cfg.extraInfoEnabled    = window.GetProperty('PA.ExtraInfoEnabled', true);
+        cfg.glitchEnabled       = window.GetProperty('PA.GlitchEnabled', true);
+
+        cfg.titleFontName       = window.GetProperty('PA.TitleFontName', 'Segoe UI');
+        cfg.titleFontSize       = GdiUtils.clamp(window.GetProperty('PA.TitleFontSize', 42), 12, 100);
+        cfg.artistFontName      = window.GetProperty('PA.ArtistFontName', 'Segoe UI');
+        cfg.artistFontSize      = GdiUtils.clamp(window.GetProperty('PA.ArtistFontSize', 28), 10, 80);
+        cfg.extraFontName       = window.GetProperty('PA.ExtraFontName', 'Segoe UI');
+        cfg.extraFontSize       = GdiUtils.clamp(window.GetProperty('PA.ExtraFontSize', 20), 8, 60);
+
+        cfg.imageFolder         = window.GetProperty('PA.ImageFolder', `${this.#profileBase}skins\\images`);
+        cfg.bezelFolder         = GdiUtils.sanitizePath(window.GetProperty('PA.BezelFolder', `${this.#profileBase}skins\\overlay`)) || `${this.#profileBase}skins\\overlay`;
+        cfg.bezelEnabled        = window.GetProperty('PA.BezelEnabled', false);
+        cfg.bezelFile           = window.GetProperty('PA.BezelFile', '');
+    }
+
+    #loadCustomFolders() {
+        this.#scanner.clearCaches();
+        try {
+            const raw = window.GetProperty('PA.CustomFolders', '[]');
+            const parsed = JSON.parse(raw);
+            this.#customFolders = Array.isArray(parsed)
+                ? parsed.map(GdiUtils.sanitizePath).filter(p => p && utils.IsDirectory(p))
+                : [];
+        } catch {
+            this.#customFolders = [];
+        }
+    }
+
+    saveAll() {
+        const cfg = this.config;
+        for (const key of PanelArtController.PERSISTED_KEYS) {
+            if (Object.prototype.hasOwnProperty.call(cfg, key)) {
+                window.SetProperty(`PA.${key.charAt(0).toUpperCase() + key.slice(1)}`, cfg[key]);
+            }
+        }
+        window.SetProperty('PA.CustomFolders', JSON.stringify(this.#customFolders));
+    }
+
+    requestSave() {
+        if (this.#saveTimeout) window.ClearTimeout(this.#saveTimeout);
+        this.#saveTimeout = window.SetTimeout(() => {
+            this.saveAll();
+            this.#saveTimeout = null;
+        }, 500);
+    }
+
+    getHudFont() {
+        this.#hudFont ??= gdi.Font('Segoe UI', Math.max(9, this.scale(12)));
+        return this.#hudFont;
+    }
+
+    #disposeTextBlock() {
+        if (this.#textBlockBmp) {
+            try { this.#textBlockBmp.Dispose(); } catch {}
+            this.#textBlockBmp = null;
+        }
+    }
+
+    getBezelImages(forceReload = false) {
+        const cleanFolder = GdiUtils.sanitizePath(this.config.bezelFolder);
+        if (!cleanFolder || !utils.IsDirectory(cleanFolder)) {
+            this.#cachedBezelImages = [];
+            this.#cachedBezelFolder = cleanFolder;
+            return this.#cachedBezelImages;
+        }
+        if (!forceReload && this.#cachedBezelImages !== null && this.#cachedBezelFolder === cleanFolder) {
+            return this.#cachedBezelImages;
+        }
+        this.#cachedBezelFolder = cleanFolder;
+        try {
+            const all = utils.Glob(`${cleanFolder}\\*.*`);
+            if (!Array.isArray(all)) return [];
+            this.#cachedBezelImages = all.filter(f => {
+                const ext = f.substring(f.lastIndexOf('.')).toLowerCase();
+                return PanelArtController.BEZEL_EXTS.includes(ext);
+            }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+            return this.#cachedBezelImages;
+        } catch {
+            return [];
+        }
+    }
+
+    listBezelNames(forceReload = false) {
+        return this.getBezelImages(forceReload).map(p => {
+            const name = p.substring(p.lastIndexOf('\\') + 1);
+            return name.substring(0, name.lastIndexOf('.'));
+        });
+    }
+
+    resolveBezelPath(name) {
+        const folder = this.config.bezelFolder;
+        if (!folder || !name) return null;
+        const cachedList = this.getBezelImages(false);
+        const lower = name.toLowerCase();
+
+        for (let i = 0; i < cachedList.length; i++) {
+            const fullPath = cachedList[i];
+            const fileName = fullPath.substring(fullPath.lastIndexOf('\\') + 1);
+            const baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+            if (fileName.toLowerCase() === lower || baseName.toLowerCase() === lower) {
+                return fullPath;
+            }
+        }
+
+        const base = folder.endsWith('\\') ? folder : `${folder}\\`;
+        for (const ext of PanelArtController.BEZEL_EXTS) {
+            if (lower.endsWith(ext) && utils.IsFile(`${base}${name}`)) return `${base}${name}`;
+        }
+        for (const ext of PanelArtController.BEZEL_EXTS) {
+            const p = `${base}${name}${ext}`;
+            if (utils.IsFile(p)) return p;
+        }
+        return null;
+    }
+
+    loadBezel() {
+        if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+        if (!this.config.bezelEnabled || !this.config.bezelFile) return;
+
+        const target = this.resolveBezelPath(this.config.bezelFile);
+        if (target) {
+            try {
+                this.#bezelBmp = gdi.Image(target);
+            } catch {
+                this.#bezelBmp = null;
+            }
+        }
+        if (!this.#bezelBmp) {
+            this.config.bezelEnabled = false;
+            this.config.bezelFile = '';
+        }
+    }
+
+    cycleBezel(direction) {
+        const bezelNames = this.listBezelNames(true);
+        if (!bezelNames.length) {
+            this.#bezelNotifyText = 'No bezels found';
+            if (this.#bezelNotifyTimeout) window.ClearTimeout(this.#bezelNotifyTimeout);
+            this.#bezelNotifyTimeout = window.SetTimeout(() => {
+                this.#bezelNotifyText = '';
+                this.#bezelNotifyTimeout = null;
+                window.Repaint();
+            }, 1500);
+            window.Repaint();
+            return;
+        }
+
+        let currentIdx = 0;
+        if (this.config.bezelEnabled && this.config.bezelFile) {
+            const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
+            const found = bezelNames.findIndex(n => n.toLowerCase() === curClean);
+            if (found !== -1) currentIdx = found + 1;
+        }
+
+        const count = bezelNames.length + 1;
+        const nextIdx = (currentIdx + direction + count) % count;
+
+        if (nextIdx === 0) {
+            this.config.bezelEnabled = false;
+            this.config.bezelFile = '';
+            this.#bezelNotifyText = 'None';
+        } else {
+            this.config.bezelEnabled = true;
+            this.config.bezelFile = bezelNames[nextIdx - 1];
+            this.#bezelNotifyText = this.config.bezelFile;
+        }
+
+        this.loadBezel();
+        this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+        this.requestSave();
+
+        if (this.#bezelNotifyTimeout) window.ClearTimeout(this.#bezelNotifyTimeout);
+        this.#bezelNotifyTimeout = window.SetTimeout(() => {
+            this.#bezelNotifyText = '';
+            this.#bezelNotifyTimeout = null;
+            window.Repaint();
+        }, 1500);
+
+        window.Repaint();
+    }
+
+    loadArtworkForTrack(metadb) {
+        const handle = this.#getSafeHandle(metadb);
+        if (!handle?.Path) {
+            this.clearTrackDisplay();
+            return;
+        }
+
+        const trackPath = handle.Path;
+        this.#currentTrackPath = trackPath;
+
+        let trackDir = '', rawArtist = '', rawAlbum = '', rawFolder = '', rawTitle = '', rawDate = '', rawLen = '', rawAlbArtist = '', rawDisc = '';
+
+        try {
+            const raw = this.#compoundTf.EvalWithMetadb(handle, true) ?? '';
+            const parts = raw.split('\x01');
+            trackDir     = parts[0] ?? '';
+            rawArtist    = parts[1] ?? '';
+            rawAlbum     = parts[2] ?? '';
+            rawFolder    = parts[3] ?? '';
+            rawTitle     = parts[4] ?? '';
+            rawDate      = parts[5] ?? '';
+            rawLen       = parts[6] ?? '';
+            rawAlbArtist = parts[7] ?? '';
+            rawDisc      = parts[8] ?? '';
+        } catch {}
+
+        this.#trackInfo.title  = rawTitle || 'Playing';
+        this.#trackInfo.artist = rawArtist;
+        const extraParts = [rawAlbum.trim(), rawDate.trim(), rawLen.trim()].filter(Boolean);
+        this.#trackInfo.extra = extraParts.join(' | ');
+
+        if (this.config.glitchEnabled) {
+            this.triggerGlitch();
+        }
+
+        if (this.config.imageMode || this.config.slideMode) {
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+            window.Repaint();
+            return;
+        }
+
+        const thisToken = ++this.#artSearchToken;
+        this.#expectedAsyncToken = 0;
+
+        const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc);
+
+        if (artKey !== this.#currentArtKey) {
+            if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
+            this.#currentCoverPath = '';
+            this.#currentArtKey = artKey;
+            this.#dirtyFlags |= PanelArtController.DIRTY.ALL;
+            this.#rebuildBackground();
+            window.Repaint();
+        } else {
+            this.#currentArtKey = artKey;
+        }
+
+        const cached = this.#scanner.getArtFromMemoryCache(artKey);
+        if (cached) {
+            this.applyNewArtwork(cached);
+            return;
+        }
+
+        const fastCover = this.#scanner.getFastCover(trackDir);
+        if (fastCover) {
+            this.#scanner.setArtMemoryCache(artKey, fastCover);
+            this.applyNewArtwork(fastCover);
+            return;
+        }
+
+        if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
+        this.#pendingSearchTimer = window.SetTimeout(() => {
+            if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+
+            let coverPath = null;
+            const artistVariants = this.#scanner.cleanVariants(rawArtist);
+            if (rawAlbArtist && rawAlbArtist !== rawArtist) {
+                for (const v of this.#scanner.cleanVariants(rawAlbArtist)) {
+                    if (!artistVariants.includes(v)) artistVariants.push(v);
+                }
+            }
+            const albumVariants  = this.#scanner.cleanVariants(rawAlbum);
+            const folderVariants = this.#scanner.cleanVariants(rawFolder);
+
+            const specificPatterns = [];
+            for (const art of artistVariants) {
+                for (const alb of albumVariants) {
+                    specificPatterns.push(`${art} - ${alb}`, `${art}_${alb}`, `${art} ${alb}`, `${alb} - ${art}`);
+                }
+            }
+            specificPatterns.push(...albumVariants, ...artistVariants);
+
+            if (this.#customFolders.length > 0) {
+                for (const cFolder of this.#customFolders) {
+                    coverPath = this.#scanner.findInCustomFolder(cFolder, artistVariants, albumVariants, folderVariants, specificPatterns, this.config.customFolderDepth);
+                    if (coverPath) break;
+                }
+            }
+
+            if (!coverPath && trackDir && utils.IsDirectory(trackDir)) {
+                coverPath = this.#scanner.searchDirectory(trackDir, specificPatterns, true, false, this.config.customFolderDepth);
+            }
+
+            if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+
+            if (coverPath) {
+                this.#scanner.setArtMemoryCache(artKey, coverPath);
+                this.#expectedAsyncToken = 0;
+                this.applyNewArtwork(coverPath);
+                return;
+            }
+
+            try {
+                const asyncHandle = this.#getSafeHandle(handle);
+                if (asyncHandle) {
+                    this.#expectedAsyncToken = thisToken;
+                    utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
+                }
+            } catch {
+                this.applyNewArtwork(null);
+            }
+        }, 10);
+    }
+
+    applyNewArtwork(coverPath) {
+        if (coverPath && coverPath === this.#currentCoverPath && this.#coverImg) {
+            this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.TEXT);
+            this.#rebuildBackground();
+            window.Repaint();
+            return;
+        }
+
+        if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
+        this.#currentCoverPath = '';
+
+        if (coverPath) {
+            try {
+                this.#coverImg = gdi.Image(coverPath);
+                this.#currentCoverPath = coverPath;
+            } catch {
+                this.#coverImg = null;
+            }
+        }
+
+        this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.TEXT | PanelArtController.DIRTY.BACKGROUND);
+        this.#rebuildBackground();
+        window.Repaint();
+    }
+
+    refreshColours() {
+        if (this.config.bgUseUIColor) {
+            this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
+            this.#rebuildBackground();
+        }
+        this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+        this.#rebuildOverlay();
+        window.Repaint();
+    }
+
+    #rebuildBackground() {
+        this.#backdrop.rebuildBlur(
+            this.#coverImg,
+            window.Width,
+            window.Height,
+            this.config.backgroundEnabled && this.config.blurEnabled,
+            this.config.blurRadius,
+            this.config.bgUseUIColor
+        );
+        this.#backdrop.rebuildCache(
+            window.Width,
+            window.Height,
+            this.config.bgUseUIColor,
+            this.config.customBgColor,
+            this.config.backgroundEnabled,
+            this.config.darkenValue,
+            this.#getSafeUIColour()
+        );
+        this.#dirtyFlags &= ~PanelArtController.DIRTY.BACKGROUND;
+    }
+
+    #rebuildOverlay() {
+        const themeColor = this.config.phosphorTheme === PanelArtController.PHOSPHOR_THEMES.length
+            ? this.config.customPhosphorColor
+            : PanelArtController.PHOSPHOR_THEMES[this.config.phosphorTheme].color;
+
+        this.#backdrop.rebuildOverlay(
+            window.Width,
+            window.Height,
+            { ...this.config, phosphorColor: themeColor },
+            this.#bezelBmp,
+            this.#dpiScale
+        );
+        this.#dirtyFlags &= ~PanelArtController.DIRTY.OVERLAY;
+    }
+
+    clearTrackDisplay() {
+        this.#currentTrackPath = '';
+        this.#currentCoverPath = '';
+        this.#currentArtKey    = '';
+        this.#artSearchToken++;
+        this.#expectedAsyncToken = 0;
+
+        if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
+        if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
+        this.#disposeTextBlock();
+
+        this.#trackInfo = { title: 'No track playing', artist: '', extra: '' };
+        this.#dirtyFlags = PanelArtController.DIRTY.ALL;
+        this.#backdrop.dispose();
+        this.#rebuildBackground();
+        window.Repaint();
+    }
+
+    // ========================================================================================
+    // 6. ENHANCED GLITCH SHADER & VIDEO DROPOUT ENGINE
+    // ========================================================================================
+    triggerGlitch() {
+        if (!this.config.glitchEnabled) return;
+        if (this.#glitchTimer) {
+            window.ClearInterval(this.#glitchTimer);
+            this.#glitchTimer = null;
+        }
+
+        let count = 0;
+        const totalFrames = 6;
+
+        this.#glitchTimer = window.SetInterval(() => {
+            count++;
+            if (count >= totalFrames) {
+                this.#glitchFrame = 0;
+                this.#glitchBlackout = false;
+                window.ClearInterval(this.#glitchTimer);
+                this.#glitchTimer = null;
+                window.Repaint();
+            } else {
+                this.#glitchFrame = Math.random() * 0.65 + 0.35;
+                this.#glitchBlackout = (count === 2 || count === 3);
+                window.Repaint();
+            }
+        }, 26);
+    }
+
+    #drawGlitch(gr, w, h, intensity) {
+        if (intensity <= 0) return;
+        const pad = this.scale(this.config.borderSize) || 0;
+        const gx = Math.max(pad, 0), gy = Math.max(pad, 0);
+        const gw = Math.max(1, w - pad * 2);
+        const gh = Math.max(1, h - pad * 2);
+
+        // 1. High-speed scanline bars
+        const stepH = Math.max(2, this.scale(3));
+        const scanOff = Math.floor(Math.random() * stepH);
+        for (let y = gy + scanOff; y < gy + gh; y += stepH) {
+            gr.FillSolidRect(gx, y, gw, Math.max(1, this.scale(1)), GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), Math.floor(Math.random() * 50) + 40));
+        }
+
+        // 2. Chromatic aberration color shift bands
+        const maxShift = Math.floor(gw * 0.12);
         const shift    = Math.floor(Math.random() * maxShift);
         const shiftDir = Math.random() > 0.5 ? 1 : -1;
 
-        if (intensity > 0.3) {
-            const col1 = GLITCH_SHIFT_COLORS[Math.floor(Math.random() * GLITCH_SHIFT_COLORS.length)];
-            const col2 = GLITCH_SHIFT_COLORS[Math.floor(Math.random() * GLITCH_SHIFT_COLORS.length)];
-            const sx1  = gx + shift * shiftDir,   rw1 = gw - shift;
-            const sx2  = gx + shift * -shiftDir,  rw2 = gw - shift;
-            if (rw1 > 0) gr.FillSolidRect(Math.max(sx1, gx), gy, rw1, gh, PanelArt_SetAlpha(col1, Math.floor(intensity * 60)));
-            gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(PA_GLITCH_CHROMA, 3));
-            if (rw2 > 0) gr.FillSolidRect(Math.max(sx2, gx), gy, rw2, gh, PanelArt_SetAlpha(col2, Math.floor(intensity * 60)));
+        if (intensity > 0.25) {
+            const col1 = PanelArtController.GLITCH_SHIFT_COLORS[Math.floor(Math.random() * PanelArtController.GLITCH_SHIFT_COLORS.length)];
+            const col2 = PanelArtController.GLITCH_SHIFT_COLORS[Math.floor(Math.random() * PanelArtController.GLITCH_SHIFT_COLORS.length)];
+            const sx1  = gx + shift * shiftDir,  rw1 = gw - shift;
+            const sx2  = gx + shift * -shiftDir, rw2 = gw - shift;
+            if (rw1 > 0) gr.FillSolidRect(Math.max(sx1, gx), gy, rw1, gh, GdiUtils.setAlpha(col1, Math.floor(intensity * 70)));
+            gr.FillSolidRect(gx, gy, gw, gh, GdiUtils.setAlpha(PanelArtController.GLITCH_CHROMA, 5));
+            if (rw2 > 0) gr.FillSolidRect(Math.max(sx2, gx), gy, rw2, gh, GdiUtils.setAlpha(col2, Math.floor(intensity * 70)));
         }
 
-        const numSlices = Math.floor(intensity * 6) + 2;
+        // 3. Horizontal slice tearing across the screen
+        const numSlices = Math.floor(intensity * 7) + 2;
         for (let i = 0; i < numSlices; i++) {
-            const sy = gy + Math.floor(Math.random() * gh), sh = Math.floor(Math.random() * 15) + 2;
-            const ms = Math.floor(gw * 0.1);
-            let sx   = gx + (Math.floor(Math.random() * ms * 2) - ms), dw = gw;
-            if (sx < gx)  { dw -= (gx - sx); sx = gx; }
+            const sy = gy + Math.floor(Math.random() * gh);
+            const sh = Math.floor(Math.random() * this.scale(16)) + 2;
+            const ms = Math.floor(gw * 0.12);
+            let sx   = gx + (Math.floor(Math.random() * ms * 2) - ms);
+            let dw   = gw;
+            if (sx < gx) { dw -= (gx - sx); sx = gx; }
             if (sx + dw > gx + gw) dw = gx + gw - sx;
-            if (dw > 0) gr.FillSolidRect(sx, sy, dw, sh,
-                PanelArt_SetAlpha(GLITCH_SLICE_COLORS[Math.floor(Math.random() * GLITCH_SLICE_COLORS.length)], 120));
+            if (dw > 0) {
+                const col = PanelArtController.GLITCH_SLICE_COLORS[Math.floor(Math.random() * PanelArtController.GLITCH_SLICE_COLORS.length)];
+                gr.FillSolidRect(sx, sy, dw, sh, GdiUtils.setAlpha(col, 130));
+            }
         }
 
-        const numBlocks = Math.floor(intensity * 30) + 1;
+        // 4. Digital corrupted memory blocks
+        const numBlocks = Math.floor(intensity * 32) + 2;
         for (let i = 0; i < numBlocks; i++) {
             const bh = Math.floor(Math.random() * gh * 0.06) + 2;
-            const by = gy + Math.floor(Math.random() * (gh - bh));
-            const bw = Math.floor(Math.random() * gw * 0.1) + 3;
-            const bx = gx + Math.floor(Math.random() * (gw - bw));
-            const col = GLITCH_BLOCK_COLORS[Math.floor(Math.random() * GLITCH_BLOCK_COLORS.length)];
-            gr.FillSolidRect(bx, by, bw, bh,
-                _RGB(Math.floor(((col >>> 16) & 0xFF) * 0.90),
-                     Math.floor(((col >>>  8) & 0xFF) * 0.90),
-                     Math.floor((col & 0xFF) * 0.90)));
+            const bw = Math.floor(Math.random() * gw * 0.12) + 4;
+            const maxSpanY = Math.max(0, gh - bh);
+            const maxSpanX = Math.max(0, gw - bw);
+            const by = gy + (maxSpanY > 0 ? Math.floor(Math.random() * maxSpanY) : 0);
+            const bx = gx + (maxSpanX > 0 ? Math.floor(Math.random() * maxSpanX) : 0);
+            const col = PanelArtController.GLITCH_BLOCK_COLORS[Math.floor(Math.random() * PanelArtController.GLITCH_BLOCK_COLORS.length)];
+            const r = Math.floor(((col >>> 16) & 0xFF) * 0.90);
+            const g = Math.floor(((col >>>  8) & 0xFF) * 0.90);
+            const b = Math.floor((col & 255) * 0.90);
+            gr.FillSolidRect(bx, by, bw, bh, GdiUtils.RGB(r, g, b));
         }
 
-        const numInterference = Math.floor(intensity * 10) + 3;
+        // 5. Electrical static interference lines
+        const numInterference = Math.floor(intensity * 12) + 4;
         for (let i = 0; i < numInterference; i++) {
-            const iy = gy + Math.floor(Math.random() * gh), ih = Math.floor(Math.random() * 2) + 1;
-            gr.FillSolidRect(gx, iy, gw, ih,
-                PanelArt_SetAlpha(GLITCH_TINT_COLORS[Math.floor(Math.random() * GLITCH_TINT_COLORS.length)],
-                                  Math.floor(Math.random() * 50) + 40));
-        }
-
-        const numNoise = Math.min(Math.floor(intensity * 200) + 100, 200);
-        for (let i = 0; i < numNoise; i++) {
-            const nx  = gx + Math.floor(Math.random() * gw);
-            const ny  = gy + Math.floor(Math.random() * gh);
-            const ns  = Math.floor(Math.random() * 2) + 1;
-            const gray = Math.floor(Math.random() * 150);
-            const pick = Math.floor(Math.random() * 4);
-            const nr   = pick === 0 ? Math.round(gray * 0.7) : gray;
-            const ng   = pick === 0 ? Math.round(gray * 0.8) : pick === 3 ? Math.round(gray * 0.5) : gray;
-            const nb   = pick === 0 ? gray : pick === 1 ? Math.round(gray * 0.5) : pick === 2 ? Math.round(gray * 0.6) : Math.round(gray * 0.5);
-            gr.FillSolidRect(nx, ny, ns, ns, _RGB(nr, ng, nb));
-        }
-
-        if (intensity > 0.75) gr.FillSolidRect(gx, gy, gw, gh, PanelArt_SetAlpha(PA_GLITCH_FLASH, 50));
-
-        if (intensity > 0.4) {
-            const tx = gx + Math.floor(Math.random() * gw * 0.6);
-            const tw = Math.min(Math.floor(Math.random() * 10) + 3, gx + gw - tx);
-            if (tw > 0) gr.FillSolidRect(tx, gy, tw, gh,
-                PanelArt_SetAlpha(GLITCH_TRACK_COLORS[Math.floor(Math.random() * GLITCH_TRACK_COLORS.length)], 150));
+            const iy = gy + Math.floor(Math.random() * gh);
+            const ih = Math.floor(Math.random() * 2) + 1;
+            const col = PanelArtController.GLITCH_TINT_COLORS[Math.floor(Math.random() * PanelArtController.GLITCH_TINT_COLORS.length)];
+            gr.FillSolidRect(gx, iy, gw, ih, GdiUtils.setAlpha(col, Math.floor(Math.random() * 60) + 40));
         }
     }
-};
 
-// ====================== FOLDER IMAGES ======================
-const FolderImages = {
-    list(folder) {
-        folder = folder || '';
-        if (folder.length > 3) folder = folder.replace(/\\+$/, '');
-        if (!folder) return [];
+    #getSafeHandle(metadb) {
+        if (metadb) {
+            try { if (metadb.Path) return metadb; } catch {}
+        }
+        if (fb.IsPlaying) {
+            try { const h = fb.GetNowPlaying(); if (h?.Path) return h; } catch {}
+        }
+        try { const s = fb.GetSelection(); if (s?.Path) return s; } catch {}
+        return null;
+    }
+
+    #getSafeUIColour() {
         try {
-            if (!_fso || !_fso.FolderExists(folder)) return [];
-            const filesEnum = new Enumerator(_fso.GetFolder(folder).Files);
-            const images = [];
-            for (; !filesEnum.atEnd(); filesEnum.moveNext()) {
-                const fname = filesEnum.item().Name.toLowerCase();
-                const ext   = fname.substring(fname.lastIndexOf('.'));
-                if (EXTENSIONS.includes(ext)) images.push(filesEnum.item().Path);
-            }
-            return images;
-        } catch (e) { return []; }
-    },
-
-    defaultFolder() {
-        return StateManager.get().imageFolder || (fb.ProfilePath + 'skins\\images');
+            return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
+        } catch {
+            return GdiUtils.RGB(25, 25, 25);
+        }
     }
-};
 
-// ====================== RENDERER ======================
-const Renderer = {
-    _sliderFont: null,
-
-    getSliderFont() {
-        if (!this._sliderFont) this._sliderFont = gdi.Font("Segoe UI", 16, 0);
-        return this._sliderFont;
-    },
-
-    drawBackground(gr) {
-        const dim = PanelArt.dimensions, img = PanelArt.images, cfg = StateManager.get();
-        gr.FillSolidRect(0, 0, dim.width, dim.height, cfg.customBackgroundColor);
-        if (cfg.backgroundEnabled && cfg.blurEnabled && img.blur)
-            gr.DrawImage(img.blur, 0, 0, dim.width, dim.height, 0, 0, img.blur.Width, img.blur.Height);
-        if (cfg.darkenValue > 0)
-            gr.FillSolidRect(0, 0, dim.width, dim.height,
-                PanelArt_SetAlpha(PA_BLACK, Math.floor(cfg.darkenValue * DARKEN_ALPHA_MULTIPLIER)));
-    },
-
-    drawAlbumArt(gr) {
-        const img = PanelArt.images.source, cfg = StateManager.get(), dim = PanelArt.dimensions;
-        if (!img || !cfg.albumArtEnabled) return { artX: 0, artY: 0, artW: 0, artH: 0 };
-        if (img.Width <= 0 || img.Height <= 0) return { artX: 0, artY: 0, artW: 0, artH: 0 };
-
-        const basePad = cfg.albumArtPadding ?? 0;
-        const availW  = dim.width, availH = dim.height;
-        const panelAspect = availW / availH;
-        let artW = 0, artH = 0, artX = 0, artY = 0, pad = basePad;
-
-        if (cfg.albumArtFloat === "left" || cfg.albumArtFloat === "right") {
-            let maxRatio = ALBUM_ART_MAX_WIDTH_RATIO;
-            if (panelAspect > 1.5) maxRatio = 0.70;
-            else if (panelAspect < 1.0) maxRatio = 0.60;
-
-            let maxArtW = (availW * maxRatio) - pad * 2;
-            let drawableH = availH - pad * 2;
-            const scale0 = Math.min(maxArtW / img.Width, drawableH / img.Height);
-            let scaledW = Math.floor(img.Width * scale0), scaledH = Math.floor(img.Height * scale0);
-
-            if (scaledW / availW < 0.35 && pad > 0) {
-                const reduction = Math.max(0, 1 - ((scaledW / availW) / 0.35));
-                pad       = Math.floor(basePad * (1 - reduction * 0.7));
-                maxArtW   = (availW * maxRatio) - pad * 2;
-                drawableH = availH - pad * 2;
-                const scale1 = Math.min(maxArtW / img.Width, drawableH / img.Height);
-                scaledW = Math.floor(img.Width * scale1); scaledH = Math.floor(img.Height * scale1);
+    // ========================================================================================
+    // SLIDESHOW & DISPLAY MODES
+    // ========================================================================================
+    startImageMode(interactive = true) {
+        this.stopSlideMode(false);
+        let images = this.#scanner.getFolderImagesList(this.config.imageFolder);
+        if (!images.length) {
+            if (interactive) {
+                const f = GdiUtils.prompt("No images found in image folder. Enter a valid path:", "Set Image Folder", this.config.imageFolder);
+                if (f) {
+                    const cleaned = GdiUtils.sanitizePath(f);
+                    if (cleaned && utils.IsDirectory(cleaned)) {
+                        this.config.imageFolder = cleaned;
+                        this.saveAll();
+                        images = this.#scanner.getFolderImagesList(this.config.imageFolder);
+                    }
+                }
             }
-
-            artW = scaledW + pad * 2; artH = availH;
-            artY = Math.floor((availH - scaledH) / 2);
-            artX = (cfg.albumArtFloat === "left") ? pad : dim.width - artW + pad;
-            const si = ArtCache.getScaledImage(img, scaledW, scaledH);
-            if (si) gr.DrawImage(si, artX, artY, scaledW, scaledH, 0, 0, scaledW, scaledH);
-
-        } else if (cfg.albumArtFloat === "top" || cfg.albumArtFloat === "bottom") {
-            const maxRatio = 0.75;
-            let maxArtH = (availH * maxRatio) - pad * 2, drawableW = availW - pad * 2;
-            const scale0 = Math.min(drawableW / img.Width, maxArtH / img.Height);
-            let scaledW = Math.floor(img.Width * scale0), scaledH = Math.floor(img.Height * scale0);
-            const minSH  = Math.floor((availH * ALBUM_ART_MIN_HEIGHT_RATIO) - pad * 2);
-            if (scaledH < minSH) { scaledH = minSH; scaledW = Math.floor(img.Width * (scaledH / img.Height)); }
-
-            if (scaledH / availH < 0.35 && pad > 0) {
-                const reduction = Math.max(0, 1 - ((scaledH / availH) / 0.35));
-                pad      = Math.floor(basePad * (1 - reduction * 0.4));
-                maxArtH  = (availH * maxRatio) - pad * 2;
-                drawableW = availW - pad * 2;
-                const scale1 = Math.min(drawableW / img.Width, maxArtH / img.Height);
-                scaledW = Math.floor(img.Width * scale1); scaledH = Math.floor(img.Height * scale1);
-                const minSH2 = Math.floor((availH * ALBUM_ART_MIN_HEIGHT_RATIO) - pad * 2);
-                if (scaledH < minSH2) { scaledH = minSH2; scaledW = Math.floor(img.Width * (scaledH / img.Height)); }
-            }
-
-            artW = availW; artH = scaledH + pad * 2;
-            artX = Math.floor((availW - scaledW) / 2);
-            artY = (cfg.albumArtFloat === "top") ? pad : dim.height - artH + pad;
-            const si = ArtCache.getScaledImage(img, scaledW, scaledH);
-            if (si) gr.DrawImage(si, artX, artY, scaledW, scaledH, 0, 0, scaledW, scaledH);
-        }
-
-        return { artX, artY, artW, artH, actualPad: pad };
-    },
-
-    getTextArea(artInfo) {
-        const cfg = StateManager.get(), dim = PanelArt.dimensions;
-        const overlayPad = DEFAULT_OVERLAY_PADDING, borderPad = cfg.borderSize || 0;
-        let textX = borderPad, textY = borderPad;
-        let textW = dim.width - borderPad * 2, textH = dim.height - borderPad * 2;
-
-        if (!cfg.albumArtEnabled || !PanelArt.images.source) return { textX, textY, textW, textH };
-
-        const { artW, artH, actualPad = 0 } = artInfo;
-        if (cfg.albumArtFloat === "left" || cfg.albumArtFloat === "right") {
-            if (cfg.albumArtFloat === "left") {
-                textX = artW + overlayPad - (actualPad * 0.5);
-                textW = dim.width - artW - overlayPad + (actualPad * 0.5) - borderPad;
-            } else {
-                textX = borderPad;
-                textW = dim.width - artW - overlayPad + (actualPad * 0.5) - borderPad;
-            }
-            textY = borderPad; textH = dim.height - borderPad * 2;
-        } else if (cfg.albumArtFloat === "top" || cfg.albumArtFloat === "bottom") {
-            textX = borderPad; textW = dim.width - borderPad * 2;
-            if (cfg.albumArtFloat === "top") {
-                textY = borderPad + artH + overlayPad - (actualPad * 0.5);
-                textH = dim.height - borderPad * 2 - artH - overlayPad + (actualPad * 0.5);
-            } else {
-                textY = borderPad;
-                textH = dim.height - borderPad * 2 - artH - overlayPad + (actualPad * 0.5);
-            }
-        }
-        return { textX, textY, textW: Math.max(0, textW), textH: Math.max(0, textH) };
-    },
-
-    drawText(gr, textArea) {
-        const { textX, textY, textW, textH } = textArea;
-        const cfg = StateManager.get();
-        const scaled = TextManager.scaleAndClip(gr, textW, textH);
-        const { titleFont, artistFont, extraFont, titleText, artistText, extraText } = scaled;
-        const titleH  = TextHeightCache.calcTextHeight(gr, titleText,  titleFont,  textW);
-        const artistH = TextHeightCache.calcTextHeight(gr, artistText, artistFont, textW);
-        const extraH  = extraFont ? TextHeightCache.calcTextHeight(gr, extraText, extraFont, textW) : 0;
-
-        let totalTextH = titleH + GAP_TITLE_ARTIST + artistH;
-        if (extraFont) totalTextH += GAP_ARTIST_EXTRA + extraH;
-
-        let startY;
-        switch (cfg.layout) {
-            case 1:  startY = textY + textH - totalTextH; break;
-            case 2:  startY = textY;                      break;
-            default: startY = textY + Math.floor((textH - totalTextH) / 2);
-        }
-
-        const ty    = startY;
-        const ay    = ty + titleH + GAP_TITLE_ARTIST;
-        const ey    = ay + artistH + (extraFont ? GAP_ARTIST_EXTRA : 0);
-        const flags = DT_CENTER;
-
-        if (cfg.textShadowEnabled) {
-            const shadow = PanelArt_SetAlpha(PA_BLACK, 136), off = TEXT_SHADOW_OFFSET;
-            gr.GdiDrawText(titleText,  titleFont,  shadow, textX, ty + off, textW, titleH,  flags | DT_NOPREFIX);
-            gr.GdiDrawText(artistText, artistFont, shadow, textX, ay + off, textW, artistH, flags | DT_NOPREFIX);
-            if (extraFont)
-                gr.GdiDrawText(extraText, extraFont, shadow, textX, ey + off, textW, extraH, flags | DT_NOPREFIX);
-        }
-
-        gr.GdiDrawText(titleText,  titleFont,  PA_WHITE,  textX, ty, textW, titleH,  flags | DT_NOPREFIX);
-        gr.GdiDrawText(artistText, artistFont, PA_GREY200, textX, ay, textW, artistH, flags | DT_NOPREFIX);
-        if (extraFont)
-            gr.GdiDrawText(extraText, extraFont, PA_GREY180, textX, ey, textW, extraH, flags | DT_NOPREFIX);
-    },
-
-    drawBorder(gr) {
-        const cfg = StateManager.get(), dim = PanelArt.dimensions;
-        if (cfg.borderSize <= 0) return;
-        const w = dim.width, h = dim.height, b = cfg.borderSize, col = cfg.borderColor;
-        gr.FillSolidRect(0, 0, w, b, col);
-        gr.FillSolidRect(0, h - b, w, b, col);
-        gr.FillSolidRect(0, b, b, h - b * 2, col);
-        gr.FillSolidRect(w - b, b, b, h - b * 2, col);
-        const bx = b, by = b, bw = w - b * 2, bh = h - b * 2;
-        gr.FillSolidRect(bx - 1, by - 1, bw + 2, 1, PA_BORDER_LIGHT);
-        gr.FillSolidRect(bx - 1, by + bh, bw + 2, 1, PA_BORDER_LIGHT);
-        gr.FillSolidRect(bx - 1, by - 1, 1, bh + 2, PA_BORDER_LIGHT);
-        gr.FillSolidRect(bx + bw, by - 1, 1, bh + 2, PA_BORDER_LIGHT);
-        gr.FillSolidRect(bx + 1, by + 1, bw - 2, 1, PA_BORDER_DARK);
-        gr.FillSolidRect(bx + 1, by + bh - 1, bw - 2, 1, PA_BORDER_DARK);
-        gr.FillSolidRect(bx + 1, by + 1, 1, bh - 2, PA_BORDER_DARK);
-        gr.FillSolidRect(bx + bw - 1, by + 1, 1, bh - 2, PA_BORDER_DARK);
-    },
-
-    drawOverlay(gr, w, h, artInfo, textArea) {
-        if (OverlayCache.valid && OverlayCache.img &&
-            (OverlayCache.img.Width !== w || OverlayCache.img.Height !== h)) {
-            OverlayCache.invalidate();
-        }
-        if (!OverlayCache.valid) OverlayCache.build(w, h, artInfo, textArea);
-        if (OverlayCache.img)
-            gr.DrawImage(OverlayCache.img, 0, 0, w, h, 0, 0, w, h);
-    },
-
-    drawSlider(gr, value, max, yPos) {
-        const dim = PanelArt.dimensions;
-        const barW = Math.max(SLIDER_MIN_WIDTH, Math.floor(dim.width * SLIDER_WIDTH_RATIO));
-        const bx = Math.floor((dim.width - barW) / 2);
-        gr.FillSolidRect(bx, yPos, barW, SLIDER_HEIGHT, PanelArt_SetAlpha(PA_WHITE, 60));
-        gr.FillSolidRect(bx, yPos, Math.floor(barW * (value / max)), SLIDER_HEIGHT, PanelArt_SetAlpha(PA_WHITE, 180));
-        const font = this.getSliderFont();
-        const text = value.toString();
-        const sz   = gr.MeasureString(text, font, 0, 0, dim.width, 64);
-        const sw   = Math.ceil(sz.Width), sh = Math.ceil(sz.Height);
-        const textY = Math.max(0, Math.floor(yPos - sh - 2));
-        gr.DrawString(text, font, PA_WHITE, Math.floor((dim.width - sw) / 2), textY, sw, sh);
-    },
-
-    drawSliders(gr) {
-        const sl = PanelArt.slider, cfg = StateManager.get(), dim = PanelArt.dimensions;
-        if (!sl.active) return;
-        if (sl.target) {
-            const valMap = { Reflection: cfg.opReflection, Glow: cfg.opGlow, Scanlines: cfg.opScanlines, Phosphor: cfg.opPhosphor };
-            this.drawSlider(gr, valMap[sl.target], 255, dim.height - 18);
-        }
-        if (sl.paddingActive) this.drawSlider(gr, cfg.albumArtPadding || 0, 100, dim.height - 40);
-    }
-};
-
-// ====================== STATE MANAGER ======================
-const StateManager = {
-    _config: getDefaultState(),
-
-    get() { return this._config; },
-
-    load() {
-        try {
-            const raw = window.GetProperty(STATE_KEY, null);
-            if (!raw) {
-                this._config = getDefaultState();
-                this.apply(this._config, true, false, false);
-                this.save();
+            if (!images.length) {
+                this.config.imageMode = false;
                 return;
             }
-            const parsed     = JSON.parse(raw);
-            let savedVersion = parsed.version ?? 1;
-            let savedData    = parsed.data ?? parsed;
-            if (savedVersion !== STATE_VERSION) {
-                savedData = migrateState(savedData, savedVersion);
-                const migrated = Validator.validateConfig(savedData);
-                try { window.SetProperty(STATE_KEY, JSON.stringify({ version: STATE_VERSION, data: migrated })); } catch (e) {}
-                this._config = migrated;
-            } else {
-                this._config = Validator.validateConfig(savedData);
-            }
-            this.apply(this._config, true, false, false);
-        } catch (e) {
-            this._config = getDefaultState();
-            this.apply(this._config, true, false, false);
-            this.save();
         }
-    },
-
-    apply(config, rebuildBlur = false, skipOverlayRebuild = true, skipFontRebuild = false) {
-        this._config = config;
-        if (!skipOverlayRebuild) OverlayCache.invalidate();
-        if (!skipFontRebuild) {
-            FontManager.rebuildFonts();
-            TextManager.update(fb.IsPlaying ? fb.GetNowPlaying() : null);
-        }
-        if (rebuildBlur) ImageManager.scheduleBlurRebuild();
-    },
-
-    reset() {
-        this._config = getDefaultState();
-        PanelArt.slider.active = false; PanelArt.slider.paddingActive = false; PanelArt.slider.target = null;
-        TextHeightCache.clear();
-        ImageSearch.clearCache();
-        if (PanelArt.slideMode) SlideManager.stopSlideMode();
-        if (PanelArt.imageMode) ImageModeManager.stopImageMode();
-        this.apply(this._config, true, false);
-        this.save();
-        PanelArt.images.folderPath = '';
-        const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-        if (track) ImageManager.loadAlbumArt(track);
-        else       TextManager.update(null);
-        RepaintHelper.full();
-    },
-
-    save() {
-        try { window.SetProperty(STATE_KEY, JSON.stringify({ version: STATE_VERSION, data: this._config })); } catch (e) {}
-    },
-
-    _saveTimer: null, _saveScheduled: false,
-
-    saveDebounced() {
-        if (this._saveScheduled) return;
-        this._saveScheduled = true;
-        this._saveTimer = window.SetTimeout(() => {
-            this._saveTimer = null;
-            try { this.save(); } finally { this._saveScheduled = false; }
-        }, 100);
-    }
-};
-
-// ====================== PRESET MANAGER ======================
-const PresetManager = {
-    save(slot) {
-        if (!_.inRange(slot, 1, 4)) return;
-        try { window.SetProperty("SMP.Preset" + slot, JSON.stringify(_.assign({}, StateManager.get()))); } catch (e) {}
-    },
-
-    load(slot) {
-        if (!_.inRange(slot, 1, 4)) return;
+        const pick = images[Math.floor(Math.random() * images.length)];
         try {
-            const str = window.GetProperty("SMP.Preset" + slot, null);
-            if (!str) return;
-            const validated = Validator.validateConfig(JSON.parse(str));
-            StateManager.apply(validated, true, false);
-            StateManager.save();
-            const wasSlide = PanelArt.slideMode;
-            const wasImage = PanelArt.imageMode;
-            if (wasSlide && !validated.slideMode) SlideManager.stopSlideMode();
-            if (wasImage && !validated.imageMode) ImageModeManager.stopImageMode();
-            PanelArt.imageMode    = validated.imageMode;
-            PanelArt.slideMode    = validated.slideMode;
-            PanelArt.slideIndex   = validated.slideIndex || 0;
-            if (PanelArt.slideMode)      SlideManager.startSlideMode(true);
-            else if (PanelArt.imageMode) ImageModeManager.startImageMode();
-            RepaintHelper.full();
-        } catch (e) {}
-    }
-};
-
-// ====================== PHOSPHOR MANAGER ======================
-const PhosphorManager = {
-    getColor() {
-        const cfg = StateManager.get();
-        if (cfg.currentPhosphorTheme === CUSTOM_THEME_INDEX) return cfg.customPhosphorColor;
-        if (!_.inRange(cfg.currentPhosphorTheme, 0, PHOSPHOR_THEMES.length)) return PHOSPHOR_THEMES[0].color;
-        return PHOSPHOR_THEMES[cfg.currentPhosphorTheme].color;
-    },
-
-    setCustomColor() {
-        try {
-            const cfg    = StateManager.get();
-            const picked = utils.ColourPicker(window.ID, cfg.customPhosphorColor);
-            if (_.isNumber(picked) && picked !== -1) {
-                cfg.customPhosphorColor   = picked >>> 0;
-                cfg.currentPhosphorTheme  = CUSTOM_THEME_INDEX;
-                StateManager.apply(cfg, false, false, true);
-                StateManager.save();
-                RepaintHelper.full();
-            }
-        } catch (e) {}
-    }
-};
-
-// ====================== MENU MANAGER ======================
-const MenuManager = {
-    createMainMenu() {
-        const m   = window.CreatePopupMenu();
-        const cfg = StateManager.get();
-        this.addOverlayMenu(m);
-        m.AppendMenuSeparator();
-        this.addPanelArtMenu(m);
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(MF_STRING, 900, "Reset to Defaults");
-        m.AppendMenuItem(MF_STRING, 901, "Clear Image Cache");
-        this.addCustomFoldersMenu(m);
-        this.addPresetMenu(m);
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(cfg.glitchEnabled ? MF_CHECKED : MF_STRING, 545, "Glitch Effect on Track Change");
-        m.AppendMenuItem(MF_STRING, 950, cfg.imageFolder ? "Change Image Folder" : "Set Image Folder...");
-        m.AppendMenuItem(PanelArt.slideMode ? MF_CHECKED : MF_STRING, 952, "Slide Show");
-        if (cfg.imageFolder)
-            m.AppendMenuItem(PanelArt.imageMode ? MF_CHECKED : MF_STRING, 951, "Show Image");
-        return m;
-    },
-
-    addOverlayMenu(parent) {
-        const overlayM = window.CreatePopupMenu();
-        const cfg      = StateManager.get();
-        const themeM   = window.CreatePopupMenu();
-        _.forEach(PHOSPHOR_THEMES, (theme, i) => {
-            themeM.AppendMenuItem(MF_STRING, 600 + i, theme.name);
-            if (cfg.currentPhosphorTheme === i) themeM.CheckMenuItem(600 + i, true);
-        });
-        themeM.AppendMenuSeparator();
-        const customId = 600 + CUSTOM_THEME_INDEX;
-        themeM.AppendMenuItem(MF_STRING, customId, "Custom...");
-        if (cfg.currentPhosphorTheme === CUSTOM_THEME_INDEX) themeM.CheckMenuItem(customId, true);
-        themeM.AppendTo(overlayM, MF_STRING, "Phosphor Theme");
-        overlayM.AppendMenuSeparator();
-        overlayM.AppendMenuItem(cfg.overlayAllOff ? MF_CHECKED : MF_STRING, 99, "— All Effects Off");
-        overlayM.AppendMenuSeparator();
-        overlayM.AppendMenuItem((!cfg.overlayAllOff && cfg.showReflection) ? MF_CHECKED : MF_STRING, 100, "Reflection");
-        overlayM.AppendMenuItem((!cfg.overlayAllOff && cfg.showGlow)       ? MF_CHECKED : MF_STRING, 101, "Glow");
-        overlayM.AppendMenuItem((!cfg.overlayAllOff && cfg.showScanlines)  ? MF_CHECKED : MF_STRING, 102, "Scanlines");
-        overlayM.AppendMenuItem((!cfg.overlayAllOff && cfg.showPhosphor)   ? MF_CHECKED : MF_STRING, 103, "Phosphor");
-        overlayM.AppendMenuSeparator();
-        const opacityM = window.CreatePopupMenu();
-        _.forEach(["Reflection","Glow","Scanlines","Phosphor"], (name, i) => {
-            const keys  = ["opReflection","opGlow","opScanlines","opPhosphor"];
-            opacityM.AppendMenuItem(MF_STRING, 200 + i, `Adjust ${name} Opacity...  [${cfg[keys[i]]}]`);
-        });
-        opacityM.AppendTo(overlayM, MF_STRING, "Adjust Opacity");
-        overlayM.AppendTo(parent, MF_STRING, "Overlay");
-    },
-
-    addPanelArtMenu(parent) {
-        const panelM = window.CreatePopupMenu();
-        this.addAlbumArtMenu(panelM);
-        panelM.AppendMenuSeparator();
-        this.addTextMenu(panelM);
-        const borderM = window.CreatePopupMenu();
-        borderM.AppendMenuItem(MF_STRING, 530, 'Set Border Size...');
-        borderM.AppendMenuItem(MF_STRING, 531, 'Change Color...');
-        borderM.AppendTo(panelM, MF_STRING, 'Border Appearance');
-        this.addBackgroundMenu(panelM);
-        panelM.AppendTo(parent, MF_STRING, 'PanelArt Settings');
-    },
-
-    addBackgroundMenu(parent) {
-        const bgM = window.CreatePopupMenu(), cfg = StateManager.get();
-        bgM.AppendMenuItem(cfg.backgroundEnabled ? MF_CHECKED : MF_STRING, 850, "Enable Background Art");
-        bgM.AppendMenuItem(MF_STRING, 851, "Custom Background Color...");
-        bgM.AppendMenuSeparator();
-        const blurM = window.CreatePopupMenu();
-        blurM.AppendMenuItem(cfg.blurEnabled ? MF_CHECKED : MF_STRING, 512, 'Enable Blur');
-        blurM.AppendMenuSeparator();
-        _.times(11, i => {
-            const v = i * 20;
-            blurM.AppendMenuItem(MF_STRING, 500 + i, 'Radius: ' + v);
-            if (cfg.blurRadius === v) blurM.CheckMenuItem(500 + i, true);
-        });
-        blurM.AppendMenuItem(MF_STRING, 511, 'Max: 254');
-        if (cfg.blurRadius === 254) blurM.CheckMenuItem(511, true);
-        const blurMenuActive = cfg.backgroundEnabled && cfg.blurEnabled;
-        blurM.AppendTo(bgM, blurMenuActive ? MF_STRING : MF_GRAYED, 'Blur Settings');
-        const darkM = window.CreatePopupMenu();
-        _.times(6, d => {
-            const v = d * 10;
-            darkM.AppendMenuItem(MF_STRING, 520 + d, 'Level: ' + v + '%');
-            if (cfg.darkenValue === v) darkM.CheckMenuItem(520 + d, true);
-        });
-        darkM.AppendTo(bgM, MF_STRING, 'Darken Background');
-        bgM.AppendTo(parent, MF_STRING, "Background");
-    },
-
-    addTextMenu(parent) {
-        const textM = window.CreatePopupMenu(), cfg = StateManager.get();
-        this.addFontMenu(textM);
-        textM.AppendMenuSeparator();
-        textM.AppendMenuItem(MF_STRING, 562, 'Layout: Top');
-        textM.AppendMenuItem(MF_STRING, 560, 'Layout: Center');
-        textM.AppendMenuItem(MF_STRING, 561, 'Layout: Bottom');
-        textM.CheckMenuRadioItem(560, 562, 560 + cfg.layout);
-        textM.AppendMenuSeparator();
-        textM.AppendMenuItem(cfg.textShadowEnabled ? MF_CHECKED : MF_STRING, 570, 'Text Shadow');
-        textM.AppendMenuItem(cfg.extraInfoEnabled  ? MF_CHECKED : MF_STRING, 571, 'Show Extra Info');
-        textM.AppendTo(parent, MF_STRING, "Text");
-    },
-
-    addFontMenu(parent) {
-        const fontsM = window.CreatePopupMenu();
-        const sizeM  = window.CreatePopupMenu();
-        const typeM  = window.CreatePopupMenu();
-        _.forEach(['Title','Artist','Extra'], (name, i) => {
-            sizeM.AppendMenuItem(MF_STRING, 540 + i, name);
-            typeM.AppendMenuItem(MF_STRING, 550 + i, name);
-        });
-        sizeM.AppendTo(fontsM, MF_STRING, 'Size');
-        typeM.AppendTo(fontsM, MF_STRING, 'Type');
-        fontsM.AppendTo(parent, MF_STRING, 'Fonts');
-    },
-
-    addAlbumArtMenu(parent) {
-        const artM = window.CreatePopupMenu(), cfg = StateManager.get();
-        artM.AppendMenuItem(cfg.albumArtEnabled ? MF_CHECKED : MF_STRING, 800, "Enable Album Art");
-        _.forEach([
-            { value:"left",   id:801, text:"Float: Left"   },
-            { value:"right",  id:802, text:"Float: Right"  },
-            { value:"top",    id:803, text:"Float: Top"    },
-            { value:"bottom", id:804, text:"Float: Bottom" }
-        ], opt => artM.AppendMenuItem(cfg.albumArtFloat === opt.value ? MF_CHECKED : MF_STRING, opt.id, opt.text));
-        artM.AppendMenuItem(MF_STRING, 805, "Padding...");
-        artM.AppendTo(parent, MF_STRING, "Album Art");
-    },
-
-    addPresetMenu(parent) {
-        const presetM = window.CreatePopupMenu(), loadM = window.CreatePopupMenu(), saveM = window.CreatePopupMenu();
-        _.times(3, i => {
-            loadM.AppendMenuItem(MF_STRING, 301 + i, "Preset " + (i + 1));
-            saveM.AppendMenuItem(MF_STRING, 401 + i, "Preset " + (i + 1));
-        });
-        loadM.AppendTo(presetM, MF_STRING, 'Load Preset');
-        saveM.AppendTo(presetM, MF_STRING, 'Save Preset');
-        presetM.AppendTo(parent, MF_STRING, 'Presets');
-    },
-
-    addCustomFoldersMenu(parent) {
-        const customMenu = window.CreatePopupMenu();
-        customMenu.AppendMenuItem(MF_STRING, 1000, "Add Custom Folder...");
-        const folders = CustomFolders.getAll();
-        if (!_.isEmpty(folders)) {
-            customMenu.AppendMenuSeparator();
-            folders.forEach((folder, i) =>
-                customMenu.AppendMenuItem(MF_STRING, 1010 + i, _.truncate(folder, { length: 50 })));
-            customMenu.AppendMenuSeparator();
-            customMenu.AppendMenuItem(MF_STRING, 1020, "Clear All Custom Folders");
+            if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} }
+            this.#modeImg = gdi.Image(pick.path);
+            this.config.imageMode = true;
+            window.Repaint();
+        } catch {
+            this.#modeImg = null;
         }
-        customMenu.AppendTo(parent, MF_STRING, "Custom Artwork Folders");
-    },
+    }
 
-    handleSelection(id) {
-        const cfg = StateManager.get();
+    stopImageMode(restoreTrack = true) {
+        this.config.imageMode = false;
+        if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} this.#modeImg = null; }
+        if (restoreTrack && fb.IsPlaying) {
+            this.loadArtworkForTrack(fb.GetNowPlaying());
+        } else {
+            window.Repaint();
+        }
+    }
 
-        const update = (callback, rebuildBlur = false, rebuildFonts = false, invalidateOverlay = false) => {
-            const prevRadius = cfg.blurRadius, prevBlurOn = cfg.blurEnabled, prevBgOn = cfg.backgroundEnabled;
-            callback(cfg);
-            const blurChanged = prevRadius !== cfg.blurRadius || prevBlurOn !== cfg.blurEnabled || prevBgOn !== cfg.backgroundEnabled;
-            StateManager.apply(cfg, rebuildBlur || blurChanged, !invalidateOverlay, !rebuildFonts);
-            StateManager.saveDebounced();
-            RepaintHelper.full();
+    startSlideMode(interactive = true) {
+        this.stopImageMode(false);
+        this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+        if (!this.#slideImages.length) {
+            if (interactive) {
+                const f = GdiUtils.prompt("No images found in image folder. Enter a valid path:", "Set Image Folder", this.config.imageFolder);
+                if (f) {
+                    const cleaned = GdiUtils.sanitizePath(f);
+                    if (cleaned && utils.IsDirectory(cleaned)) {
+                        this.config.imageFolder = cleaned;
+                        this.saveAll();
+                        this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+                    }
+                }
+            }
+            if (!this.#slideImages.length) {
+                this.config.slideMode = false;
+                return;
+            }
+        }
+
+        this.config.slideMode = true;
+        const pickNext = () => {
+            if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE && this.#lifecycle !== PanelArtController.LIFECYCLE.INIT) return;
+            if (!window.IsVisible) return;
+            if (!this.#slideImages || !this.#slideImages.length) {
+                this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+            }
+            if (!this.#slideImages.length) return;
+            const pick = this.#slideImages[Math.floor(Math.random() * this.#slideImages.length)];
+            try {
+                if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} }
+                this.#modeImg = gdi.Image(pick.path);
+                window.Repaint();
+            } catch {
+                this.#modeImg = null;
+            }
         };
 
-        if (id === 99) {
-            update(c => {
-                if (!c.overlayAllOff) {
-                    c.savedOverlay = { showReflection: c.showReflection, showGlow: c.showGlow,
-                                       showScanlines:  c.showScanlines,  showPhosphor: c.showPhosphor };
-                    c.overlayAllOff = true;
-                } else {
-                    if (c.savedOverlay) {
-                        if (_.isBoolean(c.savedOverlay.showReflection)) c.showReflection = c.savedOverlay.showReflection;
-                        if (_.isBoolean(c.savedOverlay.showGlow))       c.showGlow       = c.savedOverlay.showGlow;
-                        if (_.isBoolean(c.savedOverlay.showScanlines))  c.showScanlines  = c.savedOverlay.showScanlines;
-                        if (_.isBoolean(c.savedOverlay.showPhosphor))   c.showPhosphor   = c.savedOverlay.showPhosphor;
-                        c.savedOverlay = null;
-                    }
-                    c.overlayAllOff = false;
-                }
-            }, false, false, true);
-        }
-        else if (_.inRange(id, 100, 104)) {
-            const effects = ['showReflection','showGlow','showScanlines','showPhosphor'];
-            update(c => c[effects[id - 100]] = !c[effects[id - 100]], false, false, true);
-        }
-        else if (_.inRange(id, 200, 204)) {
-            PanelArt.slider.active = true; PanelArt.slider.paddingActive = false;
-            PanelArt.slider.target = ["Reflection","Glow","Scanlines","Phosphor"][id - 200];
-            RepaintHelper.full();
-        }
-        else if (_.inRange(id, 600, 600 + CUSTOM_THEME_INDEX)) {
-            update(c => c.currentPhosphorTheme = id - 600, false, false, true);
-        }
-        else if (id === 600 + CUSTOM_THEME_INDEX) { PhosphorManager.setCustomColor(); }
-        else if (_.inRange(id, 500, 511)) { update(c => c.blurRadius = (id - 500) * 20, true); }
-        else if (id === 511)              { update(c => c.blurRadius = 254, true); }
-        else if (id === 512)              { update(c => c.blurEnabled = !c.blurEnabled, true); }
-        else if (_.inRange(id, 520, 526)) { update(c => c.darkenValue = (id - 520) * 10); }
-        else if (id === 530) {
-            const v = Utils.validateNumber(utils.InputBox(window.ID, 'Border Size', 'Enter size (0-50):', cfg.borderSize.toString(), false), cfg.borderSize, 0, 50);
-            update(c => c.borderSize = v);
-        }
-        else if (id === 531) {
-            const p = utils.ColourPicker(window.ID, cfg.borderColor);
-            if (_.isNumber(p) && p !== -1) update(c => c.borderColor = p >>> 0);
-        }
-        else if (_.inRange(id, 540, 543)) {
-            const keys   = ['titleFontSize','artistFontSize','extraFontSize'];
-            const labels = ['Title Font Size','Artist Font Size','Extra Font Size'];
-            const idx    = id - 540;
-            const v      = Utils.validateNumber(utils.InputBox(window.ID, labels[idx], 'Enter new size:', cfg[keys[idx]].toString(), false), cfg[keys[idx]], MIN_FONT_SIZE, MAX_FONT_SIZE);
-            update(c => c[keys[idx]] = v, false, true);
-        }
-        else if (_.inRange(id, 550, 553)) {
-            const keys   = ['titleFontName','artistFontName','extraFontName'];
-            const labels = ['Title Font Name','Artist Font Name','Extra Font Name'];
-            const idx    = id - 550;
-            const input  = utils.InputBox(window.ID, labels[idx], 'Enter font name:', cfg[keys[idx]], false);
-            if (input && _.trim(input)) update(c => c[keys[idx]] = _.trim(input), false, true);
-        }
-        else if (_.inRange(id, 560, 563)) { update(c => c.layout = id - 560); }
-        else if (id === 570) { update(c => c.textShadowEnabled = !c.textShadowEnabled); }
-        else if (id === 571) { update(c => c.extraInfoEnabled = !c.extraInfoEnabled, false, true); }
-        else if (id === 800) { update(c => c.albumArtEnabled   = !c.albumArtEnabled, false, false, true); }
-        else if (_.inRange(id, 801, 805)) {
-            const floats = ["left","right","top","bottom"];
-            update(c => c.albumArtFloat = floats[id - 801], false, false, true);
-        }
-        else if (id === 805) {
-            PanelArt.slider.active = true; PanelArt.slider.paddingActive = true;
-            PanelArt.slider.target = null; RepaintHelper.full();
-        }
-        else if (id === 850) { update(c => c.backgroundEnabled = !c.backgroundEnabled, false, false, true); }
-        else if (id === 851) {
-            const p = utils.ColourPicker(window.ID, cfg.customBackgroundColor);
-            if (_.isNumber(p) && p !== -1) update(c => c.customBackgroundColor = p >>> 0);
-        }
-        else if (_.inRange(id, 301, 304)) { PresetManager.load(id - 300); }
-        else if (_.inRange(id, 401, 404)) { PresetManager.save(id - 400); }
-        else if (id === 900)  { StateManager.reset(); }
-        else if (id === 901)  {
-            FileManager.clear(); ImageSearch.clearCache();
-            ImageManager.cleanup(); PanelArt.images.folderPath = ''; TextHeightCache.clear();
-            const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-            if (track) ImageManager.loadAlbumArt(track);
-            else { TextManager.update(null); RepaintHelper.full(); }
-        }
-        else if (id === 1000) {
-            try {
-                const folder = utils.InputBox(window.ID, "Enter folder path for custom artwork search:", "Custom Artwork Folder", "", true);
-                if (folder && CustomFolders.add(folder)) {
-                    ImageSearch.clearCache();
-                    const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-                    if (track) ImageManager.loadAlbumArt(track); else RepaintHelper.full();
-                }
-            } catch (e) {}
-        }
-        else if (_.inRange(id, 1010, 1015)) {
-            if (CustomFolders.remove(id - 1010)) {
-                ImageSearch.clearCache();
-                const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-                if (track) ImageManager.loadAlbumArt(track); else RepaintHelper.full();
-            }
-        }
-        else if (id === 1020) {
-            CustomFolders.clear(); ImageSearch.clearCache();
-            const track = fb.IsPlaying ? fb.GetNowPlaying() : null;
-            if (track) ImageManager.loadAlbumArt(track); else RepaintHelper.full();
-        }
-        else if (id === 950) {
-            try {
-                const folder = utils.InputBox(window.ID, "Enter Image folder path:", "Image Folder", cfg.imageFolder || '', true);
-                if (folder && _isFolder(folder)) {
-                    update(c => { c.imageFolder = folder; });
-                }
-            } catch (e) {}
-        }
-        else if (id === 951) { ImageModeManager.toggleImageMode(); }
-        else if (id === 952) { SlideManager.toggleSlideMode(); }
-        else if (id === 545) {
-            cfg.glitchEnabled = !cfg.glitchEnabled;
-            StateManager.saveDebounced();
-            RepaintHelper.full();
+        pickNext();
+        if (this.#slideTimer) window.ClearInterval(this.#slideTimer);
+        this.#slideTimer = window.SetInterval(pickNext, 12000);
+        window.Repaint();
+    }
+
+    stopSlideMode(restoreTrack = true) {
+        if (this.#slideTimer) { window.ClearInterval(this.#slideTimer); this.#slideTimer = null; }
+        this.config.slideMode = false;
+        this.#slideImages = null;
+        if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} this.#modeImg = null; }
+        if (restoreTrack && fb.IsPlaying) {
+            this.loadArtworkForTrack(fb.GetNowPlaying());
+        } else {
+            window.Repaint();
         }
     }
-};
+	
+// ========================================================================================
+    // PAINT PIPELINE & PRE-BAKED COMPOSITE TYPOGRAPHY
+    // ========================================================================================
+    onPaint(gr) {
+        if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+        const w = window.Width, h = window.Height;
+        if (!gr || w <= 0 || h <= 0) return;
 
-// ====================== ART CONTROLLER ======================
-const ArtController = {
-    onPlaybackNewTrack(metadb) {
-        TextHeightCache.clear();
-        TextManager.update(metadb);
-        OverlayCache.invalidate();
-        ImageManager.loadAlbumArt(metadb);
-        GlitchRenderer.run();
-    },
+        if ((this.config.imageMode || this.config.slideMode) && this.#modeImg) {
+            const pad = this.scale(this.config.borderSize) + this.scale(3);
+            const dw = Math.max(10, w - pad * 2);
+            const dh = Math.max(10, h - pad * 2);
 
-    onPlaybackStop(reason) {
-        if (reason === 0 || reason === 2) {
-            ImageManager.cleanup();
-            ArtCache.clearScaledCache();
-            OverlayCache.invalidate();
-            TextManager.update(null);
+            gr.FillSolidRect(0, 0, w, h, GdiUtils.RGB(5, 5, 5));
+            if (this.#modeImg.Width > 0 && this.#modeImg.Height > 0) {
+                gr.SetInterpolationMode(2);
+                gr.DrawImage(this.#modeImg, pad, pad, dw, dh, 0, 0, this.#modeImg.Width, this.#modeImg.Height);
+            }
+
+            if (!this.#backdrop.overlayBmp || (this.#dirtyFlags & PanelArtController.DIRTY.OVERLAY) ||
+                (this.#backdrop.overlayBmp.Width !== w || this.#backdrop.overlayBmp.Height !== h)) {
+                this.#rebuildOverlay();
+            }
+            if (this.#backdrop.overlayBmp) gr.DrawImage(this.#backdrop.overlayBmp, 0, 0, w, h, 0, 0, this.#backdrop.overlayBmp.Width, this.#backdrop.overlayBmp.Height);
+            return;
         }
-        RepaintHelper.full();
-    },
 
+        // Layer 1: Background (Momentary blackout during frames 2-3 of glitch)
+        if (this.#glitchBlackout) {
+            gr.FillSolidRect(0, 0, w, h, GdiUtils.RGB(6, 6, 8)); // Signal dropout CRT black
+        } else {
+            if (!this.#backdrop.cacheBmp || (this.#dirtyFlags & PanelArtController.DIRTY.BACKGROUND) ||
+                (this.#backdrop.cacheBmp.Width !== w || this.#backdrop.cacheBmp.Height !== h)) {
+                this.#rebuildBackground();
+            }
+            if (this.#backdrop.cacheBmp) {
+                gr.DrawImage(this.#backdrop.cacheBmp, 0, 0, w, h, 0, 0, this.#backdrop.cacheBmp.Width, this.#backdrop.cacheBmp.Height);
+            } else {
+                gr.FillSolidRect(0, 0, w, h, this.config.customBgColor >>> 0);
+            }
+        }
+
+        if (this.#dirtyFlags & PanelArtController.DIRTY.LAYOUT) {
+            this.#updateLayout(gr, w, h);
+        } else if (this.#dirtyFlags & PanelArtController.DIRTY.TEXT) {
+            this.#bakeTypographyPlate(gr);
+        }
+
+        // Layer 2: Cover Art
+        if (this.#coverImg && this.config.albumArtEnabled && fb.IsPlaying && this.#layout.artRect.w > 0) {
+            const ar = this.#layout.artRect;
+
+            if (this.#glitchBlackout) {
+                // Violent horizontal signal sync slice during blackout
+                const sliceCount = 5;
+                const sliceH = Math.max(6, Math.floor(ar.h / sliceCount));
+                const maxJitter = Math.round((this.#glitchFrame - 0.5) * 36);
+
+                for (let sy = 0; sy < ar.h; sy += sliceH) {
+                    const curH = Math.min(sliceH, ar.h - sy);
+                    const dx = ((Math.floor(sy / sliceH) % 2 === 0) ? maxJitter : -maxJitter);
+                    const srcSy = Math.floor((sy / ar.h) * this.#coverImg.Height);
+                    const srcSh = Math.floor((curH / ar.h) * this.#coverImg.Height);
+                    gr.DrawImage(this.#coverImg, ar.x + dx, ar.y + sy, ar.w, curH, 0, srcSy, this.#coverImg.Width, srcSh);
+                }
+            } else {
+                if (this.config.showGlow && this.config.opGlow > 0 && !this.config.overlayAllOff && this.#backdrop.glowBmp) {
+                    const gx = Math.floor(ar.x + (ar.w - this.#backdrop.glowSize) / 2);
+                    const gy = Math.floor(ar.y + (ar.h - this.#backdrop.glowSize) / 2);
+                    gr.DrawImage(this.#backdrop.glowBmp, gx, gy, this.#backdrop.glowSize, this.#backdrop.glowSize, 0, 0, this.#backdrop.glowBmp.Width, this.#backdrop.glowBmp.Height);
+                }
+                gr.SetInterpolationMode(2);
+
+                if (this.#glitchFrame > 0 && this.config.glitchEnabled) {
+                    const jx = Math.round((Math.random() - 0.5) * 8);
+                    const jy = Math.round((Math.random() - 0.5) * 4);
+                    gr.DrawImage(this.#coverImg, ar.x + jx, ar.y + jy, ar.w, ar.h, 0, 0, this.#coverImg.Width, this.#coverImg.Height);
+                } else {
+                    gr.DrawImage(this.#coverImg, ar.x, ar.y, ar.w, ar.h, 0, 0, this.#coverImg.Width, this.#coverImg.Height);
+                }
+            }
+        }
+
+        // Layer 3: Typography (Momentarily flashed off during blackout)
+        if (!this.#glitchBlackout && this.#textBlockBmp && this.#textBlockW > 0 && this.#textBlockH > 0) {
+            let tx = this.#textBlockX;
+            let ty = this.#textBlockY;
+            if (this.#glitchFrame > 0 && this.config.glitchEnabled) {
+                tx += Math.round((Math.random() - 0.5) * 10);
+                ty += Math.round((Math.random() - 0.5) * 4);
+            }
+            gr.DrawImage(this.#textBlockBmp, tx, ty, this.#textBlockW, this.#textBlockH, 0, 0, this.#textBlockW, this.#textBlockH);
+        }
+
+        // Layer 4: CRT Glitch Noise Shader (Chromatic Aberration & Interference Overlays)
+        if (this.#glitchFrame > 0 && this.config.glitchEnabled) {
+            this.#drawGlitch(gr, w, h, this.#glitchFrame);
+        }
+
+        // Layer 5: Overlays & CRT Masks
+        if (!this.#backdrop.overlayBmp || (this.#dirtyFlags & PanelArtController.DIRTY.OVERLAY) ||
+            (this.#backdrop.overlayBmp.Width !== w || this.#backdrop.overlayBmp.Height !== h)) {
+            this.#rebuildOverlay();
+        }
+        if (this.#backdrop.overlayBmp) gr.DrawImage(this.#backdrop.overlayBmp, 0, 0, w, h, 0, 0, this.#backdrop.overlayBmp.Width, this.#backdrop.overlayBmp.Height);
+
+        // Layer 6: HUD Slider & Toasts
+        if (this.#opacityTarget) {
+            this.#drawSliderHud(gr, w, h);
+        } else if (this.#bezelNotifyText) {
+            this.#drawBezelToast(gr, w, h);
+        }
+    }
+
+    #updateLayout(gr, w, h) {
+        const b = this.scale(this.config.borderSize);
+        const pad = this.scale(this.config.albumArtPadding);
+        const inL = b + pad + this.scale(this.config.padLeft);
+        const inR = b + pad + this.scale(this.config.padRight);
+        const inT = b + pad + this.scale(this.config.padTop);
+        const inB = b + pad + this.scale(this.config.padBottom);
+        const contentW = Math.max(10, w - inL - inR);
+        const contentH = Math.max(10, h - inT - inB);
+
+        let artRect = { x: 0, y: 0, w: 0, h: 0 };
+        let textRect = { x: inL + 8, y: inT + 8, w: Math.max(10, contentW - 16), h: Math.max(10, contentH - 16) };
+
+        if (this.#coverImg && this.config.albumArtEnabled && fb.IsPlaying) {
+            const flt = this.config.albumArtFloat;
+            if (flt === 'left' || flt === 'right') {
+                const maxW = Math.max(10, Math.floor(contentW * 0.65) - pad);
+                const maxH = Math.max(10, contentH - pad * 2);
+                const scale = Math.min(maxW / this.#coverImg.Width, maxH / this.#coverImg.Height);
+                const drawW = Math.max(1, Math.floor(this.#coverImg.Width * scale));
+                const drawH = Math.max(1, Math.floor(this.#coverImg.Height * scale));
+                const drawY = inT + Math.floor((contentH - drawH) / 2);
+                const drawX = flt === 'left' ? inL + pad : Math.max(inL, w - inR - pad - drawW);
+
+                artRect = { x: drawX, y: drawY, w: drawW, h: drawH };
+                textRect.x = flt === 'left' ? drawX + drawW + pad : inL + 8;
+                textRect.w = flt === 'left' ? Math.max(10, w - inR - textRect.x - 8) : Math.max(10, drawX - pad - textRect.x);
+            } else if (flt === 'top' || flt === 'bottom') {
+                const artRatio = this.config.extraInfoEnabled ? 0.60 : 0.68;
+                const maxH = Math.max(10, Math.floor(contentH * artRatio) - Math.floor(pad * 1.5));
+                const maxW = Math.max(10, contentW - pad * 2);
+                const scale = Math.min(maxW / this.#coverImg.Width, maxH / this.#coverImg.Height);
+                const drawW = Math.max(1, Math.floor(this.#coverImg.Width * scale));
+                const drawH = Math.max(1, Math.floor(this.#coverImg.Height * scale));
+                const drawX = inL + Math.floor((contentW - drawW) / 2);
+                const drawY = flt === 'top' ? inT + pad : Math.max(inT, h - inB - pad - drawH);
+
+                artRect = { x: drawX, y: drawY, w: drawW, h: drawH };
+                textRect.y = flt === 'top' ? drawY + drawH + Math.floor(pad * 0.5) : inT + 8;
+                textRect.h = flt === 'top' ? Math.max(10, h - inB - textRect.y - 4) : Math.max(10, drawY - Math.floor(pad * 0.5) - textRect.y);
+            } else if (flt === 'stretch') {
+                artRect = { 
+                    x: inL + pad, 
+                    y: inT + pad, 
+                    w: Math.max(10, contentW - pad * 2), 
+                    h: Math.max(10, contentH - pad * 2) 
+                };
+                textRect = { 
+                    x: inL + 8, 
+                    y: inT + 8, 
+                    w: Math.max(10, contentW - 16), 
+                    h: Math.max(10, contentH - 16) 
+                };
+            }
+        }
+
+        if (artRect.w > 0 && this.config.showGlow && this.config.opGlow > 0 && !this.config.overlayAllOff) {
+            this.#backdrop.checkGlow(artRect.w, artRect.h, this.config.showGlow, this.config.opGlow, this.config.overlayAllOff);
+        } else {
+            this.#backdrop.checkGlow(0, 0, false, 0, true);
+        }
+
+        this.#layout.artRect = artRect;
+        this.#textBlockX = textRect.x;
+        this.#textBlockY = textRect.y;
+        this.#textBlockW = textRect.w;
+        this.#textBlockH = textRect.h;
+
+        this.#bakeTypographyPlate(gr);
+        this.#dirtyFlags &= ~PanelArtController.DIRTY.LAYOUT;
+    }
+
+    #bakeTypographyPlate(gr) {
+        this.#disposeTextBlock();
+        const rw = this.#textBlockW;
+        const rh = this.#textBlockH;
+        if (!gr || rw <= 20 || rh <= 20) {
+            this.#dirtyFlags &= ~PanelArtController.DIRTY.TEXT;
+            return;
+        }
+
+        const hasArtist = Boolean(this.#trackInfo.artist && this.#trackInfo.artist.trim());
+        const hasExtra  = Boolean(this.config.extraInfoEnabled && this.#trackInfo.extra && this.#trackInfo.extra.trim());
+
+        let titleBudgetH, artistBudgetH, extraBudgetH;
+        if (hasArtist && hasExtra) {
+            titleBudgetH  = Math.floor(rh * 0.38);
+            artistBudgetH = Math.floor(rh * 0.28);
+            extraBudgetH  = Math.floor(rh * 0.22);
+        } else if (hasArtist || hasExtra) {
+            titleBudgetH  = Math.floor(rh * 0.52);
+            artistBudgetH = Math.floor(rh * 0.36);
+            extraBudgetH  = Math.floor(rh * 0.36);
+        } else {
+            titleBudgetH  = Math.floor(rh * 0.82);
+            artistBudgetH = 0;
+            extraBudgetH  = 0;
+        }
+
+        let titleFitSize  = this.#fonts.fitSize(gr, this.#trackInfo.title, this.config.titleFontName, 1, rw, titleBudgetH, this.scale(this.config.titleFontSize), this.scale(12));
+        let artistFitSize = hasArtist ? this.#fonts.fitSize(gr, this.#trackInfo.artist, this.config.artistFontName, 0, rw, artistBudgetH, this.scale(this.config.artistFontSize), this.scale(10)) : 0;
+        let extraFitSize  = hasExtra  ? this.#fonts.fitSize(gr, this.#trackInfo.extra, this.config.extraFontName, 0, rw, extraBudgetH, this.scale(this.config.extraFontSize), this.scale(8)) : 0;
+
+        let fTitle  = this.#fonts.get(this.config.titleFontName, titleFitSize, 1);
+        let fArtist = hasArtist ? this.#fonts.get(this.config.artistFontName, artistFitSize, 0) : null;
+        let fExtra  = hasExtra  ? this.#fonts.get(this.config.extraFontName, extraFitSize, 0) : null;
+
+        let mTitle  = gr.MeasureString(this.#trackInfo.title, fTitle, 0, 0, 10000, 10000);
+        let mArtist = (hasArtist && fArtist) ? gr.MeasureString(this.#trackInfo.artist, fArtist, 0, 0, 10000, 10000) : { Width: 0, Height: 0 };
+        let mExtra  = (hasExtra && fExtra)   ? gr.MeasureString(this.#trackInfo.extra, fExtra, 0, 0, 10000, 10000)   : { Width: 0, Height: 0 };
+
+        const gap1 = hasArtist ? this.scale(4) : 0;
+        const gap2 = hasExtra  ? this.scale(5) : 0;
+        let totalH = mTitle.Height + gap1 + mArtist.Height + gap2 + mExtra.Height;
+
+        const maxAllowedH = rh - this.scale(4);
+        if (totalH > maxAllowedH && totalH > 0) {
+            const scaleDown = Math.max(0.55, maxAllowedH / totalH);
+            titleFitSize  = Math.max(this.scale(10), Math.floor(titleFitSize * scaleDown));
+            if (hasArtist) artistFitSize = Math.max(this.scale(9), Math.floor(artistFitSize * scaleDown));
+            if (hasExtra)  extraFitSize  = Math.max(this.scale(8), Math.floor(extraFitSize * scaleDown));
+
+            fTitle  = this.#fonts.get(this.config.titleFontName, titleFitSize, 1);
+            fArtist = hasArtist ? this.#fonts.get(this.config.artistFontName, artistFitSize, 0) : null;
+            fExtra  = hasExtra  ? this.#fonts.get(this.config.extraFontName, extraFitSize, 0) : null;
+
+            mTitle  = gr.MeasureString(this.#trackInfo.title, fTitle, 0, 0, 10000, 10000);
+            mArtist = (hasArtist && fArtist) ? gr.MeasureString(this.#trackInfo.artist, fArtist, 0, 0, 10000, 10000) : { Width: 0, Height: 0 };
+            mExtra  = (hasExtra && fExtra)   ? gr.MeasureString(this.#trackInfo.extra, fExtra, 0, 0, 10000, 10000)   : { Width: 0, Height: 0 };
+            totalH  = mTitle.Height + gap1 + mArtist.Height + gap2 + mExtra.Height;
+        }
+
+        let startRelY = 0;
+        if (this.config.layoutAlignV === 0) {
+            startRelY = Math.max(0, Math.floor((rh - totalH) / 2));
+        } else if (this.config.layoutAlignV === 1) {
+            startRelY = Math.max(0, rh - totalH - this.scale(2));
+        } else {
+            startRelY = this.scale(2);
+        }
+
+        if (startRelY + totalH > rh) {
+            startRelY = Math.max(0, rh - totalH);
+        }
+
+        const getAlignedRelX = (wVal) => {
+            if (this.config.layoutAlignH === 1) return Math.max(0, Math.floor((rw - wVal) / 2));
+            if (this.config.layoutAlignH === 2) return Math.max(0, rw - wVal - 2);
+            return 0;
+        };
+
+        let bmp = null, g = null;
+        try {
+            bmp = gdi.CreateImage(rw, rh);
+            g = bmp.GetGraphics();
+            g.SetTextRenderingHint(4);
+
+            let curY = startRelY;
+
+            // 1. Title
+            if (this.#trackInfo.title && fTitle) {
+                const rx = getAlignedRelX(mTitle.Width);
+                if (this.config.textShadowEnabled) {
+                    g.DrawString(this.#trackInfo.title, fTitle, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + 2, curY + 2, mTitle.Width + 4, mTitle.Height + 4);
+                }
+                g.DrawString(this.#trackInfo.title, fTitle, GdiUtils.RGB(255, 255, 255), rx, curY, mTitle.Width + 4, mTitle.Height + 4);
+                curY += mTitle.Height + gap1;
+            }
+
+            // 2. Artist
+            if (hasArtist && fArtist) {
+                const rx = getAlignedRelX(mArtist.Width);
+                if (this.config.textShadowEnabled) {
+                    g.DrawString(this.#trackInfo.artist, fArtist, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + 2, curY + 2, mArtist.Width + 4, mArtist.Height + 4);
+                }
+                g.DrawString(this.#trackInfo.artist, fArtist, GdiUtils.RGB(200, 200, 200), rx, curY, mArtist.Width + 4, mArtist.Height + 4);
+                curY += mArtist.Height + gap2;
+            }
+
+            // 3. Extra Info
+            if (hasExtra && fExtra) {
+                const rx = getAlignedRelX(mExtra.Width);
+                const drawH = Math.max(mExtra.Height + 4, rh - curY);
+                if (this.config.textShadowEnabled) {
+                    g.DrawString(this.#trackInfo.extra, fExtra, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + 2, curY + 2, mExtra.Width + 4, drawH);
+                }
+                g.DrawString(this.#trackInfo.extra, fExtra, GdiUtils.RGB(170, 170, 170), rx, curY, mExtra.Width + 4, drawH);
+            }
+
+            bmp.ReleaseGraphics(g);
+            g = null;
+            this.#textBlockBmp = bmp;
+        } catch {
+            if (g && bmp) { try { bmp.ReleaseGraphics(g); } catch {} }
+            if (bmp) { try { bmp.Dispose(); } catch {} }
+            this.#textBlockBmp = null;
+        }
+        this.#dirtyFlags &= ~PanelArtController.DIRTY.TEXT;
+    }
+
+    #drawSliderHud(gr, w, h) {
+        const barW = Math.min(this.scale(220), Math.round(w * 0.6));
+        const barH = Math.max(4, this.scale(6));
+        const bx = Math.floor((w - barW) / 2);
+        const by = h - Math.max(16, this.scale(24));
+        const font = this.getHudFont();
+        const val = this.getOpacity(this.#opacityTarget);
+        const max = this.#opacityTarget === 'Padding' ? 100 : 255;
+        const label = `${this.#opacityTarget}: ${val}${this.#opacityTarget === 'Padding' ? 'px' : ''}`;
+        const lH = Math.max(16, this.scale(20));
+
+        gr.FillSolidRect(bx, by, barW, barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 60));
+        gr.FillSolidRect(bx, by, Math.floor(barW * (val / max)), barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
+        gr.DrawString(label, font, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 230), 0, by - lH - 2, w, lH, 0x11000000);
+    }
+
+    #drawBezelToast(gr, w, h) {
+        const font = this.getHudFont();
+        const text = `Bezel: ${this.#bezelNotifyText}`;
+        const boxH = Math.max(20, this.scale(24));
+        const boxW = Math.min(w - this.scale(20), Math.max(this.scale(130), text.length * this.scale(7) + this.scale(24)));
+        const bx = Math.floor((w - boxW) / 2);
+        const by = h - Math.max(24, this.scale(32));
+        gr.FillSolidRect(bx, by, boxW, boxH, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 190));
+        gr.DrawString(text, font, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 240), bx, by, boxW, boxH, 0x11000000);
+    }
+
+    // ========================================================================================
+    // CONTEXT MENU
+    // ========================================================================================
+    showContextMenu(x, y) {
+        const m         = window.CreatePopupMenu();
+        const panelM    = window.CreatePopupMenu();
+        const artM      = window.CreatePopupMenu();
+        const floatM    = window.CreatePopupMenu();
+        const textM     = window.CreatePopupMenu();
+        const fontM     = window.CreatePopupMenu();
+        const alignVM   = window.CreatePopupMenu();
+        const alignHM   = window.CreatePopupMenu();
+        const borderM   = window.CreatePopupMenu();
+        const bgM       = window.CreatePopupMenu();
+        const blurM     = window.CreatePopupMenu();
+        const darkenM   = window.CreatePopupMenu();
+        const overlayM  = window.CreatePopupMenu();
+        const phosphorM = window.CreatePopupMenu();
+        const opacityM  = window.CreatePopupMenu();
+        const customFM  = window.CreatePopupMenu();
+        const depthM    = window.CreatePopupMenu();
+        const presetM   = window.CreatePopupMenu();
+        const loadM     = window.CreatePopupMenu();
+        const saveM     = window.CreatePopupMenu();
+        const bezelM    = window.CreatePopupMenu();
+
+        const allMenus = [
+            m, panelM, artM, floatM, textM, fontM, alignVM, alignHM,
+            borderM, bgM, blurM, darkenM, overlayM, phosphorM, opacityM,
+            customFM, depthM, presetM, loadM, saveM, bezelM
+        ];
+
+        const MID = PanelArtController.MENU_ID;
+        const bezelNames = this.listBezelNames();
+        const bzStart = MID.BEZEL_NONE;
+
+        bezelM.AppendMenuItem(0, MID.BEZEL_ENABLE, "Enable Bezel Frame");
+        if (this.config.bezelEnabled && this.config.bezelFile) bezelM.CheckMenuRadioItem(MID.BEZEL_ENABLE, MID.BEZEL_ENABLE, MID.BEZEL_ENABLE);
+        bezelM.AppendMenuSeparator();
+        bezelM.AppendMenuItem(0, bzStart, "None (No Bezel)");
+        for (let bi = 0; bi < bezelNames.length; bi++) {
+            const shortName = bezelNames[bi].length > 42 ? `...${bezelNames[bi].substring(bezelNames[bi].length - 39)}` : bezelNames[bi];
+            bezelM.AppendMenuItem(0, MID.BEZEL_BASE + bi, shortName);
+        }
+        if (bezelNames.length > 0) {
+            const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
+            const selIdx = curClean ? bezelNames.findIndex(n => n.toLowerCase() === curClean) : -1;
+            const checkId = selIdx >= 0 ? MID.BEZEL_BASE + selIdx : bzStart;
+            bezelM.CheckMenuRadioItem(bzStart, MID.BEZEL_BASE + bezelNames.length - 1, checkId);
+        } else {
+            if (!this.config.bezelFile) bezelM.CheckMenuRadioItem(bzStart, bzStart, bzStart);
+        }
+        bezelM.AppendMenuSeparator();
+        bezelM.AppendMenuItem(0, MID.BEZEL_FOLDER, "Set Bezel Folder...");
+        bezelM.AppendMenuItem(0, MID.BEZEL_RELOAD, "Reload Bezel List");
+        bezelM.AppendMenuSeparator();
+        bezelM.AppendMenuItem(0, MID.PAD_LEFT, `Left Padding... (${this.config.padLeft}px)`);
+        bezelM.AppendMenuItem(0, MID.PAD_RIGHT, `Right Padding... (${this.config.padRight}px)`);
+        bezelM.AppendMenuItem(0, MID.PAD_TOP, `Top Padding... (${this.config.padTop}px)`);
+        bezelM.AppendMenuItem(0, MID.PAD_BOTTOM, `Bottom Padding... (${this.config.padBottom}px)`);
+        bezelM.AppendTo(m, 0, "Bezel / Overlay");
+        m.AppendMenuSeparator();
+
+        PanelArtController.PHOSPHOR_THEMES.forEach((pt, i) => {
+            phosphorM.AppendMenuItem(0, MID.PHOSPHOR_THEME_BASE + i, pt.name);
+        });
+        phosphorM.AppendMenuSeparator();
+        phosphorM.AppendMenuItem(0, MID.PHOSPHOR_THEME_BASE + PanelArtController.PHOSPHOR_THEMES.length, "Custom Color...");
+        phosphorM.CheckMenuRadioItem(MID.PHOSPHOR_THEME_BASE, MID.PHOSPHOR_THEME_BASE + PanelArtController.PHOSPHOR_THEMES.length, MID.PHOSPHOR_THEME_BASE + this.config.phosphorTheme);
+        phosphorM.AppendTo(overlayM, 0, "Phosphor Palette");
+
+        overlayM.AppendMenuSeparator();
+        overlayM.AppendMenuItem(0, MID.OVERLAY_ALL_OFF, "Disable All Overlays");
+        if (this.config.overlayAllOff) overlayM.CheckMenuRadioItem(MID.OVERLAY_ALL_OFF, MID.OVERLAY_ALL_OFF, MID.OVERLAY_ALL_OFF);
+        overlayM.AppendMenuSeparator();
+
+        overlayM.AppendMenuItem(0, MID.SHOW_REFLECTION, "Reflection Highlight");
+        if (this.config.showReflection) overlayM.CheckMenuRadioItem(MID.SHOW_REFLECTION, MID.SHOW_REFLECTION, MID.SHOW_REFLECTION);
+        overlayM.AppendMenuItem(0, MID.SHOW_GLOW, "CRT Outer Glow");
+        if (this.config.showGlow) overlayM.CheckMenuRadioItem(MID.SHOW_GLOW, MID.SHOW_GLOW, MID.SHOW_GLOW);
+        overlayM.AppendMenuItem(0, MID.SHOW_SCANLINES, "CRT Scanlines");
+        if (this.config.showScanlines) overlayM.CheckMenuRadioItem(MID.SHOW_SCANLINES, MID.SHOW_SCANLINES, MID.SHOW_SCANLINES);
+        overlayM.AppendMenuItem(0, MID.SHOW_PHOSPHOR, "Phosphor Mask");
+        if (this.config.showPhosphor) overlayM.CheckMenuRadioItem(MID.SHOW_PHOSPHOR, MID.SHOW_PHOSPHOR, MID.SHOW_PHOSPHOR);
+
+        overlayM.AppendMenuSeparator();
+        opacityM.AppendMenuItem(0, MID.OPACITY_REFL, `Reflection Opacity... (${this.config.opReflection})`);
+        opacityM.AppendMenuItem(0, MID.OPACITY_GLOW, `Glow Opacity... (${this.config.opGlow})`);
+        opacityM.AppendMenuItem(0, MID.OPACITY_SCAN, `Scanlines Opacity... (${this.config.opScanlines})`);
+        opacityM.AppendMenuItem(0, MID.OPACITY_PHOS, `Phosphor Opacity... (${this.config.opPhosphor})`);
+        opacityM.AppendTo(overlayM, 0, "Adjust Opacities");
+        overlayM.AppendTo(m, 0, "Overlay Effects");
+
+        artM.AppendMenuItem(0, MID.ALBUM_ART_ENABLE, "Enable Album Art");
+        if (this.config.albumArtEnabled) artM.CheckMenuRadioItem(MID.ALBUM_ART_ENABLE, MID.ALBUM_ART_ENABLE, MID.ALBUM_ART_ENABLE);
+        artM.AppendMenuSeparator();
+        PanelArtController.VALID_FLOATS.forEach((flt, i) => {
+            floatM.AppendMenuItem(0, MID.FLOAT_BASE + i, `Float: ${flt.toUpperCase()}`);
+        });
+        const fltIdx = PanelArtController.VALID_FLOATS.indexOf(this.config.albumArtFloat);
+        if (fltIdx !== -1) floatM.CheckMenuRadioItem(MID.FLOAT_BASE, MID.FLOAT_BASE + PanelArtController.VALID_FLOATS.length - 1, MID.FLOAT_BASE + fltIdx);
+        floatM.AppendTo(artM, 0, "Placement Float");
+        artM.AppendMenuItem(0, MID.ART_PADDING, `Art Padding... (${this.config.albumArtPadding}px)`);
+        artM.AppendTo(panelM, 0, "Album Art");
+
+        alignHM.AppendMenuItem(0, MID.ALIGN_H_LEFT, "Left");
+        alignHM.AppendMenuItem(0, MID.ALIGN_H_CENTER, "Center");
+        alignHM.AppendMenuItem(0, MID.ALIGN_H_RIGHT, "Right");
+        alignHM.CheckMenuRadioItem(MID.ALIGN_H_LEFT, MID.ALIGN_H_RIGHT, MID.ALIGN_H_LEFT + this.config.layoutAlignH);
+        alignHM.AppendTo(textM, 0, "Horizontal Alignment");
+
+        alignVM.AppendMenuItem(0, MID.ALIGN_V_TOP, "Top");
+        alignVM.AppendMenuItem(0, MID.ALIGN_V_CENTER, "Center");
+        alignVM.AppendMenuItem(0, MID.ALIGN_V_BOTTOM, "Bottom");
+        alignVM.CheckMenuRadioItem(MID.ALIGN_V_CENTER, MID.ALIGN_V_TOP, MID.ALIGN_V_CENTER + (this.config.layoutAlignV === 0 ? 0 : this.config.layoutAlignV === 1 ? 1 : 2));
+        alignVM.AppendTo(textM, 0, "Vertical Alignment");
+
+        textM.AppendMenuSeparator();
+        textM.AppendMenuItem(0, MID.TEXT_SHADOW, "Text Drop Shadow");
+        if (this.config.textShadowEnabled) textM.CheckMenuRadioItem(MID.TEXT_SHADOW, MID.TEXT_SHADOW, MID.TEXT_SHADOW);
+        textM.AppendMenuItem(0, MID.EXTRA_INFO, "Show Extra Info (Album/Date/Length)");
+        if (this.config.extraInfoEnabled) textM.CheckMenuRadioItem(MID.EXTRA_INFO, MID.EXTRA_INFO, MID.EXTRA_INFO);
+        textM.AppendMenuSeparator();
+
+        fontM.AppendMenuItem(0, MID.FONT_TITLE, `Title Font... (${this.config.titleFontName}, ${this.config.titleFontSize}pt)`);
+        fontM.AppendMenuItem(0, MID.FONT_ARTIST, `Artist Font... (${this.config.artistFontName}, ${this.config.artistFontSize}pt)`);
+        fontM.AppendMenuItem(0, MID.FONT_EXTRA, `Extra Info Font... (${this.config.extraFontName}, ${this.config.extraFontSize}pt)`);
+        fontM.AppendTo(textM, 0, "Fonts");
+        textM.AppendTo(panelM, 0, "Text & Metadata");
+
+        borderM.AppendMenuItem(0, MID.BORDER_SIZE, `Set Border Size... (${this.config.borderSize}px)`);
+        borderM.AppendMenuItem(0, MID.BORDER_COLOR, "Change Border Color...");
+        borderM.AppendMenuSeparator();
+        borderM.AppendMenuItem(0, MID.PAD_LEFT, `Left Padding... (${this.config.padLeft}px)`);
+        borderM.AppendMenuItem(0, MID.PAD_RIGHT, `Right Padding... (${this.config.padRight}px)`);
+        borderM.AppendMenuItem(0, MID.PAD_TOP, `Top Padding... (${this.config.padTop}px)`);
+        borderM.AppendMenuItem(0, MID.PAD_BOTTOM, `Bottom Padding... (${this.config.padBottom}px)`);
+        borderM.AppendTo(panelM, 0, "Border & Padding");
+
+        bgM.AppendMenuItem(0, MID.BG_USE_UI_COLOR, "Use UI Color");
+        if (this.config.bgUseUIColor) bgM.CheckMenuRadioItem(MID.BG_USE_UI_COLOR, MID.BG_USE_UI_COLOR, MID.BG_USE_UI_COLOR);
+        bgM.AppendMenuItem(0, MID.BG_ENABLE, "Enable Background Art");
+        if (this.config.backgroundEnabled) bgM.CheckMenuRadioItem(MID.BG_ENABLE, MID.BG_ENABLE, MID.BG_ENABLE);
+        bgM.AppendMenuItem(0, MID.BG_BLUR_ENABLE, "Enable Blurred Backdrop");
+        if (this.config.blurEnabled) bgM.CheckMenuRadioItem(MID.BG_BLUR_ENABLE, MID.BG_BLUR_ENABLE, MID.BG_BLUR_ENABLE);
+        bgM.AppendMenuItem(0, MID.BG_CUSTOM_COLOR, "Custom Background Color...");
+        bgM.AppendMenuSeparator();
+
+        [20, 60, 100, 140, 180, 220, 240, 254].forEach((rad, i) => {
+            blurM.AppendMenuItem(0, MID.BLUR_RADIUS_BASE + i, `Blur Radius: ${rad}`);
+        });
+        const radIdx = [20, 60, 100, 140, 180, 220, 240, 254].indexOf(this.config.blurRadius);
+        if (radIdx !== -1) blurM.CheckMenuRadioItem(MID.BLUR_RADIUS_BASE, MID.BLUR_RADIUS_BASE + 7, MID.BLUR_RADIUS_BASE + radIdx);
+        blurM.AppendTo(bgM, 0, "Blur Radius");
+
+        [0, 10, 20, 30, 40, 50].forEach((pct, i) => {
+            darkenM.AppendMenuItem(0, MID.DARKEN_BASE + i, `Darken ${pct}%`);
+        });
+        const dkIdx = [0, 10, 20, 30, 40, 50].indexOf(this.config.darkenValue);
+        if (dkIdx !== -1) darkenM.CheckMenuRadioItem(MID.DARKEN_BASE, MID.DARKEN_BASE + 5, MID.DARKEN_BASE + dkIdx);
+        darkenM.AppendTo(bgM, 0, "Darken Backdrop");
+        bgM.AppendTo(panelM, 0, "Background");
+
+        panelM.AppendTo(m, 0, "Panel Layout & Art");
+        m.AppendMenuSeparator();
+
+        customFM.AppendMenuItem(0, MID.CUSTOM_FOLDER_ADD, "Add Custom Folder Path...");
+        customFM.AppendMenuSeparator();
+        [1, 2, 3, 4].forEach(d => {
+            depthM.AppendMenuItem(0, MID.FOLDER_DEPTH_BASE + (d - 1), `${d} Sub-folder${d > 1 ? 's' : ''} Deep`);
+        });
+        depthM.CheckMenuRadioItem(MID.FOLDER_DEPTH_BASE, MID.FOLDER_DEPTH_BASE + 3, MID.FOLDER_DEPTH_BASE + (this.config.customFolderDepth - 1));
+        depthM.AppendTo(customFM, 0, "Folder Match Depth");
+
+        if (this.#customFolders.length > 0) {
+            customFM.AppendMenuSeparator();
+            this.#customFolders.forEach((f, i) => {
+                const shortName = f.length > 45 ? `...${f.substring(f.length - 42)}` : f;
+                customFM.AppendMenuItem(0, MID.REMOVE_FOLDER_BASE + i, `Remove: ${shortName}`);
+            });
+            customFM.AppendMenuSeparator();
+            customFM.AppendMenuItem(0, MID.CLEAR_CUSTOM_FOLDERS, "Clear All Custom Folders");
+        }
+        customFM.AppendTo(m, 0, "Custom Artwork Folders");
+
+        m.AppendMenuItem(0, MID.IMAGE_FOLDER_SET, (this.config.imageFolder && utils.IsDirectory(this.config.imageFolder)) ? "Change Image Folder..." : "Set Image Folder...");
+        m.AppendMenuItem(0, MID.SHOW_SINGLE_IMAGE, "Show Single Image");
+        if (this.config.imageMode) m.CheckMenuRadioItem(MID.SHOW_SINGLE_IMAGE, MID.SHOW_SINGLE_IMAGE, MID.SHOW_SINGLE_IMAGE);
+        m.AppendMenuItem(0, MID.SLIDE_SHOW, "Slide Show");
+        if (this.config.slideMode) m.CheckMenuRadioItem(MID.SLIDE_SHOW, MID.SLIDE_SHOW, MID.SLIDE_SHOW);
+        m.AppendMenuSeparator();
+
+        [1, 2, 3].forEach(i => {
+            const hasPreset = Boolean(window.GetProperty(`PA.Preset${i}`, null));
+            loadM.AppendMenuItem(hasPreset ? 0 : 0x0001, MID.PRESET_LOAD_BASE + (i - 1), `Preset ${i}${hasPreset ? '' : ' (Empty)'}`);
+        });
+        loadM.AppendTo(presetM, 0, "Load Preset");
+        [1, 2, 3].forEach(i => saveM.AppendMenuItem(0, MID.PRESET_SAVE_BASE + (i - 1), `Preset ${i}`));
+        saveM.AppendTo(presetM, 0, "Save Preset");
+        presetM.AppendTo(m, 0, "Presets");
+
+        m.AppendMenuSeparator();
+        m.AppendMenuItem(0, MID.GLITCH_ENABLE, "Glitch Effect on Track Change");
+        if (this.config.glitchEnabled) m.CheckMenuRadioItem(MID.GLITCH_ENABLE, MID.GLITCH_ENABLE, MID.GLITCH_ENABLE);
+
+        m.AppendMenuItem(0, MID.RELOAD_ART, "Reload Artwork");
+        m.AppendMenuItem(0, MID.RESET_DEFAULTS, "Reset Visual Settings to Defaults");
+        m.AppendMenuItem(0, MID.FACTORY_RESET, "Factory Reset (All Settings & Folders)...");
+
+        let id = 0;
+        try {
+            id = m.TrackPopupMenu(x, y);
+        } finally {
+            allMenus.forEach(menu => { try { menu.Dispose(); } catch {} });
+        }
+
+        if (id === 0) return true;
+
+        if (id >= MID.PHOSPHOR_THEME_BASE && id < MID.PHOSPHOR_THEME_BASE + PanelArtController.PHOSPHOR_THEMES.length) {
+            this.config.phosphorTheme = id - MID.PHOSPHOR_THEME_BASE;
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.PHOSPHOR_THEME_BASE + PanelArtController.PHOSPHOR_THEMES.length) {
+            const c = utils.ColourPicker(window.ID, this.config.customPhosphorColor);
+            if (c !== -1) {
+                this.config.customPhosphorColor = (c | 0xFF000000) >>> 0;
+                this.config.phosphorTheme = PanelArtController.PHOSPHOR_THEMES.length;
+                this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+                this.#rebuildOverlay();
+            }
+        } else if (id === MID.OVERLAY_ALL_OFF) {
+            this.config.overlayAllOff = !this.config.overlayAllOff;
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.SHOW_REFLECTION) {
+            this.config.showReflection = !this.config.showReflection;
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.SHOW_GLOW) { 
+            this.config.showGlow = !this.config.showGlow; 
+            this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT;
+            window.Repaint(); 
+        } else if (id === MID.SHOW_SCANLINES) {
+            this.config.showScanlines = !this.config.showScanlines;
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.SHOW_PHOSPHOR) {
+            this.config.showPhosphor = !this.config.showPhosphor;
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.OPACITY_REFL) {
+            this.setOpacityTarget('Reflection');
+        } else if (id === MID.OPACITY_GLOW) {
+            this.setOpacityTarget('Glow');
+        } else if (id === MID.OPACITY_SCAN) {
+            this.setOpacityTarget('Scanlines');
+        } else if (id === MID.OPACITY_PHOS) {
+            this.setOpacityTarget('Phosphor');
+        } else if (id === MID.ALBUM_ART_ENABLE) {
+            this.config.albumArtEnabled = !this.config.albumArtEnabled;
+            this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT;
+        } else if (id >= MID.FLOAT_BASE && id < MID.FLOAT_BASE + PanelArtController.VALID_FLOATS.length) {
+            this.config.albumArtFloat = PanelArtController.VALID_FLOATS[id - MID.FLOAT_BASE];
+            this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT;
+        } else if (id === MID.ART_PADDING) {
+            this.setOpacityTarget('Padding');
+        } else if (id === MID.FONT_TITLE) {
+            const f = GdiUtils.prompt("Title Font Name:", "Typography", this.config.titleFontName);
+            if (f) { this.config.titleFontName = f; this.#dirtyFlags |= PanelArtController.DIRTY.TEXT; }
+            const s = GdiUtils.prompt("Title Font Size (pt):", "Typography", this.config.titleFontSize);
+            if (s) { this.config.titleFontSize = GdiUtils.clamp(parseInt(s, 10) || 42, 12, 100); this.#dirtyFlags |= PanelArtController.DIRTY.TEXT; }
+        } else if (id === MID.FONT_ARTIST) {
+            const f = GdiUtils.prompt("Artist Font Name:", "Typography", this.config.artistFontName);
+            if (f) { this.config.artistFontName = f; this.#dirtyFlags |= PanelArtController.DIRTY.TEXT; }
+            const s = GdiUtils.prompt("Artist Font Size (pt):", "Typography", this.config.artistFontSize);
+            if (s) { this.config.artistFontSize = GdiUtils.clamp(parseInt(s, 10) || 28, 10, 80); this.#dirtyFlags |= PanelArtController.DIRTY.TEXT; }
+        } else if (id === MID.FONT_EXTRA) {
+            const f = GdiUtils.prompt("Extra Info Font Name:", "Typography", this.config.extraFontName);
+            if (f) { this.config.extraFontName = f; this.#dirtyFlags |= PanelArtController.DIRTY.TEXT; }
+            const s = GdiUtils.prompt("Extra Font Size (pt):", "Typography", this.config.extraFontSize);
+            if (s) { this.config.extraFontSize = GdiUtils.clamp(parseInt(s, 10) || 20, 8, 60); this.#dirtyFlags |= PanelArtController.DIRTY.TEXT; }
+        } else if (id === MID.ALIGN_V_CENTER) {
+            this.config.layoutAlignV = 0;
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+        } else if (id === MID.ALIGN_V_BOTTOM) {
+            this.config.layoutAlignV = 1;
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+        } else if (id === MID.ALIGN_V_TOP) {
+            this.config.layoutAlignV = 2;
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+        } else if (id >= MID.ALIGN_H_LEFT && id <= MID.ALIGN_H_RIGHT) {
+            this.config.layoutAlignH = id - MID.ALIGN_H_LEFT;
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+        } else if (id === MID.TEXT_SHADOW) {
+            this.config.textShadowEnabled = !this.config.textShadowEnabled;
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+        } else if (id === MID.EXTRA_INFO) {
+            this.config.extraInfoEnabled = !this.config.extraInfoEnabled;
+            this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.TEXT);
+        } else if (id === MID.BORDER_SIZE) {
+            const val = GdiUtils.prompt("Enter border thickness (0-50 px):", "Border Frame", this.config.borderSize);
+            if (val !== null) { 
+                this.config.borderSize = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 50); 
+                this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.OVERLAY); 
+                this.#rebuildOverlay(); 
+            }
+        } else if (id === MID.BORDER_COLOR) {
+            const c = utils.ColourPicker(window.ID, this.config.borderColor);
+            if (c !== -1) { 
+                this.config.borderColor = (c | 0xFF000000) >>> 0; 
+                this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; 
+                this.#rebuildOverlay(); 
+            }
+        } else if (id === MID.PAD_LEFT) {
+            const val = GdiUtils.prompt("Enter left padding (0-100 px):", "Left Padding", this.config.padLeft);
+            if (val !== null) { this.config.padLeft = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; }
+        } else if (id === MID.PAD_RIGHT) {
+            const val = GdiUtils.prompt("Enter right padding (0-100 px):", "Right Padding", this.config.padRight);
+            if (val !== null) { this.config.padRight = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; }
+        } else if (id === MID.PAD_TOP) {
+            const val = GdiUtils.prompt("Enter top padding (0-100 px):", "Top Padding", this.config.padTop);
+            if (val !== null) { this.config.padTop = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; }
+        } else if (id === MID.PAD_BOTTOM) {
+            const val = GdiUtils.prompt("Enter bottom padding (0-100 px):", "Bottom Padding", this.config.padBottom);
+            if (val !== null) { this.config.padBottom = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; }
+        } else if (id === MID.BG_USE_UI_COLOR) {
+            this.config.bgUseUIColor = !this.config.bgUseUIColor;
+            this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
+            this.#rebuildBackground();
+        } else if (id === MID.BG_ENABLE) {
+            this.config.backgroundEnabled = !this.config.backgroundEnabled;
+            this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
+            this.#rebuildBackground();
+        } else if (id === MID.BG_BLUR_ENABLE) {
+            this.config.blurEnabled = !this.config.blurEnabled;
+            this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
+            this.#rebuildBackground();
+        } else if (id === MID.BG_CUSTOM_COLOR) {
+            const c = utils.ColourPicker(window.ID, this.config.customBgColor);
+            if (c !== -1) { 
+                this.config.customBgColor = (c | 0xFF000000) >>> 0; 
+                this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND; 
+                this.#rebuildBackground(); 
+            }
+        } else if (id >= MID.BLUR_RADIUS_BASE && id <= MID.BLUR_RADIUS_BASE + 7) {
+            this.config.blurRadius = [20, 60, 100, 140, 180, 220, 240, 254][id - MID.BLUR_RADIUS_BASE];
+            this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
+            this.#rebuildBackground();
+        } else if (id >= MID.DARKEN_BASE && id <= MID.DARKEN_BASE + 5) {
+            this.config.darkenValue = (id - MID.DARKEN_BASE) * 10;
+            this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
+            this.#rebuildBackground();
+        } else if (id === MID.CUSTOM_FOLDER_ADD) {
+            const f = GdiUtils.prompt("Enter folder path for artwork search:", "Add Custom Artwork Folder", "");
+            if (f) {
+                const cleaned = GdiUtils.sanitizePath(f);
+                if (cleaned && utils.IsDirectory(cleaned)) {
+                    this.#customFolders.push(cleaned);
+                    this.saveAll();
+                    this.#scanner.clearCaches();
+                    if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                    else this.clearTrackDisplay();
+                }
+            }
+        } else if (id >= MID.FOLDER_DEPTH_BASE && id <= MID.FOLDER_DEPTH_BASE + 3) {
+            this.config.customFolderDepth = (id - MID.FOLDER_DEPTH_BASE) + 1;
+            this.saveAll();
+            this.#scanner.clearCaches();
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else this.clearTrackDisplay();
+        } else if (id >= MID.REMOVE_FOLDER_BASE && id < MID.REMOVE_FOLDER_BASE + this.#customFolders.length) {
+            this.#customFolders.splice(id - MID.REMOVE_FOLDER_BASE, 1);
+            this.saveAll();
+            this.#scanner.clearCaches();
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else this.clearTrackDisplay();
+        } else if (id === MID.CLEAR_CUSTOM_FOLDERS) {
+            this.#customFolders = [];
+            this.saveAll();
+            this.#scanner.clearCaches();
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else this.clearTrackDisplay();
+        } else if (id === MID.BEZEL_ENABLE) {
+            this.config.bezelEnabled = !this.config.bezelEnabled;
+            if (this.config.bezelEnabled && !this.config.bezelFile && bezelNames.length > 0) {
+                this.config.bezelFile = bezelNames[0];
+            }
+            this.loadBezel();
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.BEZEL_NONE) {
+            this.config.bezelEnabled = false;
+            this.config.bezelFile = '';
+            this.loadBezel();
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id >= MID.BEZEL_BASE && id < MID.BEZEL_BASE + bezelNames.length) {
+            this.config.bezelEnabled = true;
+            this.config.bezelFile = bezelNames[id - MID.BEZEL_BASE];
+            this.loadBezel();
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+        } else if (id === MID.BEZEL_FOLDER) {
+            const f = GdiUtils.prompt("Enter folder path containing bezel/overlay images:", "Set Bezel Folder", this.config.bezelFolder);
+            if (f) {
+                const cleaned = GdiUtils.sanitizePath(f);
+                if (cleaned && utils.IsDirectory(cleaned)) {
+                    this.config.bezelFolder = cleaned;
+                    this.#cachedBezelImages = null;
+                    this.loadBezel();
+                    this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+                    this.#rebuildOverlay();
+                    this.saveAll();
+                    window.Repaint();
+                }
+            }
+        } else if (id === MID.BEZEL_RELOAD) {
+            this.#cachedBezelImages = null;
+            this.loadBezel();
+            this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+            this.#rebuildOverlay();
+            this.saveAll();
+            window.Repaint();
+        } else if (id === MID.IMAGE_FOLDER_SET) {
+            const f = GdiUtils.prompt("Enter custom image folder path for slideshow/display:", "Set Image Folder", this.config.imageFolder);
+            if (f) {
+                const cleaned = GdiUtils.sanitizePath(f);
+                if (cleaned && utils.IsDirectory(cleaned)) {
+                    this.config.imageFolder = cleaned;
+                    this.#slideImages = null;
+                    this.saveAll();
+                    if (this.config.imageMode) this.startImageMode(false);
+                    else if (this.config.slideMode) this.startSlideMode(false);
+                }
+            }
+        } else if (id === MID.SHOW_SINGLE_IMAGE) {
+            this.config.imageMode ? this.stopImageMode() : this.startImageMode(true);
+        } else if (id === MID.SLIDE_SHOW) {
+            this.config.slideMode ? this.stopSlideMode() : this.startSlideMode(true);
+        } else if (id >= MID.PRESET_LOAD_BASE && id <= MID.PRESET_LOAD_BASE + 2) {
+            this.loadPreset((id - MID.PRESET_LOAD_BASE) + 1);
+        } else if (id >= MID.PRESET_SAVE_BASE && id <= MID.PRESET_SAVE_BASE + 2) {
+            this.savePreset((id - MID.PRESET_SAVE_BASE) + 1);
+        } else if (id === MID.GLITCH_ENABLE) {
+            this.config.glitchEnabled = !this.config.glitchEnabled;
+            if (this.config.glitchEnabled) this.triggerGlitch();
+        } else if (id === MID.RELOAD_ART) {
+            this.#scanner.clearCaches();
+            this.#slideImages = null;
+            this.loadBezel();
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else this.clearTrackDisplay();
+        } else if (id === MID.RESET_DEFAULTS) {
+            Object.assign(this.config, {
+                albumArtEnabled: true, albumArtFloat: 'left', albumArtPadding: 0,
+                padLeft: 10, padRight: 10, padTop: 10, padBottom: 10, borderSize: 10, borderColor: GdiUtils.RGB(32, 32, 32),
+                backgroundEnabled: true, blurEnabled: true, blurRadius: 240, darkenValue: 10,
+                customBgColor: GdiUtils.RGB(25, 25, 25), bgUseUIColor: false,
+                showReflection: true, opReflection: 25, showGlow: false, opGlow: 80,
+                showScanlines: false, opScanlines: 100, showPhosphor: true, opPhosphor: 20,
+                phosphorTheme: 8, overlayAllOff: false, customFolderDepth: 2,
+                layoutAlignV: 0, layoutAlignH: 1, textShadowEnabled: true, extraInfoEnabled: true, glitchEnabled: true,
+                titleFontName: 'Segoe UI', titleFontSize: 42, artistFontName: 'Segoe UI', artistFontSize: 28,
+                extraFontName: 'Segoe UI', extraFontSize: 20, imageMode: false, slideMode: false,
+                bezelEnabled: false, bezelFile: ''
+            });
+            this.stopSlideMode(false);
+            this.stopImageMode(false);
+            this.loadBezel();
+            this.#dirtyFlags = PanelArtController.DIRTY.ALL;
+            this.#rebuildBackground();
+            this.#rebuildOverlay();
+        } else if (id === MID.FACTORY_RESET) {
+            const confirm = GdiUtils.prompt("Type YES to reset all settings, custom folders and paths to factory defaults:", "Confirm Factory Reset", "");
+            if (confirm?.toUpperCase() === 'YES') {
+                this.#customFolders = [];
+                this.config.imageFolder = `${this.#profileBase}skins\\images`;
+                this.config.bezelFolder = `${this.#profileBase}skins\\overlay`;
+                this.config.customPhosphorColor = 0xFFFFFFFF;
+                for (let p = 1; p <= 3; p++) window.SetProperty(`PA.Preset${p}`, '');
+                Object.assign(this.config, {
+                    albumArtEnabled: true, albumArtFloat: 'left', albumArtPadding: 0,
+                    padLeft: 10, padRight: 10, padTop: 10, padBottom: 10, borderSize: 10, borderColor: GdiUtils.RGB(32, 32, 32),
+                    backgroundEnabled: true, blurEnabled: true, blurRadius: 240, darkenValue: 10,
+                    customBgColor: GdiUtils.RGB(25, 25, 25), bgUseUIColor: false,
+                    showReflection: true, opReflection: 25, showGlow: false, opGlow: 80,
+                    showScanlines: false, opScanlines: 100, showPhosphor: true, opPhosphor: 20,
+                    phosphorTheme: 8, overlayAllOff: false, customFolderDepth: 2,
+                    layoutAlignV: 0, layoutAlignH: 1, textShadowEnabled: true, extraInfoEnabled: true, glitchEnabled: true,
+                    titleFontName: 'Segoe UI', titleFontSize: 42, artistFontName: 'Segoe UI', artistFontSize: 28,
+                    extraFontName: 'Segoe UI', extraFontSize: 20, imageMode: false, slideMode: false,
+                    bezelEnabled: false, bezelFile: ''
+                });
+                this.stopSlideMode(false);
+                this.stopImageMode(false);
+                this.#scanner.clearCaches();
+                this.#slideImages = null;
+                this.loadBezel();
+                this.#dirtyFlags = PanelArtController.DIRTY.ALL;
+                this.#rebuildBackground();
+                this.#rebuildOverlay();
+                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                else this.clearTrackDisplay();
+            }
+        }
+
+        this.requestSave();
+        window.Repaint();
+        return true;
+    }
+
+    // ========================================================================================
+    // EVENT DELEGATION
+    // ========================================================================================
     onSize() {
-        PanelArt.dimensions.width  = window.Width;
-        PanelArt.dimensions.height = window.Height;
+        if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+        const w = window.Width, h = window.Height;
+        if (w <= 0 || h <= 0) return;
 
-        if (PanelArt.timers.resize)         { window.ClearTimeout(PanelArt.timers.resize);         PanelArt.timers.resize         = null; }
-        if (PanelArt.timers.resizeStage1)   { window.ClearTimeout(PanelArt.timers.resizeStage1);   PanelArt.timers.resizeStage1   = null; }
-        if (PanelArt.timers.resizeStage2)   { window.ClearTimeout(PanelArt.timers.resizeStage2);   PanelArt.timers.resizeStage2   = null; }
-        if (PanelArt.timers.resizeStage3)   { window.ClearTimeout(PanelArt.timers.resizeStage3);   PanelArt.timers.resizeStage3   = null; }
+        this.#dirtyFlags = PanelArtController.DIRTY.ALL;
+        this.#rebuildBackground();
+        this.#rebuildOverlay();
+        window.Repaint();
+    }
 
-        PanelArt.timers.resize = window.SetTimeout(() => {
-            PanelArt.timers.resize = null;
-            if (!isLive()) return;
-            this._runResizePipeline();
-        }, 50);
-    },
-
-    // --- STAGED RESIZE PIPELINE ---
-    _runResizePipeline() {
-        // Stage 0: Synchronously flush size-dependent caches & trigger instant basic repaint
-        PanelArt.dimensions.width  = window.Width;
-        PanelArt.dimensions.height = window.Height;
-        ArtCache.clearScaledCache();
-        TextHeightCache.clear();
-        TextManager.invalidateCache();
-        OverlayCache.invalidate();
-        RepaintScheduler.request();
-
-        // Stage 1: Build Full-Panel Blur Background (Heavy StackBlur on deferred tick)
-        PanelArt.timers.resizeStage1 = window.SetTimeout(() => {
-            PanelArt.timers.resizeStage1 = null;
-            if (!isLive()) return;
-            ImageManager.buildBlur();
-            RepaintScheduler.request();
-
-            // Stage 2: Pre-compute text metrics and rebuild Overlay effects at new aspect ratio
-            PanelArt.timers.resizeStage2 = window.SetTimeout(() => {
-                PanelArt.timers.resizeStage2 = null;
-                if (!isLive()) return;
-                OverlayCache.invalidate();
-                RepaintScheduler.request();
-
-                // Stage 3: Reload/Scale art images & blit final high-quality composition
-                PanelArt.timers.resizeStage3 = window.SetTimeout(() => {
-                    PanelArt.timers.resizeStage3 = null;
-                    if (!isLive()) return;
-                    RepaintScheduler.immediate();
-                }, 0);
-            }, 0);
-        }, 0);
-    },
-
-    onMouseWheel(delta) {
-        if (!PanelArt.slider.active) return;
-        const cfg = StateManager.get();
-        const keyMap = { Reflection:"opReflection", Glow:"opGlow", Scanlines:"opScanlines", Phosphor:"opPhosphor" };
-        const key    = keyMap[PanelArt.slider.target];
-        if (key) {
-            cfg[key] = _.clamp(cfg[key] + delta * SLIDER_STEP, 0, 255);
-            StateManager.apply(cfg, false, true, true);
-            RepaintHelper.full();
-            PanelArt.timers.overlayRebuild = Utils.clearTimer(PanelArt.timers.overlayRebuild);
-            PanelArt.timers.overlayRebuild = window.SetTimeout(() => {
-                PanelArt.timers.overlayRebuild = null;
-                OverlayCache.invalidate();
-                RepaintHelper.full();
-                StateManager.saveDebounced();
-            }, 100);
+    onAlbumArtDone(handle, art_id, image, image_path) {
+        if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) {
+            if (image) { try { image.Dispose(); } catch {} }
+            return;
         }
-        if (PanelArt.slider.paddingActive) {
-            cfg.albumArtPadding = _.clamp(cfg.albumArtPadding + delta * SLIDER_STEP, 0, 100);
-            StateManager.apply(cfg, false, true, true);
-            RepaintHelper.full();
-            PanelArt.timers.overlayRebuild = Utils.clearTimer(PanelArt.timers.overlayRebuild);
-            PanelArt.timers.overlayRebuild = window.SetTimeout(() => {
-                PanelArt.timers.overlayRebuild = null;
-                OverlayCache.invalidate();
-                RepaintHelper.full();
-                StateManager.saveDebounced();
-            }, 100);
+        if (!this.#expectedAsyncToken || this.#expectedAsyncToken !== this.#artSearchToken) {
+            if (image) { try { image.Dispose(); } catch {} }
+            return;
         }
-    },
+        this.#expectedAsyncToken = 0;
 
-    onMouseLbtnUp() {
-        if (PanelArt.slider.active) {
-            PanelArt.slider.active = false;
-            PanelArt.slider.target = null;
-            PanelArt.slider.paddingActive = false;
-            RepaintHelper.full();
+        if (image) {
+            if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} }
+            this.#coverImg = image;
+            this.#currentCoverPath = image_path || '';
+            if (this.#currentArtKey) {
+                this.#scanner.setArtMemoryCache(this.#currentArtKey, this.#currentCoverPath);
+            }
+        } else {
+            if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} }
+            this.#coverImg = null;
+            this.#currentCoverPath = '';
+        }
+
+        this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.TEXT | PanelArtController.DIRTY.BACKGROUND);
+        this.#rebuildBackground();
+        window.Repaint();
+    }
+
+    getOpacity(target) {
+        switch (target) {
+            case 'Reflection': return this.config.opReflection;
+            case 'Glow':       return this.config.opGlow;
+            case 'Scanlines':  return this.config.opScanlines;
+            case 'Phosphor':   return this.config.opPhosphor;
+            case 'Padding':    return this.config.albumArtPadding;
+            default:           return 255;
+        }
+    }
+
+    setOpacity(target, val) {
+        const max = target === 'Padding' ? 100 : 255;
+        const clamped = GdiUtils.clamp(val, 0, max);
+        switch (target) {
+            case 'Reflection': this.config.opReflection = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; break;
+            case 'Glow':       this.config.opGlow = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; break;
+            case 'Scanlines':  this.config.opScanlines = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; break;
+            case 'Phosphor':   this.config.opPhosphor = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; break;
+            case 'Padding':    this.config.albumArtPadding = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; break;
+        }
+        this.#rebuildOverlay();
+        this.requestSave();
+        window.Repaint();
+    }
+
+    onMouseWheel(step) {
+        if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return false;
+        if (this.#opacityTarget) {
+            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? 5 : -5));
+            window.Repaint();
             return true;
         }
         return false;
-    },
-
-    onUnload() {
-        PanelArt.timers.blurRebuild    = Utils.clearTimer(PanelArt.timers.blurRebuild);
-        PanelArt.timers.overlayRebuild = Utils.clearTimer(PanelArt.timers.overlayRebuild);
-        if (PanelArt.timers.resize)       { window.ClearTimeout(PanelArt.timers.resize);       PanelArt.timers.resize       = null; }
-        if (PanelArt.timers.resizeStage1) { window.ClearTimeout(PanelArt.timers.resizeStage1); PanelArt.timers.resizeStage1 = null; }
-        if (PanelArt.timers.resizeStage2) { window.ClearTimeout(PanelArt.timers.resizeStage2); PanelArt.timers.resizeStage2 = null; }
-        if (PanelArt.timers.resizeStage3) { window.ClearTimeout(PanelArt.timers.resizeStage3); PanelArt.timers.resizeStage3 = null; }
-        if (PanelArt.timers.glitch)       { window.ClearInterval(PanelArt.timers.glitch);       PanelArt.timers.glitch       = null; }
-        if (PanelArt.slideTimer)          { window.ClearInterval(PanelArt.slideTimer);          PanelArt.slideTimer          = null; }
-        if (PanelArt.slideImage)          { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
-        if (PanelArt.imageImage)          { try { PanelArt.imageImage.Dispose(); } catch (e) {} PanelArt.imageImage = null; }
-        if (StateManager._saveTimer) {
-            window.ClearTimeout(StateManager._saveTimer);
-            StateManager._saveTimer      = null;
-            StateManager._saveScheduled  = false;
-        }
     }
-};
 
-// ====================== ARTWORK DISPATCHER ======================
-const ArtDispatcher = {
-    _pending:  null,
-    _timer:    null,
-    _trackTimer: null,
-    _unloaded: false,
-    _priority: { track: 4, stop: 3, playlist: 1 },
-
-    request(reason, payload) {
-        const priority = this._priority[reason] || 0;
-        if (this._pending) {
-            const cur = this._priority[this._pending.reason] || 0;
-            if (priority < cur) return;
-        }
-        this._pending = { reason, payload };
-        if (this._timer)      { window.ClearTimeout(this._timer);      this._timer      = null; }
-        if (this._trackTimer) { window.ClearTimeout(this._trackTimer); this._trackTimer = null; }
-        this._timer = window.SetTimeout(() => this._dispatch(), 50);
-    },
-
-    _dispatch() {
-        if (this._unloaded || !this._pending) return;
-        const { reason, payload } = this._pending;
-        this._pending = null; this._timer = null;
-        switch (reason) {
-            case 'track':
-                if (payload) {
-                    this._trackTimer = window.SetTimeout(() => {
-                        this._trackTimer = null;
-                        if (!this._unloaded) ArtController.onPlaybackNewTrack(payload);
-                    }, 60);
-                }
-                break;
-            case 'stop':
-                ArtController.onPlaybackStop(payload);
-                break;
-            case 'playlist':
-                if (fb.IsPlaying) {
-                    const nowPlaying = fb.GetNowPlaying();
-                    if (nowPlaying) ArtController.onPlaybackNewTrack(nowPlaying);
-                }
-                break;
-        }
+    setOpacityTarget(target) {
+        this.#opacityTarget = target;
+        window.Repaint();
     }
-};
 
-// ====================== ART QUEUE ======================
-const ArtQueue = {
-    busy: false, pending: null, _safetyTimer: null,
-
-    enqueue(task) { this.pending = task; this._process(); },
-
-    _process() {
-        if (this.busy || !this.pending) return;
-        this.busy = true;
-        const task = this.pending; this.pending = null;
-        let doneInvoked = false;
-        this._safetyTimer = window.SetTimeout(() => {
-            this._safetyTimer = null;
-            if (!doneInvoked) { this.busy = false; this._process(); }
-        }, 10000);
-        const done = () => {
-            doneInvoked = true;
-            if (this._safetyTimer) { window.ClearTimeout(this._safetyTimer); this._safetyTimer = null; }
-            this.busy = false;
-            this._process();
-        };
-        try { task(done); }
-        catch (e) {
-            if (!doneInvoked) {
-                if (this._safetyTimer) { window.ClearTimeout(this._safetyTimer); this._safetyTimer = null; }
-                this.busy = false; this._process();
+    loadPreset(slot) {
+        if (slot < 1 || slot > 3) return;
+        const raw = window.GetProperty(`PA.Preset${slot}`, null);
+        if (!raw) return;
+        try {
+            const d = JSON.parse(raw);
+            for (const [k, v] of Object.entries(d)) {
+                if (Object.prototype.hasOwnProperty.call(this.config, k)) this.config[k] = v;
             }
+            this.#dirtyFlags = PanelArtController.DIRTY.ALL;
+            this.#scanner.clearCaches();
+            this.#slideImages = null;
+            this.loadBezel();
+            this.#rebuildBackground();
+            this.#rebuildOverlay();
+            this.requestSave();
+            window.Repaint();
+        } catch (err) {
+            console.log(new Error(`Failed to load preset ${slot}`, { cause: err }));
         }
-    },
-
-    clear() {
-        this.pending = null;
-        if (this._safetyTimer) { window.ClearTimeout(this._safetyTimer); this._safetyTimer = null; }
     }
-};
 
-// ====================== IMAGE MODE MANAGER ======================
-const ImageModeManager = {
-    startImageMode() {
-        if (PanelArt.slideMode) SlideManager.stopSlideMode();
-        const files = FolderImages.list(FolderImages.defaultFolder());
-        if (!files.length) return;
-        const imagePath = files[Math.floor(Math.random() * files.length)];
-        PanelArt.imageMode = true;
-        StateManager.get().imageMode = true;
-        StateManager.saveDebounced();
-        OverlayCache.invalidate();
-        ArtQueue.enqueue(done => {
-            if (PanelArt.imageImage) { try { PanelArt.imageImage.Dispose(); } catch (e) {} }
-            try { PanelArt.imageImage = gdi.Image(imagePath); } catch (e) { PanelArt.imageImage = null; }
-            RepaintHelper.full();
-            done();
-        });
-    },
+    savePreset(slot) {
+        if (slot < 1 || slot > 3) return;
+        window.SetProperty(`PA.Preset${slot}`, JSON.stringify(this.config));
+    }
 
-    stopImageMode() {
-        PanelArt.imageMode = false;
-        StateManager.get().imageMode = false;
-        StateManager.saveDebounced();
-        OverlayCache.invalidate();
-        if (PanelArt.imageImage) { try { PanelArt.imageImage.Dispose(); } catch (e) {} PanelArt.imageImage = null; }
-        RepaintHelper.full();
-    },
+    onNotifyData(name, info) {
+        if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+        if (name === 'ArtFolder' && info && !fb.IsPlaying) {
+            if (!utils.IsDirectory(info)) return;
 
-    toggleImageMode() { PanelArt.imageMode ? this.stopImageMode() : this.startImageMode(); }
-};
+            const thisToken = ++this.#artSearchToken;
+            this.#expectedAsyncToken = 0;
+            if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
 
-// ====================== SLIDE MANAGER ======================
-const SlideManager = {
-    startSlideMode(useSavedIndex) {
-        if (PanelArt.imageMode) ImageModeManager.stopImageMode();
-        const images = FolderImages.list(FolderImages.defaultFolder());
-        if (images.length === 0) return;
-        PanelArt.slideMode   = true;
-        PanelArt.slideImages = images;
+            this.#pendingSearchTimer = window.SetTimeout(() => {
+                this.#pendingSearchTimer = null;
+                if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || fb.IsPlaying) return;
 
-        if (useSavedIndex && PanelArt.slideIndex >= 0 && PanelArt.slideIndex < images.length) {
-            // keep saved index
-        } else {
-            PanelArt.slideIndex = Math.floor(Math.random() * images.length);
+                const res = this.#scanner.searchDirectory(info, ArtScanner.FAST_NAMES, true, false, this.config.customFolderDepth);
+                if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || fb.IsPlaying) return;
+
+                if (res) this.applyNewArtwork(res);
+            }, 30);
         }
+    }
 
-        StateManager.get().slideMode  = true;
-        StateManager.get().slideIndex = PanelArt.slideIndex;
-        StateManager.saveDebounced();
-        OverlayCache.invalidate();
+    onMetadbChanged(handle_list, fromhook) {
+        if (fromhook || !fb.IsPlaying || !handle_list) return;
+        try {
+            const np = fb.GetNowPlaying();
+            if (!np || handle_list.Find(np) === -1) return;
 
-        ArtQueue.enqueue(done => {
-            if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch (e) {} }
-            try { PanelArt.slideImage = gdi.Image(images[PanelArt.slideIndex]); } catch (e) { PanelArt.slideImage = null; }
-            RepaintHelper.albumArt();
-            done();
-        });
+            let trackDir = '', rawAlbum = '', rawDisc = '', rawTitle = '', rawArtist = '', rawDate = '', rawLen = '';
+            try {
+                const raw = this.#compoundTf.EvalWithMetadb(np, true) ?? '';
+                const parts = raw.split('\x01');
+                trackDir  = parts[0] ?? '';
+                rawArtist = parts[1] ?? '';
+                rawAlbum  = parts[2] ?? '';
+                rawTitle  = parts[4] ?? '';
+                rawDate   = parts[5] ?? '';
+                rawLen    = parts[6] ?? '';
+                rawDisc   = parts[8] ?? '';
+            } catch {}
 
-        if (PanelArt.slideTimer) window.ClearInterval(PanelArt.slideTimer);
-        PanelArt.slideTimer = window.SetInterval(() => {
-            let randomIdx;
-            do { randomIdx = Math.floor(Math.random() * PanelArt.slideImages.length); }
-            while (randomIdx === PanelArt.slideIndex && PanelArt.slideImages.length > 1);
-            PanelArt.slideIndex = randomIdx;
-            StateManager.get().slideIndex = randomIdx;
-            StateManager.saveDebounced();
-            const capturedIdx = randomIdx;
-            ArtQueue.enqueue(done => {
-                if (!PanelArt.slideMode || capturedIdx >= PanelArt.slideImages.length) { done(); return; }
-                if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch (e) {} }
-                try { PanelArt.slideImage = gdi.Image(PanelArt.slideImages[capturedIdx]); } catch (e) { PanelArt.slideImage = null; }
-                RepaintHelper.albumArt();
-                done();
-            });
-        }, 12000);
-    },
+            const newArtKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc);
 
-    stopSlideMode() {
-        if (PanelArt.slideTimer) { window.ClearInterval(PanelArt.slideTimer); PanelArt.slideTimer = null; }
-        PanelArt.slideMode = false; PanelArt.slideImages = []; PanelArt.slideIndex = 0;
-        StateManager.get().slideMode  = false;
-        StateManager.get().slideIndex = 0;
-        StateManager.saveDebounced();
-        OverlayCache.invalidate();
-        if (PanelArt.slideImage) { try { PanelArt.slideImage.Dispose(); } catch (e) {} PanelArt.slideImage = null; }
-        RepaintHelper.full();
-    },
+            this.#trackInfo.title  = rawTitle || 'Playing';
+            this.#trackInfo.artist = rawArtist;
+            const extraParts = [rawAlbum.trim(), rawDate.trim(), rawLen.trim()].filter(Boolean);
+            this.#trackInfo.extra = extraParts.join(' | ');
 
-    toggleSlideMode() { PanelArt.slideMode ? this.stopSlideMode() : this.startSlideMode(); }
-};
+            if (newArtKey === this.#currentArtKey) {
+                this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+                window.Repaint();
+            } else {
+                this.loadArtworkForTrack(np);
+            }
+        } catch {}
+    }
 
-// ====================== CALLBACKS ======================
+    onFontChanged() {
+        this.#fonts.clear();
+        this.#hudFont = null;
+        this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.TEXT);
+        window.Repaint();
+    }
+
+    onKeyDown(vkey) {
+        if (vkey === 0x1B) {
+            this.setOpacityTarget(null);
+            return true;
+        }
+        if (utils.IsKeyPressed(0x11)) { // VK_CONTROL
+            if (vkey === 0x26) { this.cycleBezel(-1); return true; } // UP
+            if (vkey === 0x28) { this.cycleBezel(1);  return true; } // DOWN
+        }
+        return false;
+    }
+
+    dispose() {
+        this.saveAll();
+        this.#lifecycle = PanelArtController.LIFECYCLE.SHUTDOWN;
+
+        if (this.#glitchTimer)        window.ClearInterval(this.#glitchTimer);
+        if (this.#slideTimer)         window.ClearInterval(this.#slideTimer);
+        if (this.#saveTimeout)        window.ClearTimeout(this.#saveTimeout);
+        if (this.#bezelNotifyTimeout) window.ClearTimeout(this.#bezelNotifyTimeout);
+        if (this.#pendingSearchTimer) window.ClearTimeout(this.#pendingSearchTimer);
+
+        if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
+        if (this.#modeImg)  { try { this.#modeImg.Dispose(); }  catch {} this.#modeImg = null; }
+        if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+        this.#disposeTextBlock();
+
+        this.#backdrop.dispose();
+        this.#fonts.clear();
+        this.#scanner.clearCaches();
+        this.#slideImages = null;
+    }
+}
+
+// ============================================================================================
+// 7. SMP GLOBAL HOOKS & DISPATCH
+// ============================================================================================
+const app = new PanelArtController();
+
 function on_paint(gr) {
-    if (!isLive() || !PanelArt.dimensions.width || !PanelArt.dimensions.height) return;
-    try {
-        const w = PanelArt.dimensions.width, h = PanelArt.dimensions.height;
-        const cfg = StateManager.get();
-
-        const modeImg = (PanelArt.imageMode && PanelArt.imageImage) ? PanelArt.imageImage
-                      : (PanelArt.slideMode  && PanelArt.slideImage) ? PanelArt.slideImage
-                      : null;
-
-        if (modeImg) {
-            const borderPad = cfg.borderSize || 0, imagePad = borderPad + 3;
-            const dx = imagePad, dy = imagePad, dw = w - imagePad * 2, dh = h - imagePad * 2;
-            gr.FillSolidRect(0, 0, w, h, PA_MODE_BG);
-            if (modeImg.Width > 0 && modeImg.Height > 0 && dw > 0 && dh > 0) {
-                gr.FillSolidRect(dx - 1, dy - 1, dw + 2, dh + 2, PA_BORDER_LIGHT);
-                gr.FillSolidRect(dx + 1, dy + 1, dw - 2, dh - 2, PA_BORDER_DARK);
-                const si = ArtCache.getScaledImage(modeImg, dw, dh);
-                if (si) gr.DrawImage(si, dx, dy, dw, dh, 0, 0, dw, dh);
-            }
-            if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled)
-                GlitchRenderer.paint(gr, w, h, PanelArt.glitchFrame, imagePad, false);
-            Renderer.drawBorder(gr);
-            Renderer.drawOverlay(gr, w, h, null, null);
-            return;
-        }
-
-        Renderer.drawBackground(gr);
-        const artInfo  = Renderer.drawAlbumArt(gr);
-        const textArea = Renderer.getTextArea(artInfo);
-        Renderer.drawText(gr, textArea);
-        if (PanelArt.glitchFrame > 0 && cfg.glitchEnabled)
-            GlitchRenderer.paint(gr, w, h, PanelArt.glitchFrame, cfg.borderSize || 0, true);
-        Renderer.drawBorder(gr);
-        Renderer.drawOverlay(gr, w, h, artInfo, textArea);
-        Renderer.drawSliders(gr);
-    } catch (e) {
-        if (typeof console !== "undefined") console.log("Paint error:", e);
-    }
+    app.onPaint(gr);
 }
 
 function on_size() {
-    PanelArt.dimensions.width  = window.Width;
-    PanelArt.dimensions.height = window.Height;
-    if (!isLive()) return;
-    ArtController.onSize();
-}
-
-function on_colours_changed() {
-    if (!isLive()) return;
-    ImageManager.scheduleBlurRebuild();
-    RepaintHelper.full();
-}
-
-function on_font_changed() {
-    if (!isLive()) return;
-    FontManager.rebuildFonts();
-    TextHeightCache.clear();
-    RepaintHelper.full();
+    app.onSize();
 }
 
 function on_playback_new_track(metadb) {
-    if (!isLive()) return;
-    ArtDispatcher.request('track', metadb);
+    app.loadArtworkForTrack(metadb);
 }
 
-function on_metadb_changed(metadb_list, fromhook) {
-    if (!isLive()) return;
-    if (!fb.IsPlaying && !fb.IsPaused) return;
-    const nowPlaying = fb.GetNowPlaying();
-    if (!nowPlaying) return;
-    let affected = false;
-    const count = (metadb_list.Count !== undefined ? metadb_list.Count : metadb_list.length) || 0;
-    for (let i = 0; i < count; i++) {
-        const item = metadb_list.Item ? metadb_list.Item(i) : metadb_list[i];
-        if (item && item.Compare && item.Compare(nowPlaying)) { affected = true; break; }
-    }
-    if (affected) {
-        TextManager.update(nowPlaying);
-        OverlayCache.invalidate();
-        PanelArt.images.folderPath = '';
-        ImageManager.loadAlbumArt(nowPlaying);
-    }
+function on_playback_stop(reason) {
+    if (reason !== 2) app.clearTrackDisplay();
 }
 
-function on_get_album_art_done(metadb, art_id, image, image_path) {
-    if (phase === Phase.SHUTDOWN) {
-        if (image && typeof image.Dispose === 'function') { try { image.Dispose(); } catch (e) {} }
-        return;
-    }
-    try {
-        if (PanelArt.pendingArtToken !== PanelArt.loadToken) {
-            if (image && typeof image.Dispose === 'function') { try { image.Dispose(); } catch (e) {} }
-            return;
-        }
-        const expected = PanelArt.images.currentMetadb;
-        if (expected && metadb && !metadb.Compare(expected)) {
-            if (image && typeof image.Dispose === 'function') { try { image.Dispose(); } catch (e) {} }
-            return;
-        }
-        PanelArt.images.currentMetadb = null;
-        if (image) {
-            if (PanelArt.images.source && PanelArt.images.source !== image) Utils.disposeImage(PanelArt.images.source);
-            PanelArt.images.source = image;
-            if (image._srcId === undefined) image._srcId = BlurCache._srcIdCounter++;
-            PanelArt.images.currentPath = image_path || '';
-            ArtCache.clearScaledCache();
-            OverlayCache.invalidate();
-            ImageManager.scheduleBlurRebuild();
-            RepaintHelper.full();
-        } else {
-            PanelArt.images.source = Utils.disposeImage(PanelArt.images.source);
-            PanelArt.images.currentPath = '';
-            OverlayCache.invalidate();
-            ImageManager.scheduleBlurRebuild();
-            RepaintHelper.full();
-        }
-    } catch (e) {
-        if (typeof console !== "undefined") console.log("on_get_album_art_done error:", e);
+function on_playback_pause()    { window.Repaint(); }
+function on_playback_starting() { window.Repaint(); }
+function on_playback_seek()     { window.Repaint(); }
+
+function on_colours_changed() {
+    app.refreshColours();
+}
+
+function on_font_changed() {
+    app.onFontChanged();
+}
+
+function on_metadb_changed(handle_list, fromhook) {
+    app.onMetadbChanged(handle_list, fromhook);
+}
+
+function on_get_album_art_done(handle, art_id, image, image_path) {
+    app.onAlbumArtDone(handle, art_id, image, image_path);
+}
+
+function on_mouse_wheel(step) {
+    return app.onMouseWheel(step);
+}
+
+function on_mouse_rbtn_up(x, y, mask) {
+    if (mask & 4) return false;
+    return app.showContextMenu(x, y);
+}
+
+function on_mouse_lbtn_dblclk() {
+    if (app.config.slideMode) {
+        app.stopSlideMode();
+    } else if (app.config.imageMode) {
+        app.stopImageMode();
+    } else {
+        app.startImageMode(true);
     }
 }
 
-function on_playback_stop(reason)          { if (!isLive()) return; ArtDispatcher.request('stop', reason); }
-function on_playback_pause(paused)         { if (!isLive()) return; RepaintHelper.full(); }
-function on_playback_starting(cmd, paused) { if (!isLive()) return; RepaintHelper.full(); }
-function on_playlist_switch()              { if (!isLive()) return; ArtDispatcher.request('playlist', null); }
-function on_playlist_items_added(idx)      { if (!isLive()) return; ArtDispatcher.request('playlist', null); }
-function on_playlist_items_removed(idx)    { if (!isLive()) return; ArtDispatcher.request('playlist', null); }
-function on_mouse_wheel(delta)             { if (!isLive()) return; ArtController.onMouseWheel(delta); }
-function on_mouse_lbtn_down(x, y)         { if (!isLive()) return; if (window.SetFocus) window.SetFocus(); }
-function on_mouse_lbtn_up(x, y) {
-    if (!isLive()) return;
-    ArtController.onMouseLbtnUp();
-}
-function on_mouse_lbtn_dblclk(x, y)       { if (!isLive()) return; if (window.SetFocus) window.SetFocus(); ImageModeManager.toggleImageMode(); }
-function on_mouse_rbtn_up(x, y)           { if (!isLive()) return false; const m = MenuManager.createMainMenu(); const id = m.TrackPopupMenu(x, y); if (id > 0) MenuManager.handleSelection(id); return true; }
-
-function on_selection_changed() {
-    if (!isLive()) return;
-    if (fb.IsPlaying || fb.IsPaused) return;
-    const item = fb.GetFocusItem();
-    if (item) { TextManager.update(item); OverlayCache.invalidate(); ImageManager.loadAlbumArt(item); }
+function on_mouse_lbtn_up() {
+    app.setOpacityTarget(null);
 }
 
-function _findHandleForFolder(folderPath) {
-    if (!folderPath || !fb.IsLibraryEnabled()) return null;
-    let items = null, matches = null;
-    try {
-        items = fb.GetLibraryItems();
-        if (!items || !items.Count) return null;
-        matches = fb.GetQueryItems(items, '"%directory_path%" IS "' + folderPath.replace(/"/g, '""') + '"');
-        if (matches && matches.Count > 0) {
-            return matches.Item ? matches.Item(0) : matches[0];
-        }
-    } catch (e) {
-    } finally {
-        if (matches) { try { matches.Dispose(); } catch (e) {} }
-        if (items)   { try { items.Dispose(); }   catch (e) {} }
-    }
-    return null;
+function on_key_down(vkey) {
+    return app.onKeyDown(vkey);
 }
 
 function on_notify_data(name, info) {
-    if (name !== 'ArtFolder') return;
-    if (!isLive()) return;
-    if (fb.IsPlaying || fb.IsPaused) return;
-    if (!info) return;
-    const handle = _findHandleForFolder(info);
-    if (handle) ArtDispatcher.request('track', handle);
+    app.onNotifyData(name, info);
 }
 
 function on_script_unload() {
-    phase = Phase.SHUTDOWN;
-    if (_startupTimer) { window.ClearTimeout(_startupTimer); _startupTimer = null; }
-    RepaintScheduler.cancel();
-    ArtQueue.clear();
-    ArtController.onUnload();
-    ArtDispatcher._unloaded = true;
-    if (ArtDispatcher._trackTimer) { window.ClearTimeout(ArtDispatcher._trackTimer); ArtDispatcher._trackTimer = null; }
-    if (ArtDispatcher._timer)      { window.ClearTimeout(ArtDispatcher._timer);      ArtDispatcher._timer      = null; }
-    ArtDispatcher._pending = null;
-    if (Renderer._sliderFont) { try { Renderer._sliderFont.Dispose(); } catch (e) {} Renderer._sliderFont = null; }
-    StateManager.save();
-    BlurCache.dispose();
-    ImageManager.cleanup();
-    OverlayCache.dispose();
-    FontManager.clearCache();
-    TextHeightCache.clear();
-    ArtCache.clearAll();
-    if (typeof _tt === 'function') _tt('');
-    if (_bmp) {
-        if (_gr) { try { _bmp.ReleaseGraphics(_gr); } catch (e) {} }
-        try { _bmp.Dispose(); } catch (e) {}
-    }
-    _gr = null; _bmp = null;
+    app.dispose();
 }
 
-// ====================== INITIALIZATION ======================
-window.MinHeight = 75;
-window.MinWidth  = 200;
-StateManager.load();
-CustomFolders.load();
-let _startupTimer = null;
-(function init() {
-    const cfg = StateManager.get();
-    PanelArt.imageMode  = cfg.imageMode;
-    PanelArt.slideMode  = cfg.slideMode;
-    PanelArt.slideIndex = cfg.slideIndex || 0;
-    if (PanelArt.slideMode) SlideManager.startSlideMode(true);
-    if (PanelArt.imageMode) ImageModeManager.startImageMode();
-    const initTrack = fb.IsPlaying ? fb.GetNowPlaying() : null;
-    if (initTrack) ImageManager.loadAlbumArt(initTrack);
-    else           TextManager.update(null);
-    _startupTimer = window.SetTimeout(() => {
-        _startupTimer = null;
-        PanelArt.dimensions.width  = window.Width;
-        PanelArt.dimensions.height = window.Height;
-        phase = Phase.LIVE;
-        RepaintHelper.full();
-    }, 0);
-})();
+// Initialize Controller
+app.init();
