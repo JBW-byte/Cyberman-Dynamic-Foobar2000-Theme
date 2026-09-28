@@ -160,6 +160,26 @@ Majot ReWrite. Bezel and Overlay Support. v2.0
 
 </details>
 
+<details>
+<summary><strong>LCD Peakmeter</strong> — Updated 28 Sep 2026</summary>
+
+### Key Features
+* **Dual Operation Modes:** Seamlessly toggles between Stereo Peak/RMS Metering and a 10–120 band Logarithmic FFT Spectrum Analyzer.
+* **DotMatrix Pre-Render Pipeline:** Pre-bakes 2D LED color strips and segmented foregrounds for one-blit level updates.
+* **7 Segment Fill Modes:** Discrete LCD Blocks, Solid Flat Bar, LED Strip Gradients, and Multi-Axis Cross Blends.
+* **20 Authentic Hardware Themes:** Color schemes inspired by Pioneer, Sony ES, Technics, Kenwood, Marantz, and Akai.
+* **Real-Time Performance Monitor:** Built-in profiler measuring audio tick latency, FFT math duration, paint cycles, and cache hit ratios.
+
+### Controls & Shortcuts
+| Input | Action |
+| :--- | :--- |
+| **Double Click** | Toggle Display Mode (Peak Meter ⟷ Spectrum Analyzer) |
+| **Mouse Wheel** | Adjust Active Overlay Opacity |
+| **Right Click** | Open Full Configuration Menu |
+| **Ctrl + Up / Down** | Cycle Bezel Frames |
+| **Ctrl + Left / Right** | Cycle Meter Segment / Flat Styles |
+</details>
+
 ---
 
 ## Interface Controls
