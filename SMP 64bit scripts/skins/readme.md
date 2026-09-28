@@ -180,6 +180,25 @@ Majot ReWrite. Bezel and Overlay Support. v2.0
 | **Ctrl + Left / Right** | Cycle Meter Segment / Flat Styles |
 </details>
 
+<details>
+<summary><strong>The Play Buttons</strong> — Updated 28 Sep 2026</summary>
+
+### Key Features
+* **Zero-Resampling Blit Engine:** Icon textures for Idle, Hover, and Click states are pre-baked at 1:1 pixel ratios to avoid runtime resampling.
+* **Vector Fallback Engine:** Automatically renders high-DPI vector glyphs if icon image files are missing.
+* **Subfolder Pack Auto-Discovery:** Scans button subdirectories and lets you hot-swap skin packs via menu or keyboard shortcuts.
+* **Bezel / Overlay System:** Full support for transparent hardware frames and glass overlays.
+* **Configurable Layouts:** Supports Fixed Box, Fill Width (Horizontally Tiled), and Fit Height alignment modes.
+
+### Controls & Shortcuts
+| Input | Action |
+| :--- | :--- |
+| **Left Click** | Trigger Transport Command (Stop, Play/Pause, Previous, Next) |
+| **Right Click** | Open Settings Context Menu |
+| **Ctrl + Up / Down** | Cycle Bezel / Overlay Frame |
+| **Ctrl + Left / Right** | Cycle Button Style Pack |
+</details>
+
 ---
 
 ## Interface Controls
