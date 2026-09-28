@@ -989,6 +989,7 @@ class LcdTimerController {
         if (!raw || typeof raw !== 'object') return out;
 
         out.themeIdx             = GdiUtils.clamp(parseInt(raw.themeIdx, 10) || 0, 0, LcdTimerController.THEMES.length);
+        out.syncTheme            = typeof raw.syncTheme === 'boolean' ? raw.syncTheme : fallback.syncTheme;
         out.borderMode           = GdiUtils.clamp(parseInt(raw.borderMode, 10) || 0, 0, 50);
         out.showGhost            = typeof raw.showGhost === 'boolean' ? raw.showGhost : fallback.showGhost;
         out.useReflection        = typeof raw.useReflection === 'boolean' ? raw.useReflection : fallback.useReflection;
@@ -1222,7 +1223,7 @@ class LcdTimerController {
             this.#mode1Cache.invalidate();
             this.saveAll();
             window.Repaint();
-            if (broadcast) {
+            if (broadcast && this.config.syncTheme) {
                 try { window.NotifyOthers('LcdThemeSync', LcdTimerController.THEMES[idx].name); } catch {}
             }
         }
@@ -1234,8 +1235,8 @@ class LcdTimerController {
         if (remaining && currentMinutes >= 10) return '-88:88';
         return '88:88';
     }
-	
-updateLayout(gr, w, h) {
+
+    updateLayout(gr, w, h) {
         const lo = this.#layout;
         lo.padL = this.scale(GdiUtils.clamp(this.config.padLeft, 0, Math.max(0, w - 1)));
         lo.padR = this.scale(GdiUtils.clamp(this.config.padRight, 0, Math.max(0, w - 1)));
@@ -1246,7 +1247,7 @@ updateLayout(gr, w, h) {
 
         const pad = this.scale(15) + (this.config.borderMode > 0 ? Math.ceil(this.scale(this.config.borderMode) / 2) + 4 : 0);
         const availW = Math.max(10, lo.dw - pad * 2);
-        const minM1TextSize = Math.max(12, this.scale(12));
+        const minM1TextSize = Math.max(8, this.scale(9));
         lo.timeCache.str = '';
 
         const isInternal = (this.config.clockFontName === 'Digital');
@@ -1322,28 +1323,71 @@ updateLayout(gr, w, h) {
             }));
 
         } else {
-            const topAvailH = Math.floor(lo.dh * 0.618);
-            if (this.config.autoFontSize) {
-                lo.m1TitleSize = this.#fonts.fitSize(gr, this.#trackInfo.title || 'Sample Title', this.config.textRowFontName, 0, availW, Math.floor(topAvailH * 0.48), 64, minM1TextSize);
-                lo.m1AlbumSize = this.#fonts.fitSize(gr, this.#trackInfo.album || 'Sample Album', this.config.textRowFontName, 0, availW, Math.floor(topAvailH * 0.38), Math.round(lo.m1TitleSize * 0.75), minM1TextSize);
-                lo.m1TechSize  = this.config.m1CodecFontSize > 0 ? this.scale(this.config.m1CodecFontSize) : GdiUtils.clamp(Math.round(lo.dh * 0.10), 8, 36);
+            // Pre-calculate Play/Pause status icon footprint first so text boundary can reserve room
+            if (this.config.playIconType > 0) {
+                const fontName = LcdTimerController.ICON_FONTS[this.config.playIconType];
+                if (fontName && LcdTimerController.ICON_CHARS[fontName]) {
+                    // Refined 28% height scaling prevents icon from encroaching on upper text row
+                    // Scaled up to ~34% (min 18px, max 52px) for bolder visual presence
+					const iconSizePx = GdiUtils.clamp(Math.round(lo.dh * 0.34), 18, 52);
+                    lo.iconFont = this.#fonts.get(fontName, iconSizePx);
+                    if (lo.iconFont) {
+                        const iSize = gr.MeasureString(LcdTimerController.ICON_CHARS[fontName].play, lo.iconFont, 0, 0, 9999, 9999);
+                        lo.iconW = iSize.Width;
+                        lo.iconH = iSize.Height;
+                    }
+                } else {
+                    lo.iconFont = null;
+                    lo.iconW = 0;
+                    lo.iconH = 0;
+                }
             } else {
-                lo.m1TitleSize = Math.max(minM1TextSize, this.scale(this.config.textRowFontSize));
-                lo.m1AlbumSize = Math.max(minM1TextSize, Math.round(lo.m1TitleSize * 0.65));
-                lo.m1TechSize  = this.config.m1CodecFontSize > 0 ? this.scale(this.config.m1CodecFontSize) : this.scale(this.config.techFontSize);
+                lo.iconFont = null;
+                lo.iconW = 0;
+                lo.iconH = 0;
+            }
+
+            // Reserve horizontal right clearance if icon is visible so text will never collide with it
+            const rightReserved = (this.config.playIconType > 0 && lo.iconW > 0) ? (lo.iconW + this.scale(12)) : 0;
+            const textAvailW = Math.max(10, availW - rightReserved);
+
+            // True top-half budget constraint (52% max) prevents title from pushing into the lower half
+            const topAvailH = Math.max(16, Math.floor(lo.dh * 0.52));
+            const bothLines = this.config.showM1Title && this.config.showM1Album;
+
+            lo.m1TechSize = this.config.m1CodecFontSize > 0 
+                ? this.scale(this.config.m1CodecFontSize) 
+                : GdiUtils.clamp(Math.round(lo.dh * 0.10), 8, 30);
+
+            if (this.config.autoFontSize) {
+                const titleMaxH = bothLines ? Math.floor(topAvailH * 0.50) : Math.floor(topAvailH * 0.82);
+                const albumMaxH = bothLines ? Math.floor(topAvailH * 0.38) : Math.floor(topAvailH * 0.70);
+
+                lo.m1TitleSize = this.#fonts.fitSize(gr, this.#trackInfo.title || 'Sample Title', this.config.textRowFontName, 0, textAvailW, titleMaxH, Math.min(32, Math.floor(topAvailH * 0.60)), minM1TextSize);
+                lo.m1AlbumSize = this.#fonts.fitSize(gr, this.#trackInfo.album || 'Sample Album', this.config.textRowFontName, 0, textAvailW, albumMaxH, Math.round(lo.m1TitleSize * 0.72), minM1TextSize);
+            } else {
+                let tSize = Math.max(minM1TextSize, this.scale(this.config.textRowFontSize));
+                let aSize = Math.max(minM1TextSize, Math.round(tSize * 0.65));
+                if (bothLines && (tSize + aSize) * 1.35 > topAvailH) {
+                    const ratio = topAvailH / ((tSize + aSize) * 1.35);
+                    tSize = Math.max(minM1TextSize, Math.floor(tSize * ratio));
+                    aSize = Math.max(minM1TextSize, Math.floor(aSize * ratio));
+                }
+                lo.m1TitleSize = tSize;
+                lo.m1AlbumSize = aSize;
             }
 
             lo.m1TitleFont = this.#fonts.get(this.config.textRowFontName, lo.m1TitleSize, 0);
             lo.m1AlbumFont = this.#fonts.get(this.config.textRowFontName, lo.m1AlbumSize, 0);
             lo.m1TechFont  = this.#fonts.get(this.config.codecFontName, lo.m1TechSize, 0);
 
-            lo.truncatedTitle = this.#fonts.truncateToFit(gr, this.#trackInfo.title, lo.m1TitleFont, availW);
+            lo.truncatedTitle = this.#fonts.truncateToFit(gr, this.#trackInfo.title, lo.m1TitleFont, textAvailW);
 
             let line2 = this.#trackInfo.artist;
             if (this.#trackInfo.album) {
                 line2 += (line2 ? ' \u2014 ' : '') + this.#trackInfo.album;
             }
-            lo.truncatedAlbum = this.#fonts.truncateToFit(gr, line2, lo.m1AlbumFont, availW);
+            lo.truncatedAlbum = this.#fonts.truncateToFit(gr, line2, lo.m1AlbumFont, textAvailW);
 
             lo.m1TechParts = [];
             if (this.config.showM1Codec && this.#trackInfo.codec) {
@@ -1358,23 +1402,6 @@ updateLayout(gr, w, h) {
                 ].filter(p => p.text).forEach(p => {
                     lo.m1TechParts.push({ text: p.text, baseCol: p.baseCol, w: gr.MeasureString(p.text, lo.m1TechFont, 0, 0, 9999, 9999).Width });
                 });
-            }
-
-            if (this.config.playIconType > 0) {
-                const fontName = LcdTimerController.ICON_FONTS[this.config.playIconType];
-                if (fontName && LcdTimerController.ICON_CHARS[fontName]) {
-                    const iconSizePx = GdiUtils.clamp(Math.round(lo.dh * 0.42), 18, 72);
-                    lo.iconFont = this.#fonts.get(fontName, iconSizePx);
-                    if (lo.iconFont) {
-                        const iSize = gr.MeasureString(LcdTimerController.ICON_CHARS[fontName].play, lo.iconFont, 0, 0, 9999, 9999);
-                        lo.iconW = iSize.Width;
-                        lo.iconH = iSize.Height;
-                    }
-                } else {
-                    lo.iconFont = null;
-                    lo.iconW = 0;
-                    lo.iconH = 0;
-                }
             }
 
             this.#mode1Cache.invalidate();
@@ -1881,6 +1908,12 @@ updateLayout(gr, w, h) {
 
         const allMenus = [m, themeM, appM, bzM, iconM, borderM, opacityM, layoutM, fontM, m0FontM, m1FontM, presetM, loadM, saveM];
 
+        // 1. Top Toggle: Sync Theme Across Panels
+        themeM.AppendMenuItem(0, MID.THEME_SYNC, 'Sync Theme');
+        if (this.config.syncTheme) themeM.CheckMenuRadioItem(MID.THEME_SYNC, MID.THEME_SYNC, MID.THEME_SYNC);
+        themeM.AppendMenuSeparator();
+
+        // 2. Themes with matching separator layout (at index 8 and 20)
         LcdTimerController.THEMES.forEach((t, i) => {
             if (i === 8 || i === 20) themeM.AppendMenuSeparator();
             themeM.AppendMenuItem(0, MID.THEME_BASE + i, t.name);
@@ -2034,14 +2067,25 @@ updateLayout(gr, w, h) {
 
         if (id === 0) return true;
 
-        if (id >= MID.THEME_BASE && id < MID.THEME_BASE + LcdTimerController.THEMES.length) {
+        if (id === MID.THEME_SYNC) {
+            this.config.syncTheme = !this.config.syncTheme;
+            this.saveAll();
+            if (this.config.syncTheme) {
+                const themeName = LcdTimerController.THEMES[this.config.themeIdx]?.name;
+                if (themeName) {
+                    try { window.NotifyOthers('LcdThemeSync', themeName); } catch {}
+                }
+            }
+        } else if (id >= MID.THEME_BASE && id < MID.THEME_BASE + LcdTimerController.THEMES.length) {
             const chosenTheme = LcdTimerController.THEMES[id - MID.THEME_BASE];
             this.config.themeIdx = id - MID.THEME_BASE;
             this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
             this.#backplate.invalidate();
             this.#digitSprites.invalidate();
             this.#mode1Cache.invalidate();
-            try { window.NotifyOthers('LcdThemeSync', chosenTheme.name); } catch {}
+            if (this.config.syncTheme) {
+                try { window.NotifyOthers('LcdThemeSync', chosenTheme.name); } catch {}
+            }
         } else if (id === MID.THEME_BASE + LcdTimerController.THEMES.length) {
             this.config.themeIdx = LcdTimerController.THEMES.length;
             this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
@@ -2313,6 +2357,7 @@ updateLayout(gr, w, h) {
     onNotifyData(name, info) {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
         if (name === 'LcdThemeSync' && typeof info === 'string') {
+            if (!this.config.syncTheme) return; // Guarded by syncTheme toggle
             this.setThemeByName(info, false);
         }
     }
