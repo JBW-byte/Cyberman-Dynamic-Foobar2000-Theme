@@ -32,11 +32,13 @@ For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable 
 
 # Components
 
+Major rewrite 28 Sep 2026, Bezel and Overlay options.
+
 <details>
-<summary><strong>DiscSpin</strong> — Updated 30 Aug 2026</summary>
+<summary><strong>DiscSpin</strong> — Updated 28 Sep 2026</summary>
 
 ### Update Overview
-Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v4.1
+Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.0
 
 ### Features
 
@@ -48,33 +50,44 @@ Optimization improvements, bug fixes, JSplitter D2D support, GDI+/D2D toggle(may
 | Custom Masks | Supports alternate mask images |
 | Context Menu | Extensive right-click customization options |
 | Scaling Options | Image scaling quality controls |
-| Large Panel Support | Optimized performance for large panels |
-
-### Performance Notes
-
-Recommended settings for large panels:
-
-- **Scaling:** Nearest Neighbour  
-- **Image Resolution:** Medium or High  
+| Large Panel Support | Optimized performance for large panels | 
 
 **Note:** Album art required for best results.
+
+### Controls & Shortcuts
+| Input | Action |
+| :--- | :--- |
+| **Mouse Wheel** | Adjust Opacity of Active HUD Layer |
+| **Right Click** | Open Context Menu |
+| **Ctrl + Up / Down** | Cycle Bezel / Glass Overlays |
+| **Esc / Left Click Up**| Dismiss HUD Slider |
 
 </details>
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 30 Aug 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 28 Sep 2026</summary>
 
 ### Update Overview
-Custom Themes and json save, bug fixes. v3.1
+Custom Themes and json save, Major update to themes. v4.0
 
-### Controls
+Press Control+left click for a random theme. don't forget to save any you like.
 
-| Action | Result |
-|------|------|
-| Left Click + Drag | Adjust volume |
-| Double Click | Toggle mute |
-| Right Click | Change themes |
+### Controls & Shortcuts
+| Input | Action |
+| :--- | :--- |
+| **Left Click + Drag** | Smooth Rotary Volume Adjustment |
+| **Mouse Wheel** | Step Volume Up / Down (or adjust active HUD slider) |
+| **Double Click** | Toggle Mute |
+| **Ctrl + Left Click** | Randomize Visual Theme and Finishes |
+| **Right Click** | Open Settings Menu / Color Picker |
+| **Alt / Ctrl + Shift + Left / Right** | Cycle Themes |
+| **Alt / Ctrl + Shift + Up / Down** | Cycle Specular Lighting Styles |
+| **Ctrl + Up / Down** | Cycle Dial Finishes |
+| **Ctrl + Left / Right** | Cycle Tick Marker Styles |
+| **Shift + Up / Down** | Cycle Pointer Styles |
+| **Shift + Left / Right** | Cycle Backplate Styles |
+| **Esc** | Dismiss Active HUD Slider |
 
 ### Features
 
@@ -85,10 +98,10 @@ Custom Themes and json save, bug fixes. v3.1
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 29 Aug 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 28 Sep 2026</summary>
 
 ### Update Overview
-Bug Fix's. v3.9
+Major Rewrite. Bezel and Overlay support. v4.0
 
 ### Features
 
@@ -105,17 +118,22 @@ Bug Fix's. v3.9
 
 ## Interface Controls
 
-| Control | Function |
-|------|------|
-| Double Click | Random artwork / actions |
+### Controls & Shortcuts
+| Input | Action |
+| :--- | :--- |
+| **Double Click** | Toggle Image Display Modes (Track Art ⟷ Single Image ⟷ Slideshow) |
+| **Mouse Wheel** | Adjust Active Overlay Opacity / Padding |
+| **Right Click** | Open Settings Menu |
+| **Ctrl + Up / Down** | Cycle Bezel / Screen Frames |
+| **Esc** | Dismiss Active HUD Slider |
 
 </details>
 
 <details>
-<summary><strong>LCD TimerPro</strong> — Updated 29 Aug 2026</summary>
+<summary><strong>LCD TimerPro</strong> — Updated 28 Sep 2026</summary>
 
 ### Update Overview
-Bug Fix's. v1.5
+Majot ReWrite. Bezel and Overlay Support. v2.0
 
 ### Features
 
@@ -126,15 +144,18 @@ Bug Fix's. v1.5
 | Layout Modes | position elements |
 | Customization | Multiple settings via right-click menu |
 
-**Note:** its a llitle cluncky menu, but it is what it is. Recommend Digital-7 Mono font or similar
+**Note:** its a little clunky menu, but it is what it is. Built in Digital, 7 Segment Font.
 
-## Interface Controls
-
-| Control | Function |
-|------|------|
-| Scroll Wheel | Display Mode |
-| Left Click | Time Mode |
-| Dbl Click | Turn Off Panel |
+### Controls & Shortcuts
+| Input | Action |
+| :--- | :--- |
+| **Single Click** | Mode 0: Toggle Elapsed / Remaining Time |
+| **Double Click** | Toggle Display Power (Standby / Blackout) |
+| **Mouse Wheel** | Switch Display Mode (Mode 0 ⟷ Mode 1) |
+| **Right Click** | Open Context Menu / Position Calibrator |
+| **Arrow Keys** | Shift Element Positions (during Layout Adjust Mode) |
+| **Ctrl + Up / Down** | Cycle Bezel Frames |
+| **Esc** | Exit Calibration HUD |
 
 </details>
 
