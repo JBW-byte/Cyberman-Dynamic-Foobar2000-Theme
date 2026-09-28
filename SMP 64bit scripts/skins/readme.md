@@ -7,6 +7,7 @@
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/led_jbw)
 
 Custom **Spider Monkey Panel / JSplitter scripts** designed for **Foobar2000 v2 64bit** providing animated visuals, album-art driven UI elements, and interactive controls.
+
 🖼️ Bezel / Overlay Framing
 Frame your visualizer behind a custom hardware Bezel. Drop any transparent PNG into your profile\skins\overlay folder and select it from the context menu to perfectly mount your meter inside a virtual stereo chassis.
 
@@ -223,10 +224,8 @@ Foobar2000 64Bit/
         │   ├── SMP_64_DiscSpin.js
         │   └── SMP_64_PanelArt
         │  
-        ├── mask.png
-        ├── vinyl_mask.png
-        ├── center_album_rim.png
-        └── default_disc.png
+        ├── overlay\
+        └── images\
 </pre>
 
 ## Usage
