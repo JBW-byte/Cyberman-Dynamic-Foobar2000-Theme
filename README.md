@@ -10,7 +10,7 @@
 
 It features a **dynamic colour scheme based on album artwork**, custom playback controls, multiple VU meter skins, and configurable spectrum and layout presets.
 
-> **Last updated:** 30 Aug 2026 Added MilkDrop2 and ESLyric. Updated componets/scripts. V2 Theme changes. +more
+> **Last updated:** 28 Sep 2026 Added MilkDrop2 and ESLyric. Updated componets. Script Rewrite upgrade. Bezel and overlay effects added to my script. +more
 
 ---
 
@@ -103,7 +103,7 @@ Some UI icons require additional fonts:
 
 * [https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts](https://github.com/regorxxx/foobar2000-assets/tree/main/Fonts)
 * [https://www.fontrepo.com/font/27754/guifx-v2-transports](https://www.fontrepo.com/font/27754/guifx-v2-transports)
-* [LCD Font Digital-7 Mono](https://www.dafont.com/digital-7.font)
+* no longer required [LCD Font Digital-7 Mono](https://www.dafont.com/digital-7.font)
 
 Install the `.ttf` files.
 
