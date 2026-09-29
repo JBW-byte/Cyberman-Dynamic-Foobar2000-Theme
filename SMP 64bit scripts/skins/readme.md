@@ -134,7 +134,7 @@ Major Rewrite. Bezel and Overlay support. v4.1 bug fix
 </details>
 
 <details>
-<summary><strong>LCD TimerPro</strong> — Updated 28 Sep 2026</summary>
+<summary><strong>LCD TimerPro</strong> — Updated 29 Sep 2026</summary>
 
 ### Update Overview
 Majot ReWrite. Bezel and Overlay Support. v2.1 theme sync fix
