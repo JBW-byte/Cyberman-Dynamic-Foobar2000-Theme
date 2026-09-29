@@ -102,10 +102,10 @@ Press Control+left click for a random theme. don't forget to save any you like.
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 28 Sep 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 29 Sep 2026</summary>
 
 ### Update Overview
-Major Rewrite. Bezel and Overlay support. v4.0
+Major Rewrite. Bezel and Overlay support. v4.1 bug fix
 
 ### Features
 
@@ -137,7 +137,7 @@ Major Rewrite. Bezel and Overlay support. v4.0
 <summary><strong>LCD TimerPro</strong> — Updated 28 Sep 2026</summary>
 
 ### Update Overview
-Majot ReWrite. Bezel and Overlay Support. v2.0
+Majot ReWrite. Bezel and Overlay Support. v2.1 theme sync fix
 
 ### Features
 
