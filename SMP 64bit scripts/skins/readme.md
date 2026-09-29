@@ -79,6 +79,7 @@ Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D su
 Custom Themes and json save, Major update to themes. v4.0
 
 Press Control+left click for a random theme. don't forget to save any you like.
+Place your custom images in the scripts/VolumeKnob folder.
 
 ### Controls & Shortcuts
 | Input | Action |
