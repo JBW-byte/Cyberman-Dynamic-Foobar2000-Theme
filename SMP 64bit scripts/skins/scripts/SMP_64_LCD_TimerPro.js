@@ -1,7 +1,7 @@
 'use strict';
 
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.0 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.1 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.0', 
+    version: '2.1', 
     features: { grab_focus: true } 
 });
 
@@ -195,7 +195,7 @@ class SevenSegmentEngine {
         return { w, h, colonW, charGap };
     }
 
-    static drawDigit(g, ch, x, y, w, h, color, italic = true) {
+    static drawDigit(g, ch, x, y, w, h, color, italic = false) {
         const mask = SevenSegmentEngine.MASKS[ch] ?? 0;
         if (!mask) return;
 
@@ -236,7 +236,7 @@ class SevenSegmentEngine {
         if (mask & (1 << 6)) poly([[gap + ht, midY], [gap + t, midY - ht], [w - gap - t, midY - ht], [w - gap - ht, midY], [w - gap - t, midY + ht], [gap + t, midY + ht]]);
     }
 
-    static drawColon(g, x, y, w, h, color, italic = true) {
+    static drawColon(g, x, y, w, h, color, italic = false) {
         const t = Math.max(3, Math.round(w * 0.42));
         const ht = Math.round(t / 2);
         const midY = Math.round(h / 2);
@@ -291,7 +291,7 @@ class DigitSpriteCache {
         this.#key = '';
     }
 
-    build(gr, isInternal, font, themeColor, opClock, opGhost, showShadow, opShadow, showGlow, opGlow, clockSize, italic = true) {
+    build(gr, isInternal, font, themeColor, opClock, opGhost, showShadow, opShadow, showGlow, opGlow, clockSize, italic = false) {
         const fontId = isInternal ? 'InternalDigital' : (font?.Name || '');
         const key = `${fontId}|${clockSize}|${themeColor}|${opClock}|${opGhost}|${showShadow ? opShadow : 0}|${showGlow ? opGlow : 0}|${italic ? 1 : 0}`;
         if (key === this.#key && this.#sprites.size > 0) return;
@@ -512,20 +512,21 @@ class Mode1TextCache {
 
             const borderPad = config.borderMode > 0 ? Math.ceil(scaleFn(config.borderMode) / 2) + 4 : 0;
             const padL = lo.padL + scaleFn(15) + borderPad;
-            const padT = lo.padT + scaleFn(12) + borderPad;
+            const padT = lo.padT + scaleFn(10) + borderPad;
             const leftX = padL + config.m1TitleOffX;
-            const maxTextW = Math.max(10, lo.dw - (scaleFn(15) + borderPad + config.m1TitleOffX) - (scaleFn(15) + borderPad));
+            const rightReserved = (config.playIconType > 0 && lo.iconW > 0) ? (lo.iconW + scaleFn(12)) : 0;
+            const maxTextW = Math.max(10, lo.dw - (scaleFn(15) + borderPad + config.m1TitleOffX) - (scaleFn(15) + borderPad) - rightReserved);
             let curY = padT + config.m1TitleOffY;
 
             if (isPlaying) {
                 if (config.showM1Title && lo.truncatedTitle && lo.m1TitleFont) {
-                    const tH = lo.m1TitleFont.Height + scaleFn(2);
+                    const tH = lo.m1TitleFont.Height + scaleFn(1);
                     g.DrawString(lo.truncatedTitle, lo.m1TitleFont, GdiUtils.setAlpha(themeColor, config.opClock), leftX, curY, maxTextW, tH);
-                    curY += tH + scaleFn(4);
+                    curY += tH + scaleFn(2);
                 }
 
                 if (config.showM1Album && lo.truncatedAlbum && lo.m1AlbumFont) {
-                    const aH = lo.m1AlbumFont.Height + scaleFn(2);
+                    const aH = lo.m1AlbumFont.Height + scaleFn(1);
                     g.DrawString(lo.truncatedAlbum, lo.m1AlbumFont, GdiUtils.setAlpha(themeColor, Math.floor(config.opClock * 0.75)), leftX, curY, maxTextW, aH);
                 }
 
@@ -675,7 +676,7 @@ class LcdBackplateEngine {
 }
 
 // ============================================================================================
-// 6. MAIN CONTROLLER & STATE MANAGEMENT (PART 1)
+// 6. MAIN CONTROLLER & STATE MANAGEMENT (PART 2)
 // ============================================================================================
 class LcdTimerController {
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
@@ -691,6 +692,7 @@ class LcdTimerController {
     };
 
     static MENU_ID = {
+        THEME_SYNC:          1000,
         THEME_BASE:          1001,
         CUST_LCD_COLOR:      800,
         CUST_BG_COLOR:       801,
@@ -790,6 +792,7 @@ class LcdTimerController {
 
     static DEFAULTS = {
         themeIdx: 0,
+        syncTheme: true,
         borderMode: 2,
         showGhost: true,
         useReflection: true,
@@ -835,6 +838,7 @@ class LcdTimerController {
 
     static PROP_MAP = {
         themeIdx:             'LCD.Theme',
+        syncTheme:            'LCD.SyncTheme',
         borderMode:           'LCD.BorderPx',
         showGhost:            'LCD.ShowGhost',
         useReflection:        'LCD.UseReflection',
@@ -911,7 +915,7 @@ class LcdTimerController {
     #saveTimeout        = null;
     #bezelNotifyTimeout = null;
 
-    #bezelBmp = null;
+    #bezelBmp           = null;
     #profileBase        = '';
     #cachedBezelImages  = null;
     #cachedBezelFolder  = null;
@@ -926,7 +930,6 @@ class LcdTimerController {
     #opacityTarget      = null;
     #blinkTarget        = null;
 
-    // Single Compound TitleFormat Query (Optimized startup load balance)
     #compoundTf = fb.TitleFormat('%codec%\x01%title%\x01%artist%\x01%album%\x01%bitrate%\x01%samplerate%\x01%__bitspersample%\x01%channels%');
 
     #trackInfo = {
@@ -970,7 +973,6 @@ class LcdTimerController {
         this.loadBezel();
         this.#lifecycle = LcdTimerController.LIFECYCLE.LIVE;
 
-        // Post-paint yield: render initial frame immediately without blocking UI thread
         window.SetTimeout(() => {
             if (this.#lifecycle === LcdTimerController.LIFECYCLE.SHUTDOWN) return;
             this.updateInfo();
@@ -1215,13 +1217,14 @@ class LcdTimerController {
     setThemeByName(name, broadcast = false) {
         if (!name || typeof name !== 'string') return;
         const idx = LcdTimerController.THEMES.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
-        if (idx !== -1 && idx !== this.config.themeIdx) {
+        if (idx !== -1) {
+            const changed = (idx !== this.config.themeIdx);
             this.config.themeIdx = idx;
             this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
             this.#backplate.invalidate();
             this.#digitSprites.invalidate();
             this.#mode1Cache.invalidate();
-            this.saveAll();
+            if (changed) this.saveAll();
             window.Repaint();
             if (broadcast && this.config.syncTheme) {
                 try { window.NotifyOthers('LcdThemeSync', LcdTimerController.THEMES[idx].name); } catch {}
@@ -1327,9 +1330,8 @@ class LcdTimerController {
             if (this.config.playIconType > 0) {
                 const fontName = LcdTimerController.ICON_FONTS[this.config.playIconType];
                 if (fontName && LcdTimerController.ICON_CHARS[fontName]) {
-                    // Refined 28% height scaling prevents icon from encroaching on upper text row
-                    // Scaled up to ~34% (min 18px, max 52px) for bolder visual presence
-					const iconSizePx = GdiUtils.clamp(Math.round(lo.dh * 0.34), 18, 52);
+                    // Scaled up to ~34% (min 18px, max 52px) for bolder presence
+                    const iconSizePx = GdiUtils.clamp(Math.round(lo.dh * 0.34), 18, 52);
                     lo.iconFont = this.#fonts.get(fontName, iconSizePx);
                     if (lo.iconFont) {
                         const iSize = gr.MeasureString(LcdTimerController.ICON_CHARS[fontName].play, lo.iconFont, 0, 0, 9999, 9999);
@@ -1348,7 +1350,7 @@ class LcdTimerController {
             }
 
             // Reserve horizontal right clearance if icon is visible so text will never collide with it
-            const rightReserved = (this.config.playIconType > 0 && lo.iconW > 0) ? (lo.iconW + this.scale(12)) : 0;
+            const rightReserved = (this.config.playIconType > 0 && lo.iconW > 0) ? (lo.iconW + this.scale(14)) : 0;
             const textAvailW = Math.max(10, availW - rightReserved);
 
             // True top-half budget constraint (52% max) prevents title from pushing into the lower half
@@ -1416,7 +1418,6 @@ class LcdTimerController {
         const h = window.Height;
         if (!gr || w <= 0 || h <= 0) return;
 
-        // Wake up timers if restoring from minimized or hidden state
         if (this.#wasHidden) {
             this.#wasHidden = false;
             if (fb.IsPlaying || fb.IsPaused) {
@@ -1578,7 +1579,6 @@ class LcdTimerController {
 
         if (np) {
             try {
-                // Single atomic DB transaction replaces 8 serial locks
                 const raw = this.#compoundTf.EvalWithMetadb(np, true) || '';
                 const parts = raw.split('\x01');
                 const co = parts[0] ? String(parts[0]).toUpperCase() : '';
@@ -1662,7 +1662,6 @@ class LcdTimerController {
                          (this.config.displayMode === 1 && this.config.playIconType > 0 && this.config.playIconBlink && (fb.IsPlaying || fb.IsPaused));
         if (!canBlink) return;
 
-        // Suspend immediately if the window is currently hidden
         if (!window.IsVisible) {
             this.#wasHidden = true;
             return;
@@ -1674,7 +1673,6 @@ class LcdTimerController {
                 return; 
             }
 
-            // True Zero-Idle: Halt timer execution completely when hidden or minimized
             if (!window.IsVisible) {
                 this.#wasHidden = true;
                 this.stopTimers();
@@ -2078,14 +2076,7 @@ class LcdTimerController {
             }
         } else if (id >= MID.THEME_BASE && id < MID.THEME_BASE + LcdTimerController.THEMES.length) {
             const chosenTheme = LcdTimerController.THEMES[id - MID.THEME_BASE];
-            this.config.themeIdx = id - MID.THEME_BASE;
-            this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
-            this.#backplate.invalidate();
-            this.#digitSprites.invalidate();
-            this.#mode1Cache.invalidate();
-            if (this.config.syncTheme) {
-                try { window.NotifyOthers('LcdThemeSync', chosenTheme.name); } catch {}
-            }
+            this.setThemeByName(chosenTheme.name, true);
         } else if (id === MID.THEME_BASE + LcdTimerController.THEMES.length) {
             this.config.themeIdx = LcdTimerController.THEMES.length;
             this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
@@ -2357,7 +2348,7 @@ class LcdTimerController {
     onNotifyData(name, info) {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
         if (name === 'LcdThemeSync' && typeof info === 'string') {
-            if (!this.config.syncTheme) return; // Guarded by syncTheme toggle
+            if (!this.config.syncTheme) return; // Verified: correctly respects toggle
             this.setThemeByName(info, false);
         }
     }

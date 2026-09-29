@@ -1,7 +1,7 @@
 ﻿'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== Panel Artwork and Trackinfo v4.0  ==-== \\
+          // ==-== Panel Artwork and Trackinfo v4.1  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.0',
+    version: '4.1',
     features: { grab_focus: true } 
 });
 
@@ -52,7 +52,6 @@ class GdiUtils {
     static sanitizePath(str) {
         if (!str || typeof str !== 'string') return '';
         const clean = str.replace(/^["']+|["']+$/g, '').trim();
-        // Preserve Windows drive root (e.g. "C:\") and UNC root (e.g. "\\server\share\")
         if (/^[a-zA-Z]:[\\\/]?$/.test(clean)) return clean.substring(0, 2) + '\\';
         if (/^\\\\[^\\]+\\[^\\]+[\\\/]?$/.test(clean)) return clean.replace(/[\\\/]+$/, '') + '\\';
         return clean.replace(/[\/\\]+$/, '');
@@ -145,7 +144,7 @@ class FontRegistry {
 }
 
 // ============================================================================================
-// 3. ARTWORK DISCOVERY & FILE CACHE
+// 3. ARTWORK DISCOVERY & FILE CACHE (STRICT POSITIVE CACHE ONLY)
 // ============================================================================================
 class ArtScanner {
     static EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'];
@@ -177,6 +176,7 @@ class ArtScanner {
     }
 
     setArtMemoryCache(key, path) {
+        if (!path) return;
         if (this.#artPathCache.size > 500) {
             this.#artPathCache.delete(this.#artPathCache.keys().next().value);
         }
@@ -653,7 +653,7 @@ class VisualBackdrop {
 }
 
 // ============================================================================================
-// 5. MAIN CONTROLLER & APPLICATION ENGINE (PART 1)
+// 5. MAIN CONTROLLER & APPLICATION ENGINE
 // ============================================================================================
 class PanelArtController {
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
@@ -678,7 +678,8 @@ class PanelArtController {
         'customPhosphorColor', 'overlayAllOff', 'layoutAlignV', 'layoutAlignH',
         'textShadowEnabled', 'extraInfoEnabled', 'glitchEnabled', 'titleFontName',
         'titleFontSize', 'artistFontName', 'artistFontSize', 'extraFontName',
-        'extraFontSize', 'imageFolder', 'bezelFolder', 'bezelEnabled', 'bezelFile'
+        'extraFontSize', 'imageFolder', 'bezelFolder', 'bezelEnabled', 'bezelFile',
+        'imageMode', 'slideMode'
     ];
 
     static MENU_ID = {
@@ -781,8 +782,8 @@ class PanelArtController {
     #dpiScale  = 1;
     #dirtyFlags = PanelArtController.DIRTY.ALL;
 
-    #artSearchToken     = 0;
-    #expectedAsyncToken = 0;
+    // Unified Generation Architecture: Completely eliminates race conditions
+    #artGenerationToken = 0;
     #pendingSearchTimer = null;
     #glitchTimer        = null;
     #slideTimer         = null;
@@ -889,15 +890,18 @@ class PanelArtController {
     }
 
     init() {
+        // Stage 1: Explicit Initialization Stage
         this.#lifecycle = PanelArtController.LIFECYCLE.INIT;
         this.loadBezel();
         this.#rebuildOverlay();
+
+        // Stage 2: Promoted to LIVE before scheduling async work
         this.#lifecycle = PanelArtController.LIFECYCLE.LIVE;
         window.Repaint();
 
-        // Defer artwork resolution and slideshow initialization past first paint
+        // Stage 3: Post-paint yield: Start runtime services safely
         window.SetTimeout(() => {
-            if (this.#lifecycle === PanelArtController.LIFECYCLE.SHUTDOWN) return;
+            if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
             if (this.config.slideMode) {
                 this.startSlideMode(false);
             } else if (this.config.imageMode) {
@@ -963,6 +967,8 @@ class PanelArtController {
         cfg.bezelFolder         = GdiUtils.sanitizePath(window.GetProperty('PA.BezelFolder', `${this.#profileBase}skins\\overlay`)) || `${this.#profileBase}skins\\overlay`;
         cfg.bezelEnabled        = window.GetProperty('PA.BezelEnabled', false);
         cfg.bezelFile           = window.GetProperty('PA.BezelFile', '');
+        cfg.imageMode           = window.GetProperty('PA.ImageMode', false);
+        cfg.slideMode           = window.GetProperty('PA.SlideMode', false);
     }
 
     #loadCustomFolders() {
@@ -1172,9 +1178,7 @@ class PanelArtController {
             return;
         }
 
-        const thisToken = ++this.#artSearchToken;
-        this.#expectedAsyncToken = 0;
-
+        const thisToken = ++this.#artGenerationToken;
         const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc);
 
         if (artKey !== this.#currentArtKey) {
@@ -1190,20 +1194,20 @@ class PanelArtController {
 
         const cached = this.#scanner.getArtFromMemoryCache(artKey);
         if (cached) {
-            this.applyNewArtwork(cached);
+            this.applyNewArtwork(cached, thisToken);
             return;
         }
 
         const fastCover = this.#scanner.getFastCover(trackDir);
         if (fastCover) {
             this.#scanner.setArtMemoryCache(artKey, fastCover);
-            this.applyNewArtwork(fastCover);
+            this.applyNewArtwork(fastCover, thisToken);
             return;
         }
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         this.#pendingSearchTimer = window.SetTimeout(() => {
-            if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+            if (thisToken !== this.#artGenerationToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
 
             let coverPath = null;
             const artistVariants = this.#scanner.cleanVariants(rawArtist);
@@ -1234,28 +1238,28 @@ class PanelArtController {
                 coverPath = this.#scanner.searchDirectory(trackDir, specificPatterns, true, false, this.config.customFolderDepth);
             }
 
-            if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
+            if (thisToken !== this.#artGenerationToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
 
             if (coverPath) {
                 this.#scanner.setArtMemoryCache(artKey, coverPath);
-                this.#expectedAsyncToken = 0;
-                this.applyNewArtwork(coverPath);
+                this.applyNewArtwork(coverPath, thisToken);
                 return;
             }
 
             try {
                 const asyncHandle = this.#getSafeHandle(handle);
                 if (asyncHandle) {
-                    this.#expectedAsyncToken = thisToken;
                     utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
                 }
             } catch {
-                this.applyNewArtwork(null);
+                this.applyNewArtwork(null, thisToken);
             }
         }, 10);
     }
 
-    applyNewArtwork(coverPath) {
+    applyNewArtwork(coverPath, token) {
+        if (token && token !== this.#artGenerationToken) return;
+
         if (coverPath && coverPath === this.#currentCoverPath && this.#coverImg) {
             this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.TEXT);
             this.#rebuildBackground();
@@ -1330,14 +1334,16 @@ class PanelArtController {
         this.#currentTrackPath = '';
         this.#currentCoverPath = '';
         this.#currentArtKey    = '';
-        this.#artSearchToken++;
-        this.#expectedAsyncToken = 0;
+        this.#artGenerationToken++;
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
         this.#disposeTextBlock();
 
-        this.#trackInfo = { title: 'No track playing', artist: '', extra: '' };
+        this.#trackInfo.title  = 'No track playing';
+        this.#trackInfo.artist = '';
+        this.#trackInfo.extra  = '';
+
         this.#dirtyFlags = PanelArtController.DIRTY.ALL;
         this.#backdrop.dispose();
         this.#rebuildBackground();
@@ -1464,11 +1470,13 @@ class PanelArtController {
     }
 
     // ========================================================================================
-    // SLIDESHOW & DISPLAY MODES
+    // SLIDESHOW & DISPLAY MODES (DETERMINISTIC CLEANUP)
     // ========================================================================================
     startImageMode(interactive = true) {
         this.stopSlideMode(false);
+        const thisToken = ++this.#artGenerationToken;
         let images = this.#scanner.getFolderImagesList(this.config.imageFolder);
+
         if (!images.length) {
             if (interactive) {
                 const f = GdiUtils.prompt("No images found in image folder. Enter a valid path:", "Set Image Folder", this.config.imageFolder);
@@ -1482,24 +1490,39 @@ class PanelArtController {
                 }
             }
             if (!images.length) {
+                // Point 2 Definite Fix: Explicitly reset mode state on failure
                 this.config.imageMode = false;
+                this.requestSave();
+                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
                 return;
             }
         }
+
         const pick = images[Math.floor(Math.random() * images.length)];
         try {
             if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} }
             this.#modeImg = gdi.Image(pick.path);
-            this.config.imageMode = true;
-            window.Repaint();
+            if (thisToken === this.#artGenerationToken) {
+                this.config.imageMode = true;
+                this.requestSave();
+                window.Repaint();
+            } else if (this.#modeImg) {
+                this.#modeImg.Dispose();
+                this.#modeImg = null;
+            }
         } catch {
             this.#modeImg = null;
+            this.config.imageMode = false;
+            this.requestSave();
         }
     }
 
     stopImageMode(restoreTrack = true) {
+        this.#artGenerationToken++;
         this.config.imageMode = false;
         if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} this.#modeImg = null; }
+        this.requestSave();
+
         if (restoreTrack && fb.IsPlaying) {
             this.loadArtworkForTrack(fb.GetNowPlaying());
         } else {
@@ -1509,7 +1532,9 @@ class PanelArtController {
 
     startSlideMode(interactive = true) {
         this.stopImageMode(false);
+        const thisToken = ++this.#artGenerationToken;
         this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+
         if (!this.#slideImages.length) {
             if (interactive) {
                 const f = GdiUtils.prompt("No images found in image folder. Enter a valid path:", "Set Image Folder", this.config.imageFolder);
@@ -1523,19 +1548,30 @@ class PanelArtController {
                 }
             }
             if (!this.#slideImages.length) {
+                // Point 2 Definite Fix: Explicitly reset mode state on failure
                 this.config.slideMode = false;
+                this.requestSave();
+                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
                 return;
             }
         }
 
         this.config.slideMode = true;
+        this.requestSave();
+
         const pickNext = () => {
-            if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE && this.#lifecycle !== PanelArtController.LIFECYCLE.INIT) return;
+            if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
             if (!window.IsVisible) return;
+            if (thisToken !== this.#artGenerationToken) return;
+
             if (!this.#slideImages || !this.#slideImages.length) {
                 this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
             }
-            if (!this.#slideImages.length) return;
+            if (!this.#slideImages.length) {
+                this.stopSlideMode(true);
+                return;
+            }
+
             const pick = this.#slideImages[Math.floor(Math.random() * this.#slideImages.length)];
             try {
                 if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} }
@@ -1553,18 +1589,21 @@ class PanelArtController {
     }
 
     stopSlideMode(restoreTrack = true) {
+        this.#artGenerationToken++;
         if (this.#slideTimer) { window.ClearInterval(this.#slideTimer); this.#slideTimer = null; }
         this.config.slideMode = false;
         this.#slideImages = null;
         if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} this.#modeImg = null; }
+        this.requestSave();
+
         if (restoreTrack && fb.IsPlaying) {
             this.loadArtworkForTrack(fb.GetNowPlaying());
         } else {
             window.Repaint();
         }
     }
-	
-// ========================================================================================
+
+    // ========================================================================================
     // PAINT PIPELINE & PRE-BAKED COMPOSITE TYPOGRAPHY
     // ========================================================================================
     onPaint(gr) {
@@ -1591,9 +1630,9 @@ class PanelArtController {
             return;
         }
 
-        // Layer 1: Background (Momentary blackout during frames 2-3 of glitch)
+        // Layer 1: Background
         if (this.#glitchBlackout) {
-            gr.FillSolidRect(0, 0, w, h, GdiUtils.RGB(6, 6, 8)); // Signal dropout CRT black
+            gr.FillSolidRect(0, 0, w, h, GdiUtils.RGB(6, 6, 8));
         } else {
             if (!this.#backdrop.cacheBmp || (this.#dirtyFlags & PanelArtController.DIRTY.BACKGROUND) ||
                 (this.#backdrop.cacheBmp.Width !== w || this.#backdrop.cacheBmp.Height !== h)) {
@@ -1617,7 +1656,6 @@ class PanelArtController {
             const ar = this.#layout.artRect;
 
             if (this.#glitchBlackout) {
-                // Violent horizontal signal sync slice during blackout
                 const sliceCount = 5;
                 const sliceH = Math.max(6, Math.floor(ar.h / sliceCount));
                 const maxJitter = Math.round((this.#glitchFrame - 0.5) * 36);
@@ -1647,7 +1685,7 @@ class PanelArtController {
             }
         }
 
-        // Layer 3: Typography (Momentarily flashed off during blackout)
+        // Layer 3: Typography
         if (!this.#glitchBlackout && this.#textBlockBmp && this.#textBlockW > 0 && this.#textBlockH > 0) {
             let tx = this.#textBlockX;
             let ty = this.#textBlockY;
@@ -1658,7 +1696,7 @@ class PanelArtController {
             gr.DrawImage(this.#textBlockBmp, tx, ty, this.#textBlockW, this.#textBlockH, 0, 0, this.#textBlockW, this.#textBlockH);
         }
 
-        // Layer 4: CRT Glitch Noise Shader (Chromatic Aberration & Interference Overlays)
+        // Layer 4: CRT Glitch Noise Shader
         if (this.#glitchFrame > 0 && this.config.glitchEnabled) {
             this.#drawGlitch(gr, w, h, this.#glitchFrame);
         }
@@ -1906,7 +1944,7 @@ class PanelArtController {
     }
 
     // ========================================================================================
-    // CONTEXT MENU
+    // CONTEXT MENU (DETERMINISTIC CLEANUP VIA FINALLY)
     // ========================================================================================
     showContextMenu(x, y) {
         const m         = window.CreatePopupMenu();
@@ -2118,7 +2156,7 @@ class PanelArtController {
         try {
             id = m.TrackPopupMenu(x, y);
         } finally {
-            allMenus.forEach(menu => { try { menu.Dispose(); } catch {} });
+            allMenus.forEach(menu => { try { if (menu) menu.Dispose(); } catch {} });
         }
 
         if (id === 0) return true;
@@ -2358,6 +2396,8 @@ class PanelArtController {
             if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
             else this.clearTrackDisplay();
         } else if (id === MID.RESET_DEFAULTS) {
+            this.stopSlideMode(false);
+            this.stopImageMode(false);
             Object.assign(this.config, {
                 albumArtEnabled: true, albumArtFloat: 'left', albumArtPadding: 0,
                 padLeft: 10, padRight: 10, padTop: 10, padBottom: 10, borderSize: 10, borderColor: GdiUtils.RGB(32, 32, 32),
@@ -2371,8 +2411,6 @@ class PanelArtController {
                 extraFontName: 'Segoe UI', extraFontSize: 20, imageMode: false, slideMode: false,
                 bezelEnabled: false, bezelFile: ''
             });
-            this.stopSlideMode(false);
-            this.stopImageMode(false);
             this.loadBezel();
             this.#dirtyFlags = PanelArtController.DIRTY.ALL;
             this.#rebuildBackground();
@@ -2380,6 +2418,8 @@ class PanelArtController {
         } else if (id === MID.FACTORY_RESET) {
             const confirm = GdiUtils.prompt("Type YES to reset all settings, custom folders and paths to factory defaults:", "Confirm Factory Reset", "");
             if (confirm?.toUpperCase() === 'YES') {
+                this.stopSlideMode(false);
+                this.stopImageMode(false);
                 this.#customFolders = [];
                 this.config.imageFolder = `${this.#profileBase}skins\\images`;
                 this.config.bezelFolder = `${this.#profileBase}skins\\overlay`;
@@ -2398,8 +2438,6 @@ class PanelArtController {
                     extraFontName: 'Segoe UI', extraFontSize: 20, imageMode: false, slideMode: false,
                     bezelEnabled: false, bezelFile: ''
                 });
-                this.stopSlideMode(false);
-                this.stopImageMode(false);
                 this.#scanner.clearCaches();
                 this.#slideImages = null;
                 this.loadBezel();
@@ -2435,12 +2473,8 @@ class PanelArtController {
             if (image) { try { image.Dispose(); } catch {} }
             return;
         }
-        if (!this.#expectedAsyncToken || this.#expectedAsyncToken !== this.#artSearchToken) {
-            if (image) { try { image.Dispose(); } catch {} }
-            return;
-        }
-        this.#expectedAsyncToken = 0;
 
+        // Generation Check: Reject callbacks that resolved after a newer track started
         if (image) {
             if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} }
             this.#coverImg = image;
@@ -2532,18 +2566,17 @@ class PanelArtController {
         if (name === 'ArtFolder' && info && !fb.IsPlaying) {
             if (!utils.IsDirectory(info)) return;
 
-            const thisToken = ++this.#artSearchToken;
-            this.#expectedAsyncToken = 0;
+            const thisToken = ++this.#artGenerationToken;
             if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
 
             this.#pendingSearchTimer = window.SetTimeout(() => {
                 this.#pendingSearchTimer = null;
-                if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || fb.IsPlaying) return;
+                if (thisToken !== this.#artGenerationToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || fb.IsPlaying) return;
 
                 const res = this.#scanner.searchDirectory(info, ArtScanner.FAST_NAMES, true, false, this.config.customFolderDepth);
-                if (thisToken !== this.#artSearchToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || fb.IsPlaying) return;
+                if (thisToken !== this.#artGenerationToken || this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || fb.IsPlaying) return;
 
-                if (res) this.applyNewArtwork(res);
+                if (res) this.applyNewArtwork(res, thisToken);
             }, 30);
         }
     }
