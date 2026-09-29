@@ -15,7 +15,10 @@ Frame your visualizer behind a custom hardware Bezel. Drop any transparent PNG i
 
 ## Preview
 
-<img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/hifi_foobar2000.png" width="800">
+<img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/Cyberman_scripts.png" width="1000"><br><br>
+<img src="https://raw.githubusercontent.com/JBW-byte/Cyberman-Dynamic-Foobar2000-Theme/refs/heads/main/screenshots/hifi_foobar2000.png" width="800"><br>
+
+
 
 Using **[Nowbar](https://github.com/jame25/foo_nowbar)** as an example for a clean layout.<br>
 
