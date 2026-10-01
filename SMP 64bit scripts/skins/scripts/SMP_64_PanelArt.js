@@ -1,7 +1,7 @@
 ﻿'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== Panel Artwork and Trackinfo v4.1  ==-== \\
+          // ==-== Panel Artwork and Trackinfo v4.2  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.1',
+    version: '4.2',
     features: { grab_focus: true } 
 });
 
@@ -163,8 +163,11 @@ class ArtScanner {
         this.#artPathCache.clear();
     }
 
-    getArtworkIdentityKey(trackDir, album, disc) {
-        return `${trackDir || ''}|${(album || '').trim().toLowerCase()}|${(disc || '').trim().toLowerCase()}`;
+    getArtworkIdentityKey(trackDir, album, disc, titleOrPath = '') {
+        const alb = (album || '').trim().toLowerCase();
+        // If there is no album tag, use title or path so tracks in compilation/singles folders don't collide
+        const fallback = alb ? '' : `|${(titleOrPath || '').trim().toLowerCase()}`;
+        return `${trackDir || ''}|${alb}|${(disc || '').trim().toLowerCase()}${fallback}`;
     }
 
     getArtFromMemoryCache(key) {
@@ -784,6 +787,7 @@ class PanelArtController {
 
     // Unified Generation Architecture: Completely eliminates race conditions
     #artGenerationToken = 0;
+    #asyncArtToken      = 0;
     #pendingSearchTimer = null;
     #glitchTimer        = null;
     #slideTimer         = null;
@@ -1179,7 +1183,7 @@ class PanelArtController {
         }
 
         const thisToken = ++this.#artGenerationToken;
-        const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc);
+        const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc, rawTitle || trackPath);
 
         if (artKey !== this.#currentArtKey) {
             if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
@@ -1249,6 +1253,7 @@ class PanelArtController {
             try {
                 const asyncHandle = this.#getSafeHandle(handle);
                 if (asyncHandle) {
+                    this.#asyncArtToken = thisToken;
                     utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
                 }
             } catch {
@@ -1335,6 +1340,7 @@ class PanelArtController {
         this.#currentCoverPath = '';
         this.#currentArtKey    = '';
         this.#artGenerationToken++;
+        this.#asyncArtToken = 0; // Discard any pending GetAlbumArtAsync callbacks
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
@@ -1490,10 +1496,10 @@ class PanelArtController {
                 }
             }
             if (!images.length) {
-                // Point 2 Definite Fix: Explicitly reset mode state on failure
                 this.config.imageMode = false;
                 this.requestSave();
                 if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                else this.clearTrackDisplay();
                 return;
             }
         }
@@ -1502,18 +1508,16 @@ class PanelArtController {
         try {
             if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} }
             this.#modeImg = gdi.Image(pick.path);
-            if (thisToken === this.#artGenerationToken) {
+            if (thisToken === this.#artGenerationToken && this.#modeImg) {
                 this.config.imageMode = true;
                 this.requestSave();
                 window.Repaint();
-            } else if (this.#modeImg) {
-                this.#modeImg.Dispose();
-                this.#modeImg = null;
+            } else {
+                if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} this.#modeImg = null; }
+                this.stopImageMode(true);
             }
         } catch {
-            this.#modeImg = null;
-            this.config.imageMode = false;
-            this.requestSave();
+            this.stopImageMode(true);
         }
     }
 
@@ -1548,10 +1552,10 @@ class PanelArtController {
                 }
             }
             if (!this.#slideImages.length) {
-                // Point 2 Definite Fix: Explicitly reset mode state on failure
                 this.config.slideMode = false;
                 this.requestSave();
                 if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                else this.clearTrackDisplay();
                 return;
             }
         }
@@ -1560,8 +1564,7 @@ class PanelArtController {
         this.requestSave();
 
         const pickNext = () => {
-            if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
-            if (!window.IsVisible) return;
+            if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE || !window.IsVisible) return;
             if (thisToken !== this.#artGenerationToken) return;
 
             if (!this.#slideImages || !this.#slideImages.length) {
@@ -1578,7 +1581,8 @@ class PanelArtController {
                 this.#modeImg = gdi.Image(pick.path);
                 window.Repaint();
             } catch {
-                this.#modeImg = null;
+                if (this.#modeImg) { try { this.#modeImg.Dispose(); } catch {} this.#modeImg = null; }
+                this.stopSlideMode(true);
             }
         };
 
@@ -1602,8 +1606,8 @@ class PanelArtController {
             window.Repaint();
         }
     }
-
-    // ========================================================================================
+	
+	// ========================================================================================
     // PAINT PIPELINE & PRE-BAKED COMPOSITE TYPOGRAPHY
     // ========================================================================================
     onPaint(gr) {
@@ -2475,6 +2479,12 @@ class PanelArtController {
         }
 
         // Generation Check: Reject callbacks that resolved after a newer track started
+        if (!this.#asyncArtToken || this.#asyncArtToken !== this.#artGenerationToken) {
+            if (image) { try { image.Dispose(); } catch {} }
+            return;
+        }
+        this.#asyncArtToken = 0;
+
         if (image) {
             if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} }
             this.#coverImg = image;
@@ -2541,6 +2551,7 @@ class PanelArtController {
         try {
             const d = JSON.parse(raw);
             for (const [k, v] of Object.entries(d)) {
+                if (k === 'imageMode' || k === 'slideMode') continue;
                 if (Object.prototype.hasOwnProperty.call(this.config, k)) this.config[k] = v;
             }
             this.#dirtyFlags = PanelArtController.DIRTY.ALL;
@@ -2551,9 +2562,7 @@ class PanelArtController {
             this.#rebuildOverlay();
             this.requestSave();
             window.Repaint();
-        } catch (err) {
-            console.log(new Error(`Failed to load preset ${slot}`, { cause: err }));
-        }
+        } catch (err) {}
     }
 
     savePreset(slot) {
@@ -2600,7 +2609,7 @@ class PanelArtController {
                 rawDisc   = parts[8] ?? '';
             } catch {}
 
-            const newArtKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc);
+            const newArtKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc, rawTitle || np.Path);
 
             this.#trackInfo.title  = rawTitle || 'Playing';
             this.#trackInfo.artist = rawArtist;
@@ -2624,7 +2633,7 @@ class PanelArtController {
     }
 
     onKeyDown(vkey) {
-        if (vkey === 0x1B) {
+        if (vkey === 0x1B) { // Escape
             this.setOpacityTarget(null);
             return true;
         }

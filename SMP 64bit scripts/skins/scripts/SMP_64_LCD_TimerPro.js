@@ -1,7 +1,7 @@
 'use strict';
 
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.1 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.2 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.1', 
+    version: '2.2', 
     features: { grab_focus: true } 
 });
 
@@ -971,11 +971,11 @@ class LcdTimerController {
     init() {
         this.#lifecycle = LcdTimerController.LIFECYCLE.INIT;
         this.loadBezel();
+        this.updateInfo();
         this.#lifecycle = LcdTimerController.LIFECYCLE.LIVE;
 
         window.SetTimeout(() => {
             if (this.#lifecycle === LcdTimerController.LIFECYCLE.SHUTDOWN) return;
-            this.updateInfo();
             if (fb.IsPlaying || fb.IsPaused) {
                 this.startTimers();
                 this.refreshClock(true);
@@ -1889,22 +1889,28 @@ class LcdTimerController {
 
         const MID = LcdTimerController.MENU_ID;
 
-        const m        = window.CreatePopupMenu();
-        const themeM   = window.CreatePopupMenu();
-        const appM     = window.CreatePopupMenu();
-        const bzM      = window.CreatePopupMenu();
-        const iconM    = window.CreatePopupMenu();
-        const borderM  = window.CreatePopupMenu();
-        const opacityM = window.CreatePopupMenu();
-        const layoutM  = window.CreatePopupMenu();
-        const fontM    = window.CreatePopupMenu();
-        const m0FontM  = window.CreatePopupMenu();
-        const m1FontM  = window.CreatePopupMenu();
-        const presetM  = window.CreatePopupMenu();
-        const loadM    = window.CreatePopupMenu();
-        const saveM    = window.CreatePopupMenu();
+        // Auto-tracking menu factory ensures every native instance is disposed
+        const menus = [];
+        const createMenu = () => {
+            const m = window.CreatePopupMenu();
+            menus.push(m);
+            return m;
+        };
 
-        const allMenus = [m, themeM, appM, bzM, iconM, borderM, opacityM, layoutM, fontM, m0FontM, m1FontM, presetM, loadM, saveM];
+        const m        = createMenu();
+        const themeM   = createMenu();
+        const appM     = createMenu();
+        const bzM      = createMenu();
+        const iconM    = createMenu();
+        const borderM  = createMenu();
+        const opacityM = createMenu();
+        const layoutM  = createMenu();
+        const fontM    = createMenu();
+        const m0FontM  = createMenu();
+        const m1FontM  = createMenu();
+        const presetM  = createMenu();
+        const loadM    = createMenu();
+        const saveM    = createMenu();
 
         // 1. Top Toggle: Sync Theme Across Panels
         themeM.AppendMenuItem(0, MID.THEME_SYNC, 'Sync Theme');
@@ -2060,8 +2066,14 @@ class LcdTimerController {
         m.AppendMenuItem(0, MID.RESET_DEFAULTS, 'Reset Visual Settings to Defaults');
         m.AppendMenuItem(0, MID.FACTORY_RESET, 'Factory Reset (All Settings & Overlays)...');
 
-        const id = m.TrackPopupMenu(x, y);
-        allMenus.forEach(menu => { try { menu.Dispose(); } catch {} });
+        let id = 0;
+        try {
+            id = m.TrackPopupMenu(x, y);
+        } finally {
+            for (const menu of menus) {
+                try { menu.Dispose(); } catch {}
+            }
+        }
 
         if (id === 0) return true;
 
@@ -2397,7 +2409,7 @@ function on_playback_new_track() {
 
 function on_playback_stop(reason) { 
     app.stopTimers();
-    app.config.modeRemaining = false;
+    app.config.modeRemaining = window.GetProperty('LCD.ModeRemaining', false);
     app.updateInfo();
     if (reason !== 2) {
         window.Repaint(); 

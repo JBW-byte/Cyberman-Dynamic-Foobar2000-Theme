@@ -1,7 +1,7 @@
 ﻿'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.0 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.1 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -19,7 +19,7 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { 
     author: 'L.E.D.', 
-    version: '5.0',
+    version: '5.1',
     features: { grab_focus: true } 
 });
 
@@ -122,8 +122,11 @@ class ArtScanner {
         this.#artPathCache.clear();
     }
 
-    getArtworkIdentityKey(trackDir, album, disc) {
-        return `${trackDir || ''}|${(album || '').trim().toLowerCase()}|${(disc || '').trim().toLowerCase()}`;
+    getArtworkIdentityKey(trackDir, album, disc, titleOrPath = '') {
+        const alb = (album || '').trim().toLowerCase();
+        // Fallback to title/path if no album tag exists to prevent loose singles from colliding
+        const fallback = alb ? '' : `|${(titleOrPath || '').trim().toLowerCase()}`;
+        return `${trackDir || ''}|${alb}|${(disc || '').trim().toLowerCase()}${fallback}`;
     }
 
     getMemoryCache(key) {
@@ -139,6 +142,8 @@ class ArtScanner {
     }
 
     setMemoryCache(key, val) {
+        // Prevent negative caching of null results
+        if (!val || (!val.disc && !val.cover)) return;
         if (this.#artPathCache.size > 500) {
             this.#artPathCache.delete(this.#artPathCache.keys().next().value);
         }
@@ -838,9 +843,16 @@ class VisualBackdrop {
     #lastBlurSrc      = null;
     #lastBlurRad      = -1;
 
+    static #disposeBmp(bmp) {
+        if (bmp) {
+            try { bmp.Dispose(); } catch {}
+        }
+        return null;
+    }
+
     rebuildBlur(activeImg, w, h, enabled, blurRadius, useUIColor, interpMode) {
         if (!enabled || useUIColor || !activeImg || w <= 0 || h <= 0) {
-            this.#disposeBitmap('#bgBlurredBmp');
+            this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
             this.#lastBlurSrc = null;
             this.#lastBlurRad = -1;
             return;
@@ -849,7 +861,7 @@ class VisualBackdrop {
         const blurR = GdiUtils.clamp(blurRadius, 0, 254);
         if (blurR <= 0) {
             if (this.#bgBlurredBmp && this.#lastBlurSrc === activeImg && this.#lastBlurRad === -1) return;
-            this.#disposeBitmap('#bgBlurredBmp');
+            this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
             try {
                 this.#bgBlurredBmp = activeImg.Clone(0, 0, activeImg.Width, activeImg.Height);
             } catch {
@@ -878,7 +890,7 @@ class VisualBackdrop {
             const effectiveRadius = GdiUtils.clamp(Math.round(blurR / scale), 1, Math.min(120, maxSafeRadius));
             thumb.StackBlur(effectiveRadius);
 
-            this.#disposeBitmap('#bgBlurredBmp');
+            this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
             this.#bgBlurredBmp = thumb;
             this.#lastBlurSrc = activeImg;
             this.#lastBlurRad = blurR;
@@ -890,7 +902,7 @@ class VisualBackdrop {
     }
 
     rebuildCache(w, h, useUIColor, customBgColor, bgEnabled, darkenPct, uiColour, interpMode) {
-        this.#disposeBitmap('#bgCacheBmp');
+        this.#bgCacheBmp = VisualBackdrop.#disposeBmp(this.#bgCacheBmp);
         if (w <= 0 || h <= 0) return;
 
         let bmp = null, g = null;
@@ -906,7 +918,7 @@ class VisualBackdrop {
                     g.SetInterpolationMode(interpMode === 0 ? 2 : interpMode);
                     g.DrawImage(this.#bgBlurredBmp, 0, 0, w, h, 0, 0, this.#bgBlurredBmp.Width, this.#bgBlurredBmp.Height);
                 }
-                if (darkenPct > 0) {
+                if (darkenPct > 0 && bgEnabled && this.#bgBlurredBmp) {
                     g.FillSolidRect(0, 0, w, h, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), Math.floor(darkenPct * 2.55)));
                 }
             }
@@ -920,7 +932,7 @@ class VisualBackdrop {
     }
 
     rebuildOverlay(w, h, config, bezelImg, dpiScale) {
-        this.#disposeBitmap('#overlayBmp');
+        this.#overlayBmp = VisualBackdrop.#disposeBmp(this.#overlayBmp);
         if (w <= 0 || h <= 0) return;
 
         let bmp = null, g = null;
@@ -956,8 +968,11 @@ class VisualBackdrop {
                 const col = config.borderColor >>> 0;
                 g.FillSolidRect(0, 0, w, b, col);
                 g.FillSolidRect(0, h - b, w, b, col);
-                g.FillSolidRect(0, b, b, h - b * 2, col);
-                g.FillSolidRect(w - b, b, b, h - b * 2, col);
+                const sideH = Math.max(0, h - b * 2);
+                if (sideH > 0) {
+                    g.FillSolidRect(0, b, b, sideH, col);
+                    g.FillSolidRect(w - b, b, b, sideH, col);
+                }
             }
 
             if (config.bezelEnabled && bezelImg) {
@@ -978,7 +993,7 @@ class VisualBackdrop {
 
     rebuildGlow(discSize, showGlow, opGlow, overlayAllOff) {
         if (!showGlow || opGlow <= 0 || overlayAllOff || discSize <= 0) {
-            this.#disposeBitmap('#glowBmp');
+            this.#glowBmp = VisualBackdrop.#disposeBmp(this.#glowBmp);
             this.#glowSize = 0;
             this.#glowOp = 0;
             return;
@@ -988,7 +1003,7 @@ class VisualBackdrop {
         const sz = Math.ceil(maxR * 2);
         if (this.#glowBmp && this.#glowSize === sz && this.#glowOp === opGlow) return;
 
-        this.#disposeBitmap('#glowBmp');
+        this.#glowBmp = VisualBackdrop.#disposeBmp(this.#glowBmp);
         try {
             const bmp = gdi.CreateImage(sz, sz);
             const g = bmp.GetGraphics();
@@ -1012,28 +1027,21 @@ class VisualBackdrop {
     get glowBmp()    { return this.#glowBmp; }
     get glowSize()   { return this.#glowSize; }
 
-    #disposeBitmap(fieldName) {
-        if (this[fieldName]) {
-            try { this[fieldName].Dispose(); } catch {}
-            this[fieldName] = null;
-        }
-    }
-
     dispose() {
-        this.#disposeBitmap('#bgBlurredBmp');
-        this.#disposeBitmap('#bgCacheBmp');
-        this.#disposeBitmap('#overlayBmp');
-        this.#disposeBitmap('#glowBmp');
-        this.#lastBlurSrc = null;
-        this.#lastBlurRad = -1;
+        this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
+        this.#bgCacheBmp   = VisualBackdrop.#disposeBmp(this.#bgCacheBmp);
+        this.#overlayBmp   = VisualBackdrop.#disposeBmp(this.#overlayBmp);
+        this.#glowBmp      = VisualBackdrop.#disposeBmp(this.#glowBmp);
+        this.#lastBlurSrc  = null;
+        this.#lastBlurRad  = -1;
     }
 }
 
 // ============================================================================================
-// 5. MAIN CONTROLLER & APPLICATION ENGINE (PART 1)
+// 5. MAIN CONTROLLER & APPLICATION ENGINE
 // ============================================================================================
 class DiscSpinController {
-    static LIFECYCLE = { BOOT: 0, LIVE: 1, SHUTDOWN: 2 };
+    static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
     static BEZEL_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
 
     static MENU_ID = {
@@ -1220,7 +1228,7 @@ class DiscSpinController {
     }
 
     init() {
-        this.#lifecycle = DiscSpinController.LIFECYCLE.LIVE;
+        this.#lifecycle = DiscSpinController.LIFECYCLE.INIT;
         this.#isPaused  = fb.IsPaused;
         this.#needsFullRepaint = true;
 
@@ -1230,6 +1238,9 @@ class DiscSpinController {
             this.#updateGeometry(window.Width, window.Height);
         }
         this.#rebuildOverlay();
+        
+        // Promote to LIVE only after state initialization is complete
+        this.#lifecycle = DiscSpinController.LIFECYCLE.LIVE;
         window.Repaint();
 
         // Startup load balancing: defer disk and database operations past the first paint
@@ -1789,7 +1800,7 @@ class DiscSpinController {
             rawAlbArtist = parts[5] ?? '';
         } catch {}
 
-        const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc);
+        const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc, trackPath);
 
         if (isTrackChange && this.#currentArtKey && artKey === this.#currentArtKey && (this.#discImgSource || this.#coverImg) && !this.#isDefault) {
             this.#currentTrackPath = trackPath;
@@ -1955,12 +1966,11 @@ class DiscSpinController {
             if (this.#coverImg)      { try { this.#coverImg.Dispose(); }      catch {} this.#coverImg = null; }
 
             this.autoDetectMask(null);
-            this.#coverImg      = image.Clone(0, 0, image.Width, image.Height);
+            this.#coverImg      = image;
             this.#discImgSource = image.Clone(0, 0, image.Width, image.Height);
             this.#isDedicated   = false;
             this.#isDefault     = false;
             this.#currentCoverPath = image_path || '';
-            try { image.Dispose(); } catch {}
 
             if (this.#currentArtKey) {
                 this.#scanner.setMemoryCache(this.#currentArtKey, { disc: null, cover: this.#currentCoverPath });
@@ -1997,7 +2007,7 @@ class DiscSpinController {
         if (utils.IsFile(defaultDiscPath)) {
             try {
                 this.#discImgSource = gdi.Image(defaultDiscPath);
-                this.#coverImg      = gdi.Image(defaultDiscPath);
+                this.#coverImg      = this.#discImgSource ? this.#discImgSource.Clone(0, 0, this.#discImgSource.Width, this.#discImgSource.Height) : null;
                 this.#isDedicated   = true;
                 this.#isDefault     = true;
             } catch {}
@@ -2047,6 +2057,17 @@ class DiscSpinController {
     }
 
     clearTrackDisplay() {
+        this.#currentTrackPath = '';
+        this.#currentCoverPath = '';
+        this.#currentDiscPath  = '';
+        this.#currentArtKey    = '';
+        this.#currentMetaStr   = '';
+        this.#artSearchToken++;
+        this.#expectedAsyncToken = 0;
+        if (this.#pendingSearchTimer) {
+            window.ClearTimeout(this.#pendingSearchTimer);
+            this.#pendingSearchTimer = null;
+        }
         this.loadDefaultArt();
     }
 
@@ -2221,8 +2242,8 @@ class DiscSpinController {
         gr.FillSolidRect(bx, by, boxW, boxH, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 190));
         gr.DrawString(text, font, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 240), bx, by, boxW, boxH, 0x11000000);
     }
-
-    onSize() {
+	
+onSize() {
         if (this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) return;
         const w = window.Width, h = window.Height;
         if (w <= 0 || h <= 0) {
@@ -2468,32 +2489,33 @@ class DiscSpinController {
     showContextMenu(x, y) {
         const MID = DiscSpinController.MENU_ID;
 
-        const m         = window.CreatePopupMenu();
-        const discM     = window.CreatePopupMenu();
-        const speedM    = window.CreatePopupMenu();
-        const fpsM      = window.CreatePopupMenu();
-        const maskM     = window.CreatePopupMenu();
-        const interpM   = window.CreatePopupMenu();
-        const sizeM     = window.CreatePopupMenu();
-        const overlayM  = window.CreatePopupMenu();
-        const phosphorM = window.CreatePopupMenu();
-        const opacityM  = window.CreatePopupMenu();
-        const borderM   = window.CreatePopupMenu();
-        const bgM       = window.CreatePopupMenu();
-        const blurM     = window.CreatePopupMenu();
-        const darkenM   = window.CreatePopupMenu();
-        const customFM  = window.CreatePopupMenu();
-        const depthM    = window.CreatePopupMenu();
-        const presetM   = window.CreatePopupMenu();
-        const loadM     = window.CreatePopupMenu();
-        const saveM     = window.CreatePopupMenu();
-        const bzM       = window.CreatePopupMenu();
+        const menus = [];
+        const createMenu = () => {
+            const m = window.CreatePopupMenu();
+            menus.push(m);
+            return m;
+        };
 
-        const allMenus = [
-            m, discM, speedM, fpsM, maskM, interpM, sizeM, overlayM, phosphorM, 
-            opacityM, borderM, bgM, blurM, darkenM, customFM, depthM, 
-            presetM, loadM, saveM, bzM
-        ];
+        const m         = createMenu();
+        const discM     = createMenu();
+        const speedM    = createMenu();
+        const fpsM      = createMenu();
+        const maskM     = createMenu();
+        const interpM   = createMenu();
+        const sizeM     = createMenu();
+        const overlayM  = createMenu();
+        const phosphorM = createMenu();
+        const opacityM  = createMenu();
+        const borderM   = createMenu();
+        const bgM       = createMenu();
+        const blurM     = createMenu();
+        const darkenM   = createMenu();
+        const customFM  = createMenu();
+        const depthM    = createMenu();
+        const presetM   = createMenu();
+        const loadM     = createMenu();
+        const saveM     = createMenu();
+        const bzM       = createMenu();
 
         m.AppendMenuItem(0, MID.ALBUM_ART_ONLY, "Album Art Only (Static)");
         if (this.config.useAlbumArtOnly) m.CheckMenuRadioItem(MID.ALBUM_ART_ONLY, MID.ALBUM_ART_ONLY, MID.ALBUM_ART_ONLY);
@@ -2664,7 +2686,9 @@ class DiscSpinController {
         try {
             id = m.TrackPopupMenu(x, y);
         } finally {
-            allMenus.forEach(menu => { try { if (menu) menu.Dispose(); } catch {} });
+            for (const menu of menus) {
+                try { menu.Dispose(); } catch {}
+            }
         }
 
         if (id === 0) return true;

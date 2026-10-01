@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.0 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.1 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.0', 
+    version: '2.1', 
     features: { grab_focus: true } 
 });
 
@@ -104,7 +104,7 @@ class MeterConstants {
     static OPACITY_VALUE_KEYS = {
         Glow: 'glowOpacity',
         Phosphor: 'phosphorOpacity',
-        Scanlines: 'scanlineOpacity',
+        ScanlineOpacity: 'scanlineOpacity',
         Reflection: 'reflectionOpacity',
         OnSegments: 'onSegmentOpacity',
         OffSegments: 'offSegmentOpacity'
@@ -374,7 +374,7 @@ function buildGradientColourStrip(theme, span, onAlpha, style) {
                 const u = t / 0.5;
                 r = Math.round(GdiUtils.lerp(dr, br, u));
                 g = Math.round(GdiUtils.lerp(dg, bg, u));
-                b = Math.round(GdiUtils.lerp(db, db, u));
+                b = Math.round(GdiUtils.lerp(db, bb, u));
             } else {
                 const u = (t - 0.5) / 0.5;
                 r = Math.round(GdiUtils.lerp(br, txtR, u * 0.4));
@@ -435,10 +435,6 @@ class GradientStripCache {
         if (this.#map.size >= 32) {
             const oldest = this.#map.keys().next().value;
             this.#map.delete(oldest);
-            if (this.#bmpMap.has(oldest)) {
-                try { this.#bmpMap.get(oldest).Dispose(); } catch {}
-                this.#bmpMap.delete(oldest);
-            }
         }
         this.#map.set(sig, strip);
         return strip;
@@ -447,6 +443,14 @@ class GradientStripCache {
     getBitmap(theme, span, onAlpha, style, isVertical) {
         const sig = `${theme.active}|${theme.text}|${theme.warning}|${theme.subPeak}|${span}|${onAlpha}|${style}|${isVertical ? 'V' : 'H'}`;
         if (this.#bmpMap.has(sig)) return this.#bmpMap.get(sig);
+
+        // Bounded cache with explicit GDI bitmap disposal to prevent handle leaks during resize
+        if (this.#bmpMap.size >= 32) {
+            const oldestKey = this.#bmpMap.keys().next().value;
+            const evictedBmp = this.#bmpMap.get(oldestKey);
+            try { evictedBmp?.Dispose(); } catch {}
+            this.#bmpMap.delete(oldestKey);
+        }
 
         const strip = this.get(theme, span, onAlpha, style);
         const w = isVertical ? 1 : span;
@@ -1010,7 +1014,7 @@ class SpectrumAnalyzer {
     isDirty = true;
 
     constructor() {
-        const maxBars = MeterConstants.SPECTRUM_BAR_COUNTS.at(-1);
+        const maxBars = MeterConstants.SPECTRUM_BAR_COUNTS[MeterConstants.SPECTRUM_BAR_COUNTS.length - 1];
         this.levels = new Float32Array(maxBars); 
         this.peaks = new Float32Array(maxBars);
         this.peakTimes = new Float64Array(maxBars);
@@ -2326,7 +2330,7 @@ class ThemeManager {
         { name: 'Pioneer Amber',   bg: [20,12,5],     in: [117,53,8],    ac: [255,178,45],  tx: [255,233,141] },
         { name: 'Technics Green',  bg: [5,17,9],      in: [14,98,42],    ac: [80,248,128],  tx: [190,255,194] },
         { name: 'Sony ES Blue',    bg: [4,11,20],     in: [10,65,118],   ac: [68,180,255],  tx: [190,235,255] },
-        { name: 'Yamaha Ice',      bg: [8,17,19],     in: [22,99,104],   ac: [96,242,234],  tx: [205,255,251] },
+        { name: 'Yamaha Ice',      bg: [8,17,19],     in: [22,99,104],   ac: [96,242,234],  tx: [205,255,255] },
         { name: 'Kenwood Red',     bg: [22,5,5],      in: [116,19,16],   ac: [255,79,57],   tx: [255,194,177] },
         { name: 'Sansui Lime',     bg: [13,18,4],     in: [81,104,12],   ac: [196,244,52],  tx: [241,255,173] },
         { name: 'Marantz Blue',    bg: [5,9,17],      in: [30,51,133],   ac: [88,126,255],  tx: [207,220,255] },
@@ -2380,9 +2384,9 @@ class ThemeManager {
         const pack = (v) => {
             if (Array.isArray(v)) {
                 return GdiUtils.colour(
-                    GdiUtils.clamp(Number(v.at(0)) || 0, 0, 255),
-                    GdiUtils.clamp(Number(v.at(1)) || 0, 0, 255),
-                    GdiUtils.clamp(Number(v.at(2)) || 0, 0, 255)
+                    GdiUtils.clamp(Number(v[0]) || 0, 0, 255),
+                    GdiUtils.clamp(Number(v[1]) || 0, 0, 255),
+                    GdiUtils.clamp(Number(v[2]) || 0, 0, 255)
                 );
             }
             return (Number(v) >>> 0);
@@ -2404,7 +2408,7 @@ class ThemeManager {
     }
 
     get(name) { 
-        return this.themeMap.get(name) ?? this.themes.at(0); 
+        return this.themeMap.get(name) ?? this.themes[0]; 
     }
     
     names() { 
@@ -2476,7 +2480,7 @@ class ThemeManager {
         const errors = [];
 
         for (let i = 0; i < parsed.length; i++) {
-            const d = parsed.at(i);
+            const d = parsed[i];
             const valid = this.#validateThemeDef(d, i);
             if (valid !== true) { errors.push(valid); continue; }
 
@@ -2523,7 +2527,7 @@ class ThemeManager {
         const checkChannel = (name, arr) => {
             if (!Array.isArray(arr) || arr.length < 3) return `"${name}" must be an [r,g,b] array.`;
             for (let ci = 0; ci < 3; ci++) {
-                const v = arr.at(ci);
+                const v = arr[ci];
                 if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 255) return `"${name}" invalid color channel.`;
             }
             return null;
@@ -2705,7 +2709,7 @@ class MenuManager {
         if (wasInUse) {
             const fallback = (this.main.properties.lastFinalizedTheme !== name)
                 ? this.main.properties.lastFinalizedTheme
-                : (this.main.themes.themes.at(0)?.name ?? 'Pioneer Amber');
+                : (this.main.themes.themes[0]?.name ?? 'Pioneer Amber');
             this.main.properties.lastFinalizedTheme = fallback;
             this.main.themes.clearPreview();
             this.main.properties.setTheme(fallback);
@@ -3023,8 +3027,12 @@ class MenuManager {
         menu.AppendMenuItem(0, MID.RESET, 'Reset Visual Settings to Defaults');
         menu.AppendMenuItem(0, MID.FACTORY_RESET, 'Factory Reset (All Settings & Themes)...');
 
-        const selected = menu.TrackPopupMenu(x, y);
-        allMenus.forEach(m => { try { if (m) m.Dispose(); } catch {} });
+        let selected = 0;
+        try {
+            selected = menu.TrackPopupMenu(x, y);
+        } finally {
+            allMenus.forEach(m => { try { if (m) m.Dispose(); } catch {} });
+        }
 
         if (selected === 0) return true;
 
@@ -3317,7 +3325,7 @@ class MenuManager {
     #shortPath(p) {
         if (!p) return '';
         const parts = p.replace(/\\/g, '/').split('/');
-        return parts.length > 2 ? `…/${parts.at(-1)}` : p;
+        return parts.length > 2 ? `…/${parts[parts.length - 1]}` : p;
     }
 
     #doSetDefaultSavePath() {

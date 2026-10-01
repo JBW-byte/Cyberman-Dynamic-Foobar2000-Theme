@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.0    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v2.1    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('Playback Buttons Pro v2.0', { 
     author: 'L.E.D.', 
-    version: '2.0', 
+    version: '2.1', 
     features: { grab_focus: true } 
 });
 
@@ -84,6 +84,7 @@ class GdiUtils {
             } finally {
                 bmp.ReleaseGraphics(g);
             }
+            try { bmp.ApplyMask(img); } catch {}
             return bmp;
         } catch {
             if (bmp) { try { bmp.Dispose(); } catch {} }
@@ -109,6 +110,11 @@ class FontRegistry {
     }
 
     clear() {
+        for (const font of this.#cache.values()) {
+            if (font && typeof font.Dispose === 'function') {
+                try { font.Dispose(); } catch {}
+            }
+        }
         this.#cache.clear();
     }
 }
@@ -510,20 +516,20 @@ class PlayButtonsController {
     }
 
     init() {
-    this.#lifecycle = PlayButtonsController.LIFECYCLE.LIVE;
-    this.initButtons(); // Instantiates vector buttons immediately
-    this.buildLayout(window.Width, window.Height);
-    window.Repaint();
-
-    // Post-paint yield: scan directories and bake high-res bitmaps in background
-    window.SetTimeout(() => {
-        if (this.#lifecycle === PlayButtonsController.LIFECYCLE.SHUTDOWN) return;
+        this.#lifecycle = PlayButtonsController.LIFECYCLE.LIVE;
         this.loadBezel();
-        this.reloadAssets();
+        this.initButtons(); // Instantiates vector buttons immediately
         this.buildLayout(window.Width, window.Height);
         window.Repaint();
-		}, 0);
-	}
+
+        // Post-paint yield: scan directories and bake high-res bitmaps in background
+        window.SetTimeout(() => {
+            if (this.#lifecycle === PlayButtonsController.LIFECYCLE.SHUTDOWN) return;
+            this.reloadAssets();
+            this.buildLayout(window.Width, window.Height);
+            window.Repaint();
+        }, 0);
+    }
 
     #getSafeUIColour() {
         try {
@@ -1143,6 +1149,9 @@ class PlayButtonsController {
     }
 
     onFontChanged() {
+        if (this.#notifyFont?.Dispose) {
+            try { this.#notifyFont.Dispose(); } catch {}
+        }
         this.#notifyFont = null;
         this.fonts.clear();
         for (const item of this.#items) item.invalidateScaledCache();
@@ -1274,8 +1283,12 @@ class PlayButtonsController {
         m.AppendMenuItem(0, M_ID.RESET_STYLE,   'Reset Current Style to Defaults');
         m.AppendMenuItem(0, M_ID.RESET_FACTORY, 'Factory Reset (All Styles & Overlays)...');
 
-        const idx = m.TrackPopupMenu(x, y);
-        allMenus.forEach(menu => { try { menu.Dispose(); } catch {} });
+        let idx = 0;
+        try {
+            idx = m.TrackPopupMenu(x, y);
+        } finally {
+            allMenus.forEach(menu => { try { menu.Dispose(); } catch {} });
+        }
 
         if (idx === 0) return true;
 
@@ -1614,6 +1627,9 @@ class PlayButtonsController {
         if (this.#bezelBmp)      { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
         if (this.#bezelLayerBmp) { try { this.#bezelLayerBmp.Dispose(); } catch {} this.#bezelLayerBmp = null; }
         this.fonts.clear();
+        if (this.#notifyFont?.Dispose) {
+            try { this.#notifyFont.Dispose(); } catch {}
+        }
         this.#notifyFont = null;
         this.#cachedBezelImages = null;
         this.#cachedStyles = null;
