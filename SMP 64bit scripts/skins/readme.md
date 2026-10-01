@@ -45,7 +45,7 @@ Major rewrite 28 Sep 2026, Bezel and Overlay options.
 <summary><strong>DiscSpin</strong> — Updated 01 Oct 2026</summary>
 
 ### Update Overview
-Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.1
+Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.2
 
 ### Features
 
@@ -109,7 +109,7 @@ Place your custom images in the scripts/VolumeKnob folder.
 <summary><strong>PanelArt</strong> — Updated 01 Oct 2026</summary>
 
 ### Update Overview
-Major Rewrite. Bezel and Overlay support. v4.2 bug fix
+Major Rewrite. Bezel and Overlay support. v4.3 bug fix
 
 ### Features
 
