@@ -45,7 +45,7 @@ Major rewrite 28 Sep 2026, Bezel and Overlay options.
 <summary><strong>DiscSpin</strong> — Updated 01 Oct 2026</summary>
 
 ### Update Overview
-Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.2
+Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.3
 
 ### Features
 
@@ -109,7 +109,7 @@ Place your custom images in the scripts/VolumeKnob folder.
 <summary><strong>PanelArt</strong> — Updated 01 Oct 2026</summary>
 
 ### Update Overview
-Major Rewrite. Bezel and Overlay support. v4.3 bug fix
+Major Rewrite. Bezel and Overlay support. v4.4 bug fix
 
 ### Features
 
@@ -141,7 +141,7 @@ Major Rewrite. Bezel and Overlay support. v4.3 bug fix
 <summary><strong>LCD TimerPro</strong> — Updated 01 Oct 2026</summary>
 
 ### Update Overview
-Majot ReWrite. Bezel and Overlay Support. v2.2 theme sync fix, bug fix
+Majot ReWrite. Bezel and Overlay Support. v2.3 theme sync fix, bug fix
 
 ### Features
 
@@ -168,7 +168,7 @@ Majot ReWrite. Bezel and Overlay Support. v2.2 theme sync fix, bug fix
 </details>
 
 <details>
-<summary><strong>LCD Peakmeter</strong> — Updated 01 Oct 2026 V2.1</summary>
+<summary><strong>LCD Peakmeter</strong> — Updated 01 Oct 2026 V2.2</summary>
 
 ### Key Features
 * **Dual Operation Modes:** Seamlessly toggles between Stereo Peak/RMS Metering and a 10–120 band Logarithmic FFT Spectrum Analyzer.
@@ -188,7 +188,7 @@ Majot ReWrite. Bezel and Overlay Support. v2.2 theme sync fix, bug fix
 </details>
 
 <details>
-<summary><strong>The Play Buttons</strong> — Updated 01 Oct 2026 V2.1</summary>
+<summary><strong>The Play Buttons</strong> — Updated 01 Oct 2026 V2.2</summary>
 
 ### Key Features
 * **Zero-Resampling Blit Engine:** Icon textures for Idle, Hover, and Click states are pre-baked at 1:1 pixel ratios to avoid runtime resampling.
