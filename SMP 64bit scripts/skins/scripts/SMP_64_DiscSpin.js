@@ -1,6 +1,6 @@
 ﻿'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.2 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.3 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -2403,9 +2403,9 @@ onSize() {
 
     #getSafeUIColour() {
         try {
-            return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
+            return window.InstanceType === 1 ? window.GetColourDUI(0) : window.GetColourCUI(3);
         } catch {
-            return GdiUtils.RGB(25, 25, 25);
+            return GdiUtils.RGB(32, 32, 32);
         }
     }
 

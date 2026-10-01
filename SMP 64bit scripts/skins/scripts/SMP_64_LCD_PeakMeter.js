@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.1 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.2 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.1', 
+    version: '2.2', 
     features: { grab_focus: true } 
 });
 
@@ -2618,7 +2618,8 @@ class MenuManager {
             fb.ShowPopupMessage(`Color picker unavailable:\n${e.message || e}`, MeterConstants.SCRIPT_NAME);
             return;
         }
-        if (newColor === startColor) return;
+        // Corrected: ignore cancel (-1) and identical selections
+        if (newColor === -1 || newColor === startColor) return;
 
         this.main.themes.updateDraft(key, newColor);
 

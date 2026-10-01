@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.1    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v2.2    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -235,8 +235,8 @@ class PlayButton {
                 slot.down   = GdiUtils.tintImage(slot.downSrc  || slot.src, controller.config.colorDown)  || slot.downSrc  || slot.src;
             } else {
                 slot.normal = slot.src;
-                slot.hover  = slot.hoverSrc || null; // Will trigger tactile modulation in bake if null
-                slot.down   = slot.downSrc  || null; // Will trigger press-down offset in bake if null
+                slot.hover  = slot.hoverSrc || null;
+                slot.down   = slot.downSrc  || null;
             }
         }
     }
@@ -280,18 +280,17 @@ class PlayButton {
                     const g = bmp.GetGraphics();
                     g.SetInterpolationMode(7);
 
-                    // Tactile visual modulation if button pack lacks dedicated hover/down images and tint is off
                     let opacity = 255;
                     let offX = 0, offY = 0;
 
                     if (!controller.config.useTint) {
                         if (key === 'normal' && !hasDedicatedHover) {
-                            opacity = 215; // Softened idle opacity so hover responds dynamically
+                            opacity = 215;
                         } else if (key === 'hover') {
-                            opacity = 255; // Full brightness on hover
+                            opacity = 255;
                         } else if (key === 'down' && !hasDedicatedDown) {
                             opacity = 255;
-                            offX = Math.max(1, controller.scale(1)); // Tactile press-down offset
+                            offX = Math.max(1, controller.scale(1));
                             offY = Math.max(1, controller.scale(1));
                         }
                     }
@@ -321,7 +320,6 @@ class PlayButton {
             bakeSlot(this.#sourceSlots.alternate, this.#scaledSlots.alternate);
         }
 
-        // Pre-bake vector fallback if icon bitmaps are missing
         if (!hasPrimary) {
             this.#bakeFallbackSprites(controller);
         }
@@ -365,10 +363,8 @@ class PlayButton {
             }
         };
 
-        // Render primary glyph
         renderGlyphs(glyphMap[this.id] || '', this.#scaledSlots.fallback);
 
-        // For play button, also pre-bake pause glyph into alternate fallback slot
         if (this.id === 'play') {
             renderGlyphs(glyphMap.pause, this.#scaledSlots.fallbackAlternate);
         }
@@ -396,7 +392,6 @@ class PlayButton {
         }
 
         if (bakedImg && bakedImg.Width > 0 && bakedImg.Height > 0) {
-            // High-speed 1:1 blit (Zero runtime resampling overhead)
             gr.DrawImage(bakedImg, this.x, this.y, this.w, this.h, 0, 0, this.w, this.h, 0, 255);
         }
     }
@@ -464,8 +459,8 @@ class PlayButtonsController {
         colorNormal:   GdiUtils.RGB(255, 255, 255),
         colorHover:    GdiUtils.RGB(150, 150, 150),
         colorDown:     GdiUtils.RGB(100, 100, 100),
-        useBgColor:    false,
-        bgColor:       GdiUtils.RGB(20, 20, 20),
+        useBgColor:    true,                     // Background enabled by default
+        bgColor:       GdiUtils.RGB(32, 32, 32), // Default 32, 32, 32
         buttonStyle:   '',
         padLeft:       4,
         padRight:      4,
@@ -518,11 +513,10 @@ class PlayButtonsController {
     init() {
         this.#lifecycle = PlayButtonsController.LIFECYCLE.LIVE;
         this.loadBezel();
-        this.initButtons(); // Instantiates vector buttons immediately
+        this.initButtons();
         this.buildLayout(window.Width, window.Height);
         window.Repaint();
 
-        // Post-paint yield: scan directories and bake high-res bitmaps in background
         window.SetTimeout(() => {
             if (this.#lifecycle === PlayButtonsController.LIFECYCLE.SHUTDOWN) return;
             this.reloadAssets();
@@ -533,9 +527,10 @@ class PlayButtonsController {
 
     #getSafeUIColour() {
         try {
+            // DUI: 1 = Background, 0 = Text. CUI: 3 = Background, 0 = Text.
             return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
         } catch {
-            return GdiUtils.RGB(25, 25, 25);
+            return GdiUtils.RGB(32, 32, 32);
         }
     }
 
@@ -731,9 +726,6 @@ class PlayButtonsController {
         return suffix ? '' : `${this.buttonsBaseDir}${baseName}.png`;
     }
 
-    // ========================================================================================
-    // BUTTON MANAGER INTEGRATION
-    // ========================================================================================
     initButtons() {
         this.clearButtons();
         this.#items = [
@@ -862,9 +854,6 @@ class PlayButtonsController {
         window.RepaintRect(btn.x, btn.y, btn.w, btn.h);
     }
 
-    // ========================================================================================
-    // BEZEL / OVERLAY ENGINE
-    // ========================================================================================
     getBezelImages(forceReload = false) {
         const cleanFolder = GdiUtils.sanitizePath(this.config.bezelFolder);
         if (!cleanFolder || !utils.IsDirectory(cleanFolder)) {
@@ -1039,9 +1028,6 @@ class PlayButtonsController {
         window.Repaint();
     }
 
-    // ========================================================================================
-    // SMP EVENT DELEGATION
-    // ========================================================================================
     onPaint(gr) {
         if (this.#lifecycle !== PlayButtonsController.LIFECYCLE.LIVE || !gr || window.Width <= 0 || window.Height <= 0) return;
 
@@ -1054,7 +1040,6 @@ class PlayButtonsController {
         for (const item of this.#items) item.draw(gr);
 
         if (this.config.bezelEnabled && this.#bezelLayerBmp) {
-            // High-speed 1:1 blit of pre-scaled bezel overlay
             gr.DrawImage(this.#bezelLayerBmp, 0, 0, window.Width, window.Height, 0, 0, window.Width, window.Height, 0, 255);
         }
 
@@ -1160,9 +1145,6 @@ class PlayButtonsController {
         window.Repaint();
     }
 
-    // ========================================================================================
-    // CONTEXT MENU BUILDER & DISPATCH
-    // ========================================================================================
     showContextMenu(x, y) {
         const m   = window.CreatePopupMenu();
         const v   = window.CreatePopupMenu();
@@ -1445,7 +1427,7 @@ class PlayButtonsController {
                 if (this.config.useTint) {
                     const picked = utils.ColourPicker(window.ID, this.config.colorNormal);
                     if (picked !== -1 && picked !== this.config.colorNormal) {
-                        this.config.colorNormal = picked >>> 0;
+                        this.config.colorNormal = (picked | 0xFF000000) >>> 0;
                         window.SetProperty('Colors: Normal', this.config.colorNormal);
                         this.reloadAssets();
                         changed = true;
@@ -1458,7 +1440,7 @@ class PlayButtonsController {
                 if (this.config.useTint) {
                     const picked = utils.ColourPicker(window.ID, this.config.colorHover);
                     if (picked !== -1 && picked !== this.config.colorHover) {
-                        this.config.colorHover = picked >>> 0;
+                        this.config.colorHover = (picked | 0xFF000000) >>> 0;
                         window.SetProperty('Colors: Hover', this.config.colorHover);
                         this.reloadAssets();
                         changed = true;
@@ -1471,7 +1453,7 @@ class PlayButtonsController {
                 if (this.config.useTint) {
                     const picked = utils.ColourPicker(window.ID, this.config.colorDown);
                     if (picked !== -1 && picked !== this.config.colorDown) {
-                        this.config.colorDown = picked >>> 0;
+                        this.config.colorDown = (picked | 0xFF000000) >>> 0;
                         window.SetProperty('Colors: Down', this.config.colorDown);
                         this.reloadAssets();
                         changed = true;
@@ -1490,7 +1472,7 @@ class PlayButtonsController {
                 if (this.config.useBgColor) {
                     const picked = utils.ColourPicker(window.ID, this.config.bgColor);
                     if (picked !== -1 && picked !== this.config.bgColor) {
-                        this.config.bgColor = picked >>> 0;
+                        this.config.bgColor = (picked | 0xFF000000) >>> 0;
                         window.SetProperty('Colors: Background', this.config.bgColor);
                         changed = true;
                     }

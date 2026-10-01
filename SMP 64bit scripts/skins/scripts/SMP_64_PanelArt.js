@@ -1,6 +1,6 @@
 ﻿'use strict';
 		   // ============== AUTHOR L.E.D. ============== \\
-		  // ==-== Panel Artwork and Trackinfo v4.3  ==-== \\
+		  // ==-== Panel Artwork and Trackinfo v4.4  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,7 +16,7 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.3',
+    version: '4.4',
     features: { grab_focus: true } 
 });
 
@@ -1475,9 +1475,9 @@ refreshColours() {
     #getSafeUIColour() {
         try {
             // Corrected: DUI background is 0 (1 is text). CUI background is 3.
-            return window.InstanceType === 1 ? window.GetColourDUI(0) : window.GetColourCUI(3);
+            return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
         } catch {
-            return GdiUtils.RGB(25, 25, 25);
+            return GdiUtils.RGB(32, 32, 32);
         }
     }
 

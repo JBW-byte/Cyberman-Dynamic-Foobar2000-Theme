@@ -1,7 +1,6 @@
 'use strict';
-
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.2 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.3 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +16,7 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.2', 
+    version: '2.3', 
     features: { grab_focus: true } 
 });
 
@@ -83,7 +82,7 @@ window.MinWidth  = GdiUtils.scale(120);
 window.MinHeight = GdiUtils.scale(36);
 
 // ============================================================================================
-// 2. FONT MANAGEMENT (LRU CACHED WITH DEFENSIVE DISPOSAL)
+// 2. FONT MANAGEMENT (LRU CACHED WITH PROBE DISPOSAL)
 // ============================================================================================
 class FontRegistry {
     #cache = new Map();
@@ -131,12 +130,23 @@ class FontRegistry {
         let high = Math.max(minBound, Math.round(startSize));
         let best = minBound;
         const testText = text && text.trim().length > 0 ? text : '-88:88';
+        const name = (typeof fontName === 'string' && fontName.trim().length > 0) ? fontName.trim() : 'Segoe UI';
 
         while (low <= high) {
             const mid = (low + high) >>> 1;
-            const font = this.get(fontName, mid, fontStyle);
-            if (!font) { high = mid - 1; continue; }
-            const m = gr.MeasureString(testText, font, 0, 0, 9999, 9999);
+            let tempFont = null;
+            try { 
+                tempFont = gdi.Font(name, mid, fontStyle); 
+            } catch { 
+                tempFont = gdi.Font('Segoe UI', mid, fontStyle); 
+            }
+            if (!tempFont) { high = mid - 1; continue; }
+
+            const m = gr.MeasureString(testText, tempFont, 0, 0, 9999, 9999);
+            if (tempFont && typeof tempFont.Dispose === 'function') {
+                try { tempFont.Dispose(); } catch {}
+            }
+
             if (m.Width <= maxW && m.Height <= maxH) {
                 best = mid;
                 low = mid + 1;
@@ -423,7 +433,7 @@ class DigitSpriteCache {
                     gg.DrawString(ghostCh, font, ghostCol, margin, margin, w + 2, h + 2);
                     gBmp.ReleaseGraphics(gg);
                     gg = null;
-                    this.#ghostSprites.set(ch, { bmp: gBmp, w, h, bmpW, bmpH, margin });
+                    this.#ghostSprites.set(ch, { bmp: gBmp, w: h, bmpW, bmpH, margin });
                 } catch {
                     if (gg && gBmp) { try { gBmp.Dispose(); } catch {} }
                     if (gBmp) { try { gBmp.Dispose(); } catch {} }
@@ -676,7 +686,7 @@ class LcdBackplateEngine {
 }
 
 // ============================================================================================
-// 6. MAIN CONTROLLER & STATE MANAGEMENT (PART 2)
+// 6. MAIN CONTROLLER & STATE MANAGEMENT (PART 1 OF CONTROLLER)
 // ============================================================================================
 class LcdTimerController {
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
@@ -1326,11 +1336,9 @@ class LcdTimerController {
             }));
 
         } else {
-            // Pre-calculate Play/Pause status icon footprint first so text boundary can reserve room
             if (this.config.playIconType > 0) {
                 const fontName = LcdTimerController.ICON_FONTS[this.config.playIconType];
                 if (fontName && LcdTimerController.ICON_CHARS[fontName]) {
-                    // Scaled up to ~34% (min 18px, max 52px) for bolder presence
                     const iconSizePx = GdiUtils.clamp(Math.round(lo.dh * 0.34), 18, 52);
                     lo.iconFont = this.#fonts.get(fontName, iconSizePx);
                     if (lo.iconFont) {
@@ -1349,11 +1357,9 @@ class LcdTimerController {
                 lo.iconH = 0;
             }
 
-            // Reserve horizontal right clearance if icon is visible so text will never collide with it
             const rightReserved = (this.config.playIconType > 0 && lo.iconW > 0) ? (lo.iconW + this.scale(14)) : 0;
             const textAvailW = Math.max(10, availW - rightReserved);
 
-            // True top-half budget constraint (52% max) prevents title from pushing into the lower half
             const topAvailH = Math.max(16, Math.floor(lo.dh * 0.52));
             const bothLines = this.config.showM1Title && this.config.showM1Album;
 
@@ -1411,8 +1417,8 @@ class LcdTimerController {
 
         this.#dirtyFlags &= ~LcdTimerController.DIRTY.LAYOUT;
     }
-
-    onPaint(gr) {
+	
+onPaint(gr) {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || !window.IsVisible) return;
         const w = window.Width;
         const h = window.Height;
@@ -1710,6 +1716,9 @@ class LcdTimerController {
         this.#btnFlash = true;
         this.#codecFlash = true;
         this.#blinkTarget = null;
+        if (!fb.IsPlaying && !fb.IsPaused) {
+            this.#lastTimeStr = '';
+        }
     }
 
     onSize() {
@@ -1867,7 +1876,7 @@ class LcdTimerController {
             this.startTimers();
             window.Repaint();
         } catch (err) {
-            console.log(new Error(`Failed to load preset ${slot}`, { cause: err }));
+            console.log(`Failed to load preset ${slot}: ${err}`);
         }
     }
 
@@ -1889,7 +1898,6 @@ class LcdTimerController {
 
         const MID = LcdTimerController.MENU_ID;
 
-        // Auto-tracking menu factory ensures every native instance is disposed
         const menus = [];
         const createMenu = () => {
             const m = window.CreatePopupMenu();
@@ -2098,7 +2106,7 @@ class LcdTimerController {
         } else if (id === MID.CUST_LCD_COLOR) {
             const c = utils.ColourPicker(window.ID, this.config.custLcd);
             if (c !== -1) { 
-                this.config.custLcd = c >>> 0; 
+                this.config.custLcd = (c | 0xFF000000) >>> 0; 
                 this.config.themeIdx = LcdTimerController.THEMES.length; 
                 this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
                 this.#backplate.invalidate(); 
@@ -2108,7 +2116,7 @@ class LcdTimerController {
         } else if (id === MID.CUST_BG_COLOR) {
             const c = utils.ColourPicker(window.ID, this.config.custBg);
             if (c !== -1) { 
-                this.config.custBg = c >>> 0; 
+                this.config.custBg = (c | 0xFF000000) >>> 0; 
                 this.config.themeIdx = LcdTimerController.THEMES.length; 
                 this.#dirtyFlags |= LcdTimerController.DIRTY.BACKPLATE;
                 this.#backplate.invalidate(); 
@@ -2116,7 +2124,7 @@ class LcdTimerController {
         } else if (id === MID.CUST_BORDER_COLOR || id === MID.BORDER_CUSTOM_SETUP) {
             const c = utils.ColourPicker(window.ID, this.config.custBorder);
             if (c !== -1) { 
-                this.config.custBorder = c >>> 0; 
+                this.config.custBorder = (c | 0xFF000000) >>> 0; 
                 this.config.useCustomBorder = true; 
                 this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
                 this.#backplate.invalidate(); 
@@ -2360,7 +2368,7 @@ class LcdTimerController {
     onNotifyData(name, info) {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
         if (name === 'LcdThemeSync' && typeof info === 'string') {
-            if (!this.config.syncTheme) return; // Verified: correctly respects toggle
+            if (!this.config.syncTheme) return;
             this.setThemeByName(info, false);
         }
     }
