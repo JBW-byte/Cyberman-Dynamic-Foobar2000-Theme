@@ -1,9 +1,8 @@
 ﻿'use strict';
-
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.1 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.2 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
- 
+
     // ===================*** Foobar2000 64bit ***================== \\
    // ======= For Spider Monkey Panel 64bit, author: marc2003 ======= \\
   // ====== Masking All Images, Creates a Disc from Album Art+  ====== \\
@@ -19,7 +18,7 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { 
     author: 'L.E.D.', 
-    version: '5.1',
+    version: '5.2',
     features: { grab_focus: true } 
 });
 
@@ -85,9 +84,9 @@ class GdiUtils {
         else if (h < 240) { r = 0; g = x; b = c; }
         else if (h < 300) { r = x; g = 0; b = c; }
         else              { r = c; g = 0; b = x; }
-        return (alpha << 24) | (Math.round((r + m) * 255) << 16)
-                            | (Math.round((g + m) * 255) << 8)
-                            | Math.round((b + m) * 255);
+        return ((alpha << 24) | (Math.round((r + m) * 255) << 16)
+                      | (Math.round((g + m) * 255) << 8)
+                      | Math.round((b + m) * 255)) >>> 0;
     }
 
     static prompt(promptText, titleText, defaultVal) {
@@ -2378,7 +2377,7 @@ onSize() {
             this.#needsFullRepaint = true;
             window.Repaint();
         } catch (err) {
-            console.log(new Error(`Failed to load preset ${slot}`, { cause: err }));
+            console.log(`Failed to load preset ${slot}: ${err}`);
         }
     }
 

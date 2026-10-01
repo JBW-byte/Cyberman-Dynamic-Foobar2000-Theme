@@ -1,7 +1,6 @@
 ﻿'use strict';
-
-           // ============== AUTHOR L.E.D. ============== \\
-          // ==-== Panel Artwork and Trackinfo v4.2  ==-== \\
+		   // ============== AUTHOR L.E.D. ============== \\
+		  // ==-== Panel Artwork and Trackinfo v4.3  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +16,7 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.2',
+    version: '4.3',
     features: { grab_focus: true } 
 });
 
@@ -77,7 +76,7 @@ class GdiUtils {
 }
 
 // ============================================================================================
-// 2. FONT MANAGEMENT (LRU CACHED WITH DEFENSIVE DISPOSAL)
+// 2. FONT MANAGEMENT (LRU CACHED WITH TRANSIENT PROBE DISPOSAL)
 // ============================================================================================
 class FontRegistry {
     #cache = new Map();
@@ -118,11 +117,22 @@ class FontRegistry {
         let high = Math.max(minBound, Math.round(startSize));
         let best = minBound;
         const testText = text && text.trim().length > 0 ? text : 'Sample Text';
+        const name = (typeof fontName === 'string' && fontName.trim().length > 0) ? fontName : 'Segoe UI';
 
         while (low <= high) {
             const mid = (low + high) >>> 1;
-            const font = this.get(fontName, mid, fontStyle);
-            const m = gr.MeasureString(testText, font, 0, 0, 10000, 10000);
+            let tempFont = null;
+            try {
+                tempFont = gdi.Font(name, mid, fontStyle);
+            } catch {
+                tempFont = gdi.Font('Segoe UI', mid, fontStyle);
+            }
+
+            const m = gr.MeasureString(testText, tempFont, 0, 0, 10000, 10000);
+            if (tempFont && typeof tempFont.Dispose === 'function') {
+                try { tempFont.Dispose(); } catch {}
+            }
+
             if (m.Width <= maxW && m.Height <= maxH) {
                 best = mid;
                 low = mid + 1;
@@ -165,7 +175,6 @@ class ArtScanner {
 
     getArtworkIdentityKey(trackDir, album, disc, titleOrPath = '') {
         const alb = (album || '').trim().toLowerCase();
-        // If there is no album tag, use title or path so tracks in compilation/singles folders don't collide
         const fallback = alb ? '' : `|${(titleOrPath || '').trim().toLowerCase()}`;
         return `${trackDir || ''}|${alb}|${(disc || '').trim().toLowerCase()}${fallback}`;
     }
@@ -656,7 +665,7 @@ class VisualBackdrop {
 }
 
 // ============================================================================================
-// 5. MAIN CONTROLLER & APPLICATION ENGINE
+// 5. MAIN CONTROLLER & APPLICATION ENGINE (PART 1)
 // ============================================================================================
 class PanelArtController {
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
@@ -785,7 +794,6 @@ class PanelArtController {
     #dpiScale  = 1;
     #dirtyFlags = PanelArtController.DIRTY.ALL;
 
-    // Unified Generation Architecture: Completely eliminates race conditions
     #artGenerationToken = 0;
     #asyncArtToken      = 0;
     #pendingSearchTimer = null;
@@ -894,16 +902,13 @@ class PanelArtController {
     }
 
     init() {
-        // Stage 1: Explicit Initialization Stage
         this.#lifecycle = PanelArtController.LIFECYCLE.INIT;
         this.loadBezel();
         this.#rebuildOverlay();
 
-        // Stage 2: Promoted to LIVE before scheduling async work
         this.#lifecycle = PanelArtController.LIFECYCLE.LIVE;
         window.Repaint();
 
-        // Stage 3: Post-paint yield: Start runtime services safely
         window.SetTimeout(() => {
             if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
             if (this.config.slideMode) {
@@ -1288,8 +1293,8 @@ class PanelArtController {
         this.#rebuildBackground();
         window.Repaint();
     }
-
-    refreshColours() {
+	
+refreshColours() {
         if (this.config.bgUseUIColor) {
             this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
             this.#rebuildBackground();
@@ -1340,7 +1345,7 @@ class PanelArtController {
         this.#currentCoverPath = '';
         this.#currentArtKey    = '';
         this.#artGenerationToken++;
-        this.#asyncArtToken = 0; // Discard any pending GetAlbumArtAsync callbacks
+        this.#asyncArtToken = 0;
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
@@ -1469,7 +1474,8 @@ class PanelArtController {
 
     #getSafeUIColour() {
         try {
-            return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
+            // Corrected: DUI background is 0 (1 is text). CUI background is 3.
+            return window.InstanceType === 1 ? window.GetColourDUI(0) : window.GetColourCUI(3);
         } catch {
             return GdiUtils.RGB(25, 25, 25);
         }
@@ -1606,8 +1612,8 @@ class PanelArtController {
             window.Repaint();
         }
     }
-	
-	// ========================================================================================
+
+    // ========================================================================================
     // PAINT PIPELINE & PRE-BAKED COMPOSITE TYPOGRAPHY
     // ========================================================================================
     onPaint(gr) {
@@ -2002,11 +2008,6 @@ class PanelArtController {
         bezelM.AppendMenuSeparator();
         bezelM.AppendMenuItem(0, MID.BEZEL_FOLDER, "Set Bezel Folder...");
         bezelM.AppendMenuItem(0, MID.BEZEL_RELOAD, "Reload Bezel List");
-        bezelM.AppendMenuSeparator();
-        bezelM.AppendMenuItem(0, MID.PAD_LEFT, `Left Padding... (${this.config.padLeft}px)`);
-        bezelM.AppendMenuItem(0, MID.PAD_RIGHT, `Right Padding... (${this.config.padRight}px)`);
-        bezelM.AppendMenuItem(0, MID.PAD_TOP, `Top Padding... (${this.config.padTop}px)`);
-        bezelM.AppendMenuItem(0, MID.PAD_BOTTOM, `Bottom Padding... (${this.config.padBottom}px)`);
         bezelM.AppendTo(m, 0, "Bezel / Overlay");
         m.AppendMenuSeparator();
 
@@ -2478,7 +2479,6 @@ class PanelArtController {
             return;
         }
 
-        // Generation Check: Reject callbacks that resolved after a newer track started
         if (!this.#asyncArtToken || this.#asyncArtToken !== this.#artGenerationToken) {
             if (image) { try { image.Dispose(); } catch {} }
             return;
