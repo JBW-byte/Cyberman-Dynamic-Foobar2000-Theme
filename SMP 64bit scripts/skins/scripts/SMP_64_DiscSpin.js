@@ -2403,7 +2403,7 @@ onSize() {
 
     #getSafeUIColour() {
         try {
-            return window.InstanceType === 1 ? window.GetColourDUI(0) : window.GetColourCUI(3);
+            return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
         } catch {
             return GdiUtils.RGB(32, 32, 32);
         }
