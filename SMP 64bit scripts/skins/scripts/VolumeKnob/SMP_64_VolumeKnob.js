@@ -1,7 +1,7 @@
 'use strict';
 
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V4.0  ========\\
+		 // ========  SMP 64bit Volume Knob V4.1  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('Volume Knob Omni v4.0', { 
     author: 'L.E.D.', 
-    version: '4.0',
+    version: '4.1',
     features: { grab_focus: true } 
 });
 
@@ -225,7 +225,37 @@ class ThemeManager {
         { name: 'Satin Silver',    bg: [180, 180, 185], knob: [220, 220, 225], inner: [190, 190, 195], tick: [100, 100, 100], marker: [255, 60, 60],   settings: { bgMode: VolumeConstants.BG_MODE.SATIN, dialMode: VolumeConstants.DIAL_MODE.SOLID } },
         { name: 'Satin Bronze',    bg: [110, 90, 75],   knob: [140, 115, 95],  inner: [120, 95, 80],   tick: [220, 200, 180], marker: [255, 220, 150], settings: { bgMode: VolumeConstants.BG_MODE.SATIN, dialMode: VolumeConstants.DIAL_MODE.BEADBLAST } },
         { name: 'Studio Console',  bg: [26, 28, 32],    knob: [48, 54, 62],    inner: [36, 44, 52],    tick: [170, 185, 200], marker: [255, 70, 70],   settings: { dialMode: VolumeConstants.DIAL_MODE.KNURLED, markerStyle: VolumeConstants.MARKER_STYLE.SHORT } },
-        { name: 'Vintage Hi-Fi',   bg: [30, 28, 25],    knob: [88, 82, 70],    inner: [115, 108, 95],  tick: [210, 195, 160], marker: [255, 120, 45],  settings: { bgMode: VolumeConstants.BG_MODE.BRUSHED, dialMode: VolumeConstants.DIAL_MODE.CONCENTRIC } },
+         { 
+            name: 'Studio Console 1707', 
+            bg: [26, 28, 32], 
+            knob: [48, 54, 62], 
+            inner: [36, 44, 52], 
+            tick: [170, 185, 200], 
+            marker: [255, 70, 70], 
+            settings: { 
+                bgMode: VolumeConstants.BG_MODE.SANDBLAST, 
+                customBgImage: '', 
+                dialMode: VolumeConstants.DIAL_MODE.SOLID, 
+                customDialImage: 'Moonwalker.jpg', 
+                spinDialImage: false, 
+                showHighlight: false, 
+                dialLightStyle: VolumeConstants.LIGHT_STYLE.SPOTLIGHT, 
+                dialLightStrength: 89, 
+                dialLightAngle: 180, 
+                showDropShadow: true, 
+                showOuterRing: true, 
+                showTicks: true, 
+                tickStyle: VolumeConstants.TICK_STYLE.MIN_MAX, 
+                majorTickInterval: VolumeConstants.MAJOR_INTERVAL.MIN_MID_MAX, 
+                tickMargin: 0, 
+                tickSizeBonus: 0, 
+                showDialMarker: true, 
+                markerStyle: VolumeConstants.MARKER_STYLE.LINE, 
+                sweepRange: 280, 
+                volumeScalingMode: 0 
+            } 
+        },
+		{ name: 'Vintage Hi-Fi',   bg: [30, 28, 25],    knob: [88, 82, 70],    inner: [115, 108, 95],  tick: [210, 195, 160], marker: [255, 120, 45],  settings: { bgMode: VolumeConstants.BG_MODE.BRUSHED, dialMode: VolumeConstants.DIAL_MODE.CONCENTRIC } },
         { name: 'Accuphase Gold',  bg: [32, 28, 24],    knob: [95, 88, 72],    inner: [125, 118, 98],  tick: [230, 210, 160], marker: [255, 60, 60],   settings: { bgMode: VolumeConstants.BG_MODE.SATIN, dialMode: VolumeConstants.DIAL_MODE.BEADBLAST } },
         
         // --- 5 Built-in Pastel Color Themes ---
@@ -741,14 +771,18 @@ class PropertyManager {
             if (has('tickSizeBonus')) this.set('tickSizeBonus', this.clampInt(s.tickSizeBonus, 0, 100));
             if (has('showDialMarker')) this.set('showDialMarker', this.parseBool(s.showDialMarker));
             if (has('markerStyle')) this.set('markerStyle', this.clampInt(s.markerStyle, 0, 7));
-            if (has('sweepRange')) this.set('sweepRange', this.clampInt(s.sweepRange, 270, 300)); 
+            if (has('sweepRange')) {
+                const range = this.clampInt(s.sweepRange, 270, 300);
+                this.set('sweepRange', range);
+                VolumeConfig.sweepRangeDeg = range;
+            }
             if (has('volumeScalingMode')) this.set('volumeScalingMode', this.clampInt(s.volumeScalingMode, 0, 1));
         } finally {
             this.endBatch();
         }
     }
 
-    setTheme(name, themeManager, restoreThemeSettings = true) {
+    setTheme(name, themeManager, restoreThemeSettings = true, state = null) {
         if (name !== '~Preview' && name !== 'Custom') {
             this.lastFinalizedTheme = name;
             const t = themeManager.get(name);
@@ -757,7 +791,13 @@ class PropertyManager {
         this.set('theme', name);
         if (restoreThemeSettings) {
             const t = themeManager.get(name);
-            if (t && t.settings) this.applySettings(t.settings);
+            if (t && t.settings) {
+                this.applySettings(t.settings);
+                if (state) {
+                    state.invalidateGeometry();
+                    VolumeEngine.syncFromFoobar(state, this.values);
+                }
+            }
         }
     }
 
@@ -1570,6 +1610,7 @@ class HudManager {
     static getFont(sizePt = 11, bold = false) {
         const s = GdiUtils.scale(sizePt);
         if (!this.#font || this.#fontScale !== s) {
+            this.invalidateFont();
             this.#fontScale = s;
             try { 
                 this.#font = gdi.Font('Segoe UI', s, bold ? 1 : 0); 
@@ -1621,6 +1662,9 @@ class HudManager {
     }
 
     static invalidateFont() {
+        if (this.#font?.Dispose) {
+            try { this.#font.Dispose(); } catch {}
+        }
         this.#font = null;
         this.#fontScale = 0;
     }
@@ -1877,20 +1921,24 @@ class SceneCache {
                     let tinyFont = null;
                     try { tinyFont = gdi.Font('Segoe UI', fontSize, 1); } catch {}
                     if (tinyFont) {
-                        g.SetTextRenderingHint(4);
-                        const textDist = rBase + span + Math.max(4, Math.round(fontSize * 0.85));
-                        const xOffset = Math.max(4, Math.round(fontSize * 0.8)); 
+                        try {
+                            g.SetTextRenderingHint(4);
+                            const textDist = rBase + span + Math.max(4, Math.round(fontSize * 0.85));
+                            const xOffset = Math.max(4, Math.round(fontSize * 0.8)); 
 
-                        const txMin = (cx + Math.sin(aMin) * textDist) - xOffset;
-                        const tyMin = cy - Math.cos(aMin) * textDist;
+                            const txMin = (cx + Math.sin(aMin) * textDist) - xOffset;
+                            const tyMin = cy - Math.cos(aMin) * textDist;
 
-                        const txMax = (cx + Math.sin(aMax) * textDist) + xOffset;
-                        const tyMax = cy - Math.cos(aMax) * textDist;
+                            const txMax = (cx + Math.sin(aMax) * textDist) + xOffset;
+                            const tyMax = cy - Math.cos(aMax) * textDist;
 
-                        const szMin = g.MeasureString("MIN", tinyFont, 0, 0, 500, 200);
-                        const szMax = g.MeasureString("MAX", tinyFont, 0, 0, 500, 200);
-                        g.DrawString("MIN", tinyFont, theme.tick, txMin - szMin.Width / 2, tyMin - szMin.Height / 2, szMin.Width, szMin.Height);
-                        g.DrawString("MAX", tinyFont, theme.tick, txMax - szMax.Width / 2, tyMax - szMax.Height / 2, szMax.Width, szMax.Height);
+                            const szMin = g.MeasureString("MIN", tinyFont, 0, 0, 500, 200);
+                            const szMax = g.MeasureString("MAX", tinyFont, 0, 0, 500, 200);
+                            g.DrawString("MIN", tinyFont, theme.tick, txMin - szMin.Width / 2, tyMin - szMin.Height / 2, szMin.Width, szMin.Height);
+                            g.DrawString("MAX", tinyFont, theme.tick, txMax - szMax.Width / 2, tyMax - szMax.Height / 2, szMax.Width, szMax.Height);
+                        } finally {
+                            try { tinyFont.Dispose(); } catch {}
+                        }
                     }
                     
                 } else if (props.tickStyle === VolumeConstants.TICK_STYLE.DOT_ARC) {
@@ -2601,7 +2649,6 @@ class ContextMenuManager {
                 const randOther = otherThemes[rand(0, otherThemes.length - 1)];
                 this.controller.themes.seedDraftFromTheme(this.controller.themes.get(chosen));
                 
-                // Use updateDraft so the new discrete outer ring color is saved to properties immediately
                 this.controller.themes.updateDraft('knob', randOther.knob);
                 
                 const t = this.controller.themes.makeTheme(
@@ -2619,7 +2666,12 @@ class ContextMenuManager {
                 this.controller.themes.clearPreview();
                 this.controller.properties.setTheme(chosen, this.controller.themes, false);
             }
-        }
+			} else {
+            // Apply the randomly picked theme for the standard 70% branch
+            this.controller.themes.clearPreview();
+            this.controller.properties.setTheme(chosen, this.controller.themes, false);
+			}
+        
 
         const availableBgModes = [0, 1, 2, 3];
         this.controller.properties.set('bgMode', availableBgModes[rand(0, availableBgModes.length - 1)]);
@@ -2728,7 +2780,7 @@ class ContextMenuManager {
     #shortPath(p) {
         if (!p) return '';
         const parts = p.replace(/\\/g, '/').split('/');
-        return parts.length > 2 ? `…/${parts.at(-1)}` : p;
+        return parts.length > 2 ? `…/${parts[parts.length - 1]}` : p;
     }
 
     show(x, y) {
@@ -3450,6 +3502,9 @@ class VolumeKnobController {
     onFontChanged() {
         if (this.#panelState === VolumeConstants.LIFECYCLE.LIVE) {
             HudManager.invalidateFont();
+            if (this.#notifyFont?.Dispose) {
+                try { this.#notifyFont.Dispose(); } catch {}
+            }
             this.#notifyFont = null;
             this.state.requestRepaint();
         }
@@ -3592,7 +3647,7 @@ class VolumeKnobController {
         return false;
     }
 
-    dispose() {
+     dispose() {
         this.#panelState = VolumeConstants.LIFECYCLE.SHUTDOWN;
         if (this.#notifyTimeout) window.ClearTimeout(this.#notifyTimeout);
         this.properties.persistSync(this.themes);
@@ -3600,7 +3655,13 @@ class VolumeKnobController {
         this.sceneCache.cleanup(this.bgRenderer, this.dialRenderer);
         this.assetManager.clear();
         HudManager.clearTimer();
+        HudManager.invalidateFont();
+        if (this.#notifyFont?.Dispose) {
+            try { this.#notifyFont.Dispose(); } catch {}
+        }
+        this.#notifyFont = null;
     }
+	
 }
 
 // ============================================================================================
