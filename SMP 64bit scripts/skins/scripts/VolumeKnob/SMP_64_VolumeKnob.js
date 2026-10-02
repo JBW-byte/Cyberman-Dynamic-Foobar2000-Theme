@@ -1,7 +1,7 @@
 'use strict';
 
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V4.1  ========\\
+		 // ========  SMP 64bit Volume Knob V4.2  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('Volume Knob Omni v4.0', { 
     author: 'L.E.D.', 
-    version: '4.1',
+    version: '4.2',
     features: { grab_focus: true } 
 });
 
@@ -142,6 +142,7 @@ class VolumeConstants {
 
     static PROFILE_BASE = this.getProfilePath();
     static IMG_DIR = `${this.PROFILE_BASE}skins\\scripts\\VolumeKnob\\`;
+    static DEFAULT_THEME_FILE = `${this.PROFILE_BASE}volumeknob_config.json`;
 }
 
 // ============================================================================================
@@ -603,7 +604,7 @@ class PropertyManager {
     
     keys = {
         theme:              'VolumeKnob.ThemeName',
-        customThemeFile:    'VolumeKnob.CustomThemeFile',
+        customThemeFile:    'VolumeKnob.ThemeFilePath',
         bgMode:             'VolumeKnob.BgMode',
         customBgImage:      'VolumeKnob.CustomBgImage',
         dialMode:           'VolumeKnob.DialMode',
@@ -628,7 +629,7 @@ class PropertyManager {
 
     defaults = {
         theme:              'Classic Gray',
-        customThemeFile:    `${VolumeConstants.PROFILE_BASE}volumeknob_config.json`,
+        customThemeFile:    VolumeConstants.DEFAULT_THEME_FILE,
         bgMode:             VolumeConstants.BG_MODE.SOLID,
         customBgImage:      '',
         dialMode:           VolumeConstants.DIAL_MODE.SOLID,
@@ -667,9 +668,16 @@ class PropertyManager {
         let storedDial = String(window.GetProperty(this.keys.customDialImage, this.defaults.customDialImage)).trim().replace(/(^"|"$)/g, '');
         if (storedDial.includes('\\')) storedDial = storedDial.substring(storedDial.lastIndexOf('\\') + 1);
 
+        let storedThemeFile = GdiUtils.sanitizePath(String(window.GetProperty(this.keys.customThemeFile, '') || ''));
+        if (storedThemeFile) {
+            const parent = storedThemeFile.replace(/[\\\/][^\\\/]*$/, '');
+            if (!parent || parent === storedThemeFile || !utils.IsDirectory(parent)) storedThemeFile = '';
+        }
+        if (!storedThemeFile) storedThemeFile = VolumeConstants.DEFAULT_THEME_FILE;
+
         this.values = {
             theme:              String(initialTheme),
-            customThemeFile:    GdiUtils.sanitizePath(String(window.GetProperty(this.keys.customThemeFile, this.defaults.customThemeFile))),
+            customThemeFile:    storedThemeFile,
             bgMode:             this.clampInt(window.GetProperty(this.keys.bgMode, this.defaults.bgMode), 0, 4),
             customBgImage:      storedBg,
             dialMode:           this.clampInt(window.GetProperty(this.keys.dialMode, this.defaults.dialMode), 0, 6),
