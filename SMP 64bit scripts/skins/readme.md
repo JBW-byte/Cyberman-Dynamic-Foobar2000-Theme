@@ -177,6 +177,8 @@ Majot ReWrite. Bezel and Overlay Support. v2.3 theme sync fix, bug fix
 * **20 Authentic Hardware Themes:** Color schemes inspired by Pioneer, Sony ES, Technics, Kenwood, Marantz, and Akai.
 * **Real-Time Performance Monitor:** Built-in profiler measuring audio tick latency, FFT math duration, paint cycles, and cache hit ratios.
 
+Using SMP to do this causes the memory to grow and shrink a little, its not a bug or memory leak.
+
 ### Controls & Shortcuts
 | Input | Action |
 | :--- | :--- |
