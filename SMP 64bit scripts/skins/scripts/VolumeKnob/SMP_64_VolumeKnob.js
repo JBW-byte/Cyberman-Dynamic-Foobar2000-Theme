@@ -15,7 +15,7 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Volume Knob Omni v4.0', { 
+window.DefineScript('Volume Knob Omni v4.2', { 
     author: 'L.E.D.', 
     version: '4.2',
     features: { grab_focus: true } 
