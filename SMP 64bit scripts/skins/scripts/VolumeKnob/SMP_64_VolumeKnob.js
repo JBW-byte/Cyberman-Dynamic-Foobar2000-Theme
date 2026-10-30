@@ -1,7 +1,7 @@
 'use strict';
 
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V4.2  ========\\
+		 // ========  SMP 64bit Volume Knob V4.4  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -15,9 +15,9 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Volume Knob Omni v4.2', { 
+window.DefineScript('Volume Knob v4.4', { 
     author: 'L.E.D.', 
-    version: '4.2',
+    version: '4.4',
     features: { grab_focus: true } 
 });
 
@@ -57,7 +57,6 @@ class GdiUtils {
     static sanitizePath(str) {
         if (!str || typeof str !== 'string') return '';
         const clean = str.replace(/^["']+|["']+$/g, '').trim();
-        // Preserve Windows drive root (e.g., "C:\") and UNC root (e.g., "\\server\share\")
         if (/^[a-zA-Z]:[\\\/]?$/.test(clean)) {
             return clean.substring(0, 2) + '\\';
         }
@@ -131,7 +130,6 @@ class VolumeConstants {
     static SWEEP_CENTER = 270;
     static DEG2RAD = Math.PI / 180;
 
-    // Precomputed trigonometric constants for fast shading
     static COS_WEDGE_PHI = Math.cos(Math.PI / 2.2);
     static SIN_WEDGE_PHI = Math.sin(Math.PI / 2.2);
 
@@ -143,6 +141,31 @@ class VolumeConstants {
     static PROFILE_BASE = this.getProfilePath();
     static IMG_DIR = `${this.PROFILE_BASE}skins\\scripts\\VolumeKnob\\`;
     static DEFAULT_THEME_FILE = `${this.PROFILE_BASE}volumeknob_config.json`;
+
+    // Shared LCD 20-Theme Table matching Peak Meter and TimerPro
+    static LCD_THEMES = [
+        { name: 'Classic Green',   color: GdiUtils.colour(30, 180, 30) },
+        { name: 'Retro Amber',     color: GdiUtils.colour(190, 110, 0) },
+        { name: 'Cyber Blue',      color: GdiUtils.colour(0, 130, 200) },
+        { name: 'Cool Blue',       color: GdiUtils.colour(100, 180, 215) },
+        { name: 'Deep Red',        color: GdiUtils.colour(170, 15, 15) },
+        { name: 'Steel Grey',      color: GdiUtils.colour(160, 160, 160) },
+        { name: 'Night Purple',    color: GdiUtils.colour(120, 60, 180) },
+        { name: 'Dim White',       color: GdiUtils.colour(180, 180, 180) },
+        { name: 'Pioneer Amber',   color: GdiUtils.colour(255, 178, 45) },
+        { name: 'Technics Green',  color: GdiUtils.colour(80, 248, 128) },
+        { name: 'Sony ES Blue',    color: GdiUtils.colour(68, 180, 255) },
+        { name: 'Yamaha Ice',      color: GdiUtils.colour(96, 242, 234) },
+        { name: 'Kenwood Red',     color: GdiUtils.colour(255, 79, 57) },
+        { name: 'Sansui Lime',     color: GdiUtils.colour(196, 244, 52) },
+        { name: 'Marantz Blue',    color: GdiUtils.colour(88, 126, 255) },
+        { name: 'Akai Orange',     color: GdiUtils.colour(255, 130, 28) },
+        { name: 'Sharp Aqua',      color: GdiUtils.colour(20, 239, 229) },
+        { name: 'Aiwa VFD',        color: GdiUtils.colour(52, 222, 183) },
+        { name: 'Nakamichi Gold',  color: GdiUtils.colour(247, 193, 67) },
+        { name: 'JVC Violet',      color: GdiUtils.colour(210, 102, 255) }
+    ];
+
 }
 
 // ============================================================================================
@@ -226,7 +249,7 @@ class ThemeManager {
         { name: 'Satin Silver',    bg: [180, 180, 185], knob: [220, 220, 225], inner: [190, 190, 195], tick: [100, 100, 100], marker: [255, 60, 60],   settings: { bgMode: VolumeConstants.BG_MODE.SATIN, dialMode: VolumeConstants.DIAL_MODE.SOLID } },
         { name: 'Satin Bronze',    bg: [110, 90, 75],   knob: [140, 115, 95],  inner: [120, 95, 80],   tick: [220, 200, 180], marker: [255, 220, 150], settings: { bgMode: VolumeConstants.BG_MODE.SATIN, dialMode: VolumeConstants.DIAL_MODE.BEADBLAST } },
         { name: 'Studio Console',  bg: [26, 28, 32],    knob: [48, 54, 62],    inner: [36, 44, 52],    tick: [170, 185, 200], marker: [255, 70, 70],   settings: { dialMode: VolumeConstants.DIAL_MODE.KNURLED, markerStyle: VolumeConstants.MARKER_STYLE.SHORT } },
-         { 
+        { 
             name: 'Studio Console 1707', 
             bg: [26, 28, 32], 
             knob: [48, 54, 62], 
@@ -256,7 +279,7 @@ class ThemeManager {
                 volumeScalingMode: 0 
             } 
         },
-		{ name: 'Vintage Hi-Fi',   bg: [30, 28, 25],    knob: [88, 82, 70],    inner: [115, 108, 95],  tick: [210, 195, 160], marker: [255, 120, 45],  settings: { bgMode: VolumeConstants.BG_MODE.BRUSHED, dialMode: VolumeConstants.DIAL_MODE.CONCENTRIC } },
+        { name: 'Vintage Hi-Fi',   bg: [30, 28, 25],    knob: [88, 82, 70],    inner: [115, 108, 95],  tick: [210, 195, 160], marker: [255, 120, 45],  settings: { bgMode: VolumeConstants.BG_MODE.BRUSHED, dialMode: VolumeConstants.DIAL_MODE.CONCENTRIC } },
         { name: 'Accuphase Gold',  bg: [32, 28, 24],    knob: [95, 88, 72],    inner: [125, 118, 98],  tick: [230, 210, 160], marker: [255, 60, 60],   settings: { bgMode: VolumeConstants.BG_MODE.SATIN, dialMode: VolumeConstants.DIAL_MODE.BEADBLAST } },
         
         // --- 5 Built-in Pastel Color Themes ---
@@ -598,7 +621,6 @@ class ThemeManager {
 // 5. PROPERTY MANAGER
 // ============================================================================================
 class PropertyManager {
-    #pendingSaves = Object.create(null);
     #saveTimer = null;
     #isBatching = false;
     
@@ -624,7 +646,13 @@ class PropertyManager {
         showDialMarker:     'VolumeKnob.ShowDialMarker',
         markerStyle:        'VolumeKnob.MarkerStyle',
         sweepRange:         'VolumeKnob.SweepRange',
-        volumeScalingMode:  'VolumeKnob.VolumeScalingMode'
+        volumeScalingMode:  'VolumeKnob.VolumeScalingMode',
+        syncLcdTheme:       'VolumeKnob.SyncLcdTheme',
+        showLcdSyncBtn:     'VolumeKnob.ShowLcdSyncBtn',
+        currentLcdTheme:    'VolumeKnob.CurrentLcdTheme',
+        syncBtnPosition:    'VolumeKnob.SyncBtnPosition',
+        syncBtnShowText:    'VolumeKnob.SyncBtnShowText',
+        lcdBtnSide:         'VolumeKnob.LcdBtnSide2'
     };
 
     defaults = {
@@ -649,7 +677,13 @@ class PropertyManager {
         showDialMarker:     true,
         markerStyle:        0,
         sweepRange:         290,
-        volumeScalingMode:  0
+        volumeScalingMode:  0,
+        syncLcdTheme:       true,
+        showLcdSyncBtn:     true,
+        currentLcdTheme:    'Pioneer Amber',
+        syncBtnPosition:    'top',
+        syncBtnShowText:    false,
+        lcdBtnSide:         'right'
     };
 
     values = {};
@@ -697,7 +731,13 @@ class PropertyManager {
             showDialMarker:     this.parseBool(window.GetProperty(this.keys.showDialMarker, this.defaults.showDialMarker)),
             markerStyle:        this.clampInt(window.GetProperty(this.keys.markerStyle, this.defaults.markerStyle), 0, 7),
             sweepRange:         this.clampInt(window.GetProperty(this.keys.sweepRange, this.defaults.sweepRange), 270, 300),
-            volumeScalingMode:  this.clampInt(window.GetProperty(this.keys.volumeScalingMode, this.defaults.volumeScalingMode), 0, 1)
+            volumeScalingMode:  this.clampInt(window.GetProperty(this.keys.volumeScalingMode, this.defaults.volumeScalingMode), 0, 1),
+            syncLcdTheme:       this.parseBool(window.GetProperty(this.keys.syncLcdTheme, this.defaults.syncLcdTheme)),
+            showLcdSyncBtn:     this.parseBool(window.GetProperty(this.keys.showLcdSyncBtn, this.defaults.showLcdSyncBtn)),
+            currentLcdTheme:    String(window.GetProperty(this.keys.currentLcdTheme, this.defaults.currentLcdTheme)),
+            syncBtnPosition:    String(window.GetProperty(this.keys.syncBtnPosition, this.defaults.syncBtnPosition)) === 'bottom' ? 'bottom' : 'top',
+            syncBtnShowText:    this.parseBool(window.GetProperty(this.keys.syncBtnShowText, this.defaults.syncBtnShowText)),
+            lcdBtnSide:         String(window.GetProperty(this.keys.lcdBtnSide, this.defaults.lcdBtnSide)) === 'left' ? 'left' : 'right'
         };
 
         this.lastFinalizedTheme = (this.values.theme !== '~Preview' && this.values.theme !== 'Custom') ? this.values.theme : this.defaults.theme;
@@ -785,6 +825,11 @@ class PropertyManager {
                 VolumeConfig.sweepRangeDeg = range;
             }
             if (has('volumeScalingMode')) this.set('volumeScalingMode', this.clampInt(s.volumeScalingMode, 0, 1));
+            if (has('syncLcdTheme')) this.set('syncLcdTheme', this.parseBool(s.syncLcdTheme));
+            if (has('showLcdSyncBtn')) this.set('showLcdSyncBtn', this.parseBool(s.showLcdSyncBtn));
+            if (has('syncBtnPosition')) this.set('syncBtnPosition', s.syncBtnPosition === 'bottom' ? 'bottom' : 'top');
+            if (has('lcdBtnSide')) this.set('lcdBtnSide', s.lcdBtnSide === 'left' ? 'left' : 'right');
+            if (has('syncBtnShowText')) this.set('syncBtnShowText', this.parseBool(s.syncBtnShowText));
         } finally {
             this.endBatch();
         }
@@ -831,6 +876,11 @@ class PropertyManager {
             this.set('markerStyle', this.defaults.markerStyle);
             this.set('sweepRange', this.defaults.sweepRange);
             this.set('volumeScalingMode', this.defaults.volumeScalingMode);
+            this.set('syncLcdTheme', this.defaults.syncLcdTheme);
+            this.set('showLcdSyncBtn', this.defaults.showLcdSyncBtn);
+            this.set('syncBtnPosition', this.defaults.syncBtnPosition);
+            this.set('syncBtnShowText', this.defaults.syncBtnShowText);
+            this.set('lcdBtnSide', this.defaults.lcdBtnSide);
         } finally {
             this.endBatch();
         }
@@ -843,6 +893,7 @@ class PropertyManager {
             this.set('customBgImage', this.defaults.customBgImage);
             this.set('customDialImage', this.defaults.customDialImage);
             this.set('customThemeFile', this.defaults.customThemeFile);
+            this.set('currentLcdTheme', this.defaults.currentLcdTheme);
         } finally {
             this.endBatch();
         }
@@ -1874,7 +1925,6 @@ class SceneCache {
                         const tX = px + sa * dRad, tY = py - ca * dRad;
                         const bX = px - sa * dRad, bY = py + ca * dRad;
                         const lX = px - ca * (dRad * 0.65), lY = py - sa * (dRad * 0.65);
-                        // Fixed: Tangent vector Y-offset correctly aligned with +sa
                         const rX = px + ca * (dRad * 0.65), rY = py + sa * (dRad * 0.65);
 
                         const col = isMajor ? theme.tick : GdiUtils.setAlpha(theme.tick, 180);
@@ -2022,7 +2072,6 @@ class VolumeConfig {
     static get WHEEL_STEP_DEG() { return this.SWEEP_TOTAL / (this.TICK_COUNT - 1) / 2; }
 }
 
-// Fixed: Exactly accounts for -100 dB to -15 dB (85 dB range / 20% = 4.25 dB/%)
 const VOL_SLOPE_1 = (VolumeConfig.DB_BREAKPOINT_1 + 100) / VolumeConfig.VOL_BREAKPOINT_1;
 const VOL_SLOPE_2 = (VolumeConfig.DB_BREAKPOINT_2 - VolumeConfig.DB_BREAKPOINT_1) / (VolumeConfig.VOL_BREAKPOINT_2 - VolumeConfig.VOL_BREAKPOINT_1);
 const VOL_SLOPE_3 = Math.abs(VolumeConfig.DB_BREAKPOINT_2) / (100 - VolumeConfig.VOL_BREAKPOINT_2);
@@ -2107,7 +2156,6 @@ class VolumeState {
     startAnimation() {
         if (this.#animationTimer) return;
         this.#animationTimer = window.SetInterval(() => {
-            // True Zero-Idle: Suspend timer completely when window is hidden
             if (!window.IsVisible) {
                 this.stopAnimation();
                 return;
@@ -2140,7 +2188,6 @@ class VolumeState {
             return;
         }
         const c = this.geometryCache;
-        // Adequate padding ensures MIN/MAX labels and marker tips are never clipped
         const pad = Math.max(12, GdiUtils.scale(16));
         const rBound = Math.ceil(c.rOuter || c.radius) + pad;
         const rx = Math.max(0, c.cx - rBound);
@@ -2221,7 +2268,6 @@ class VolumeEngine {
 // 13. MAIN RENDERER (LOW-ALLOCATION VECTOR PIPELINE)
 // ============================================================================================
 class MainRenderer {
-    // Pre-allocated coordinate buffers to minimize GC spikes
     #flat3 = [0, 0, 0, 0, 0, 0];
     #pts3  = [[0, 0], [0, 0], [0, 0]];
     #flat4 = [0, 0, 0, 0, 0, 0, 0, 0];
@@ -2557,7 +2603,6 @@ class ContextMenuManager {
     #doColorPicker(label, key) {
         const applied = this.controller.properties.values.theme;
         
-        // Only seed from a base theme if we are NOT already on a customized theme
         if (applied !== 'Custom' && applied !== '~Preview') {
             this.controller.themes.seedDraftFromTheme(this.controller.themes.get(applied));
         }
@@ -2571,10 +2616,8 @@ class ContextMenuManager {
         const newArgb = (0xFF000000 | picked) >>> 0;
         if (newArgb === startArgb) return;
 
-        // 1. Explicitly update the selected channel (knob or inner) and persist to foobar storage
         this.controller.themes.updateDraft(key, newArgb);
 
-        // 2. Build the persistent 'Custom' theme with the discrete outer ring and dial colors intact
         const t = this.controller.themes.makeTheme(
             'Custom',
             this.controller.themes.draftTheme.bg,
@@ -2586,7 +2629,6 @@ class ContextMenuManager {
         t.custom = true;
         this.controller.themes.addOrUpdate(t, true, this.controller.properties);
 
-        // 3. Keep 'Custom' active without letting it overwrite with base theme colors
         this.controller.properties.setTheme('Custom', this.controller.themes, false);
         this.controller.state.invalidateGeometry();
         this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
@@ -2674,12 +2716,10 @@ class ContextMenuManager {
                 this.controller.themes.clearPreview();
                 this.controller.properties.setTheme(chosen, this.controller.themes, false);
             }
-			} else {
-            // Apply the randomly picked theme for the standard 70% branch
+        } else {
             this.controller.themes.clearPreview();
             this.controller.properties.setTheme(chosen, this.controller.themes, false);
-			}
-        
+        }
 
         const availableBgModes = [0, 1, 2, 3];
         this.controller.properties.set('bgMode', availableBgModes[rand(0, availableBgModes.length - 1)]);
@@ -2803,6 +2843,11 @@ class ContextMenuManager {
         const themeCustomMenu = window.CreatePopupMenu();
         const creatorMenu = window.CreatePopupMenu();
         const removeThemeMenu = window.CreatePopupMenu();
+        const lcdSyncMenu = window.CreatePopupMenu();
+        const syncStylesMenu = window.CreatePopupMenu();
+        const lcdThemeListMenu = window.CreatePopupMenu();
+        const syncBtnPosMenu = window.CreatePopupMenu();
+        const lcdBtnSideMenu = window.CreatePopupMenu();
         const bgMenu = window.CreatePopupMenu();
         const dialMenu = window.CreatePopupMenu();
         const lightSubMenu = window.CreatePopupMenu();
@@ -2818,7 +2863,8 @@ class ContextMenuManager {
         const dialImgSubMenu = window.CreatePopupMenu();
 
         const allMenus = [
-            m, themeMenu, themeCustomMenu, creatorMenu, removeThemeMenu,
+            m, themeMenu, themeCustomMenu, creatorMenu, removeThemeMenu, lcdSyncMenu,
+            syncStylesMenu, lcdThemeListMenu, syncBtnPosMenu, lcdBtnSideMenu,
             bgMenu, dialMenu, lightSubMenu, lightStyleMenu, lightAngleMenu, lightStrengthMenu,
             effectsMenu, tickStyleMenu, majorIntervalMenu, markerStyleMenu, rangeMenu, bgImgSubMenu, dialImgSubMenu
         ];
@@ -2863,6 +2909,37 @@ class ContextMenuManager {
         creatorMenu.AppendMenuSeparator();
         removeThemeMenu.AppendTo(creatorMenu, 0, 'Remove Custom Theme…');
         creatorMenu.AppendTo(themeMenu, 0, 'Theme Creator');
+
+        // LCD Theme Sync Menu
+        lcdSyncMenu.AppendMenuItem(0, 8000, 'Sync LCD Theme (PeakMeter & Timer)');
+        if (props.syncLcdTheme) lcdSyncMenu.CheckMenuRadioItem(8000, 8000, 8000);
+        lcdSyncMenu.AppendMenuItem(0, 8001, 'Show LCD Sync Button (Left)');
+        if (props.showLcdSyncBtn) lcdSyncMenu.CheckMenuRadioItem(8001, 8001, 8001);
+        lcdSyncMenu.AppendMenuSeparator();
+        lcdSyncMenu.AppendMenuItem(0, 8002, 'Cycle Next LCD Theme');
+        lcdSyncMenu.AppendMenuItem(0, 8003, 'Cycle Previous LCD Theme');
+
+        // Direct pick lists
+        VolumeConstants.LCD_THEMES.forEach((t, i) => lcdThemeListMenu.AppendMenuItem(0, 8200 + i, t.name));
+        const lcdCurIdx = VolumeConstants.LCD_THEMES.findIndex(t => t.name.toLowerCase() === String(props.currentLcdTheme).toLowerCase());
+        if (lcdCurIdx !== -1) lcdThemeListMenu.CheckMenuRadioItem(8200, 8200 + VolumeConstants.LCD_THEMES.length - 1, 8200 + lcdCurIdx);
+        lcdThemeListMenu.AppendTo(lcdSyncMenu, 0, 'Select LCD Theme');
+
+        // Button placement / text
+        syncBtnPosMenu.AppendMenuItem(0, 8010, 'Top of Panel');
+        syncBtnPosMenu.AppendMenuItem(0, 8011, 'Bottom of Panel');
+        syncBtnPosMenu.CheckMenuRadioItem(8010, 8011, props.syncBtnPosition === 'bottom' ? 8011 : 8010);
+
+        // Combined "Sync Styles" menu
+        lcdSyncMenu.AppendTo(syncStylesMenu, 0, 'LCD Themes (Peak & Timer)');
+        syncStylesMenu.AppendMenuSeparator();
+        syncBtnPosMenu.AppendTo(syncStylesMenu, 0, 'Button Position');
+        lcdBtnSideMenu.AppendMenuItem(0, 8013, 'Left');
+        lcdBtnSideMenu.AppendMenuItem(0, 8014, 'Right');
+        lcdBtnSideMenu.CheckMenuRadioItem(8013, 8014, props.lcdBtnSide === 'left' ? 8013 : 8014);
+        lcdBtnSideMenu.AppendTo(syncStylesMenu, 0, 'LCD Button Side');
+        syncStylesMenu.AppendMenuItem(0, 8012, 'Show Button Text (LCD / STYLE)');
+        if (props.syncBtnShowText) syncStylesMenu.CheckMenuRadioItem(8012, 8012, 8012);
 
         bgMenu.AppendMenuItem(0, 6000, 'Solid (Theme Color)');
         bgMenu.AppendMenuItem(0, 6001, 'Brushed Aluminum (Horizontal)');
@@ -3009,6 +3086,7 @@ class ContextMenuManager {
         rangeMenu.CheckMenuRadioItem(7500, 7501, 7500 + props.volumeScalingMode);
 
         themeMenu.AppendTo(m, 0, 'Theme');
+        syncStylesMenu.AppendTo(m, 0, 'Sync Styles');
         bgMenu.AppendTo(m, 0, 'Backplate Finish');
         dialMenu.AppendTo(m, 0, 'Dial Face Finish');
         effectsMenu.AppendTo(m, 0, 'Markers and Shadow');
@@ -3031,6 +3109,8 @@ class ContextMenuManager {
 
         if (selected === 0) return true;
         this.#dispatchMenuCommand(selected, names, availableImages, props, angleMap, strMap);
+        this.controller.isLcdBtnHovered = false;
+        this.controller.refreshSyncTooltip();
         return true;
     }
 
@@ -3041,6 +3121,30 @@ class ContextMenuManager {
             this.controller.state.invalidateGeometry();
             this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
             this.controller.state.requestRepaint();
+        } else if (selected === 8000) {
+            const next = !props.syncLcdTheme;
+            this.controller.properties.set('syncLcdTheme', next);
+            this.controller.showNotification(`LCD Theme Sync: ${next ? 'ON' : 'OFF'}`);
+            window.Repaint();
+        } else if (selected === 8010 || selected === 8011) {
+            this.controller.properties.set('syncBtnPosition', selected === 8011 ? 'bottom' : 'top');
+            window.Repaint();
+        } else if (selected === 8013 || selected === 8014) {
+            this.controller.properties.set('lcdBtnSide', selected === 8013 ? 'left' : 'right');
+            this.controller.isLcdBtnHovered = false;
+            window.Repaint();
+        } else if (selected === 8012) {
+            this.controller.properties.set('syncBtnShowText', !props.syncBtnShowText);
+            window.Repaint();
+        } else if (selected >= 8200 && selected < 8200 + VolumeConstants.LCD_THEMES.length) {
+            this.controller.setLcdThemeIndex(selected - 8200);
+        } else if (selected === 8001) {
+            this.controller.properties.set('showLcdSyncBtn', !props.showLcdSyncBtn);
+            window.Repaint();
+        } else if (selected === 8002) {
+            this.controller.cycleLcdTheme(1);
+        } else if (selected === 8003) {
+            this.controller.cycleLcdTheme(-1);
         } else if (selected >= 6000 && selected <= 6003) {
             this.controller.properties.set('bgMode', selected - 6000);
             this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
@@ -3081,7 +3185,6 @@ class ContextMenuManager {
             } else if (newDialMode === VolumeConstants.DIAL_MODE.CONCENTRIC) {
                 this.controller.properties.set('showHighlight', true);
                 this.controller.properties.set('dialLightStyle', VolumeConstants.LIGHT_STYLE.ANISOTROPIC);
-                // Fixed: Reference error resolved to prevent uncaught TypeError crash
                 if (this.controller.properties.values.markerStyle === VolumeConstants.MARKER_STYLE.VSHORT) {
                     this.controller.properties.set('markerStyle', VolumeConstants.MARKER_STYLE.LINE);
                 }
@@ -3286,6 +3389,11 @@ class VolumeKnobController {
     #notifyText = '';
     #notifyTimeout = null;
     #notifyFont = null;
+    isLcdBtnHovered = false;
+    #syncTooltip = null;
+    #pauseFlash = true;
+    #pauseTimer = null;
+    #syncTipText = '';
 
     constructor() {
         this.#panelState = VolumeConstants.LIFECYCLE.INIT;
@@ -3301,7 +3409,6 @@ class VolumeKnobController {
     }
 
     init() {
-        // 1. Instant restore from foobar2000's internal memory properties
         this.themes.loadCustomThemesFromProperties();
         this.themes.loadDraftFromProperties();
 
@@ -3333,8 +3440,8 @@ class VolumeKnobController {
         this.#panelState = VolumeConstants.LIFECYCLE.LIVE;
         VolumeEngine.syncFromFoobar(this.state, this.properties.values);
         this.state.startAnimation();
+        this.#updatePauseBlink();
 
-        // 2. Defer JSON disk load to background timer so UI draws instantly
         window.SetTimeout(() => {
             if (this.#panelState === VolumeConstants.LIFECYCLE.SHUTDOWN) return;
             try { 
@@ -3344,6 +3451,7 @@ class VolumeKnobController {
     }
 
     showNotification(text) {
+        this.refreshSyncTooltip();
         this.#notifyText = text;
         if (this.#notifyTimeout) window.ClearTimeout(this.#notifyTimeout);
         this.#notifyTimeout = window.SetTimeout(() => {
@@ -3352,6 +3460,171 @@ class VolumeKnobController {
             window.Repaint();
         }, 1500);
         window.Repaint();
+    }
+
+    // ====================== DUAL SYNC BUTTON HELPERS ======================
+    getSyncBtnMetrics() {
+        const showText = this.properties.values.syncBtnShowText;
+        const m = GdiUtils.scale(6);
+        const h = GdiUtils.scale(18);
+        const w = showText ? GdiUtils.scale(54) : GdiUtils.scale(22);
+        const y = this.properties.values.syncBtnPosition === 'bottom' ? Math.max(0, window.Height - h - m) : m;
+        return { m, w, h, y };
+    }
+
+    getLcdBtnRect() {
+        const k = this.getSyncBtnMetrics();
+        const x = this.properties.values.lcdBtnSide === 'left' ? k.m : Math.max(0, window.Width - k.w - k.m);
+        return { x, y: k.y, w: k.w, h: k.h };
+    }
+
+    setLcdThemeIndex(idx) {
+        const themes = VolumeConstants.LCD_THEMES;
+        if (idx < 0 || idx >= themes.length) return;
+        const chosen = themes[idx];
+        this.properties.set('currentLcdTheme', chosen.name);
+        const syncOn = this.properties.values.syncLcdTheme;
+        if (syncOn) {
+            try { window.NotifyOthers('LcdThemeSync', chosen.name); } catch {}
+        }
+        this.showNotification(`LCD Theme: ${chosen.name}${syncOn ? '' : ' (Sync OFF)'}`);
+        window.Repaint();
+    }
+
+    cycleLcdTheme(direction) {
+        const themes = VolumeConstants.LCD_THEMES;
+        if (!themes || !themes.length) return;
+        const curName = this.properties.values.currentLcdTheme;
+        let idx = themes.findIndex(t => t.name.toLowerCase() === curName.toLowerCase());
+        if (idx === -1) idx = Math.max(0, themes.findIndex(t => t.name === 'Pioneer Amber')); // Default theme
+        const nextIdx = (idx + direction + themes.length) % themes.length;
+        const chosen = themes[nextIdx];
+
+        this.properties.set('currentLcdTheme', chosen.name);
+        const syncOn = this.properties.values.syncLcdTheme;
+        if (syncOn) {
+            try { window.NotifyOthers('LcdThemeSync', chosen.name); } catch {}
+        }
+        this.showNotification(`LCD Theme: ${chosen.name}${syncOn ? '' : ' (Sync OFF)'}`);
+        window.Repaint();
+    }
+
+    // ---- Sync button visuals (theme-matched box, hollow/lit LED, playing brightness) ----
+    #scaleColour(col, f) {
+        const rgb = GdiUtils.toRGB(col);
+        return GdiUtils.colour(rgb[0] * f, rgb[1] * f, rgb[2] * f);
+    }
+
+    #drawSyncBox(gr, r, hovered) {
+        const theme = this.themes.get(this.properties.values.theme);
+        const fill = this.#scaleColour(theme.inner, 0.38);
+        const edge = this.#scaleColour(theme.knob, 1.35);
+        gr.FillSolidRect(r.x, r.y, r.w, r.h, GdiUtils.setAlpha(fill, hovered ? 235 : 190));
+        gr.DrawRect(r.x, r.y, r.w, r.h, 1, GdiUtils.setAlpha(edge, hovered ? 230 : 150));
+        gr.FillSolidRect(r.x + 1, r.y + 1, r.w - 2, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), hovered ? 28 : 14));
+    }
+
+    #drawSyncLed(gr, cx, cy, radius, col, syncOn, blinkWhenPaused = false) {
+        const playing = fb.IsPlaying && !fb.IsPaused;
+        const blinking = blinkWhenPaused && fb.IsPlaying && fb.IsPaused;
+        if (!syncOn && !playing && !blinking) {
+            // Sync OFF and stopped: hollow dim ring
+            const ring = GdiUtils.setAlpha(this.#scaleColour(col, 0.55), 170);
+            gr.FillEllipse(cx - radius, cy - radius, radius * 2, radius * 2, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 150));
+            gr.DrawEllipse(cx - radius, cy - radius, radius * 2, radius * 2, 1, ring);
+            return;
+        }
+        // Sync ON: filled LED, much brighter + stronger halo while a track is playing
+        const bright = playing || (blinking && this.#pauseFlash);
+        const body = bright ? col : this.#scaleColour(col, blinking ? 0.22 : 0.5);
+        if (bright) {
+            gr.DrawEllipse(cx - radius - 2, cy - radius - 2, (radius + 2) * 2, (radius + 2) * 2, 1, GdiUtils.setAlpha(col, 55));
+            gr.DrawEllipse(cx - radius - 1, cy - radius - 1, (radius + 1) * 2, (radius + 1) * 2, 1, GdiUtils.setAlpha(col, 140));
+        } else if (!blinking) {
+            gr.DrawEllipse(cx - radius - 1, cy - radius - 1, (radius + 1) * 2, (radius + 1) * 2, 1, GdiUtils.setAlpha(col, 45));
+        }
+        gr.FillEllipse(cx - radius, cy - radius, radius * 2, radius * 2, body);
+        if (bright) {
+            const hl = Math.max(1, Math.floor(radius / 2));
+            gr.FillEllipse(cx - hl, cy - radius + 1, hl, hl, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 150));
+        }
+    }
+
+    refreshSyncTooltip() {
+        const v = this.properties.values;
+        let text = '';
+        if (this.isLcdBtnHovered && v.showLcdSyncBtn) {
+            text = `LCD Theme: ${v.currentLcdTheme}  |  Sync ${v.syncLcdTheme ? 'ON' : 'OFF'}`;
+        }
+        if (text === this.#syncTipText) return;
+        this.#syncTipText = text;
+        try {
+            if (!this.#syncTooltip) {
+                this.#syncTooltip = window.CreateTooltip('Segoe UI', GdiUtils.scale(12));
+                if (this.#syncTooltip) this.#syncTooltip.SetMaxWidth(500);
+            }
+            if (!this.#syncTooltip) return;
+            this.#syncTooltip.Text = text;
+            if (text) this.#syncTooltip.Activate();
+            else this.#syncTooltip.Deactivate();
+        } catch {}
+    }
+
+    // Blink the LCD button at 500 ms while paused (same cadence as LCD TimerPro)
+    #updatePauseBlink() {
+        const paused = fb.IsPlaying && fb.IsPaused;
+        if (!paused) {
+            if (this.#pauseTimer) { window.ClearInterval(this.#pauseTimer); this.#pauseTimer = null; }
+            this.#pauseFlash = true;
+            return;
+        }
+        if (this.#pauseTimer) return;
+        this.#pauseFlash = true;
+        this.#pauseTimer = window.SetInterval(() => {
+            if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE || !fb.IsPlaying || !fb.IsPaused) {
+                this.#updatePauseBlink();
+                return;
+            }
+            if (!window.IsVisible) return;
+            this.#pauseFlash = !this.#pauseFlash;
+            const v = this.properties.values;
+            if (!v.showLcdSyncBtn) return;
+            const r = this.getLcdBtnRect();
+            const pad = GdiUtils.scale(6);
+            window.RepaintRect(Math.max(0, r.x - pad), Math.max(0, r.y - pad), r.w + pad * 2, r.h + pad * 2);
+        }, 500);
+    }
+
+    onPlaybackStateChange() {
+        if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return;
+        this.#updatePauseBlink();
+        window.Repaint();
+    }
+
+    drawLcdSyncButton(gr) {
+        if (!this.properties.values.showLcdSyncBtn) return;
+        const r = this.getLcdBtnRect();
+        const syncOn = this.properties.values.syncLcdTheme;
+        const curName = this.properties.values.currentLcdTheme;
+        const activeTheme = VolumeConstants.LCD_THEMES.find(t => t.name.toLowerCase() === curName.toLowerCase()) || VolumeConstants.LCD_THEMES[8];
+        const ledCol = activeTheme.color;
+
+        this.#drawSyncBox(gr, r, this.isLcdBtnHovered);
+
+        const showText = this.properties.values.syncBtnShowText;
+        const dotRadius = Math.max(2, GdiUtils.scale(3));
+        const dotX = showText ? r.x + GdiUtils.scale(8) : Math.round(r.x + r.w / 2);
+        const dotY = Math.round(r.y + r.h / 2);
+        this.#drawSyncLed(gr, dotX, dotY, dotRadius, ledCol, syncOn, true);
+
+        const font = showText ? HudManager.getFont(8, true) : null;
+        if (font) {
+            const textX = dotX + dotRadius + GdiUtils.scale(4);
+            const textW = r.x + r.w - textX;
+            const textCol = syncOn ? GdiUtils.setAlpha(GdiUtils.colour(225, 230, 235), 230) : GdiUtils.setAlpha(GdiUtils.colour(135, 140, 145), 180);
+            gr.SetTextRenderingHint(4);
+            gr.DrawString('LCD', font, textCol, textX, r.y - 1, textW, r.h, 0x11000000 | 0x00000004);
+        }
     }
 
     // ====================== DEDICATED CYCLE FUNCTIONS ======================
@@ -3476,6 +3749,8 @@ class VolumeKnobController {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE || !window.IsVisible) return;
         this.mainRenderer.draw(gr, window.Width, window.Height, this.state, this.themes, this.properties, this.sceneCache, this.dialRenderer, this.bgRenderer, this.assetManager);
 
+        this.drawLcdSyncButton(gr);
+
         if (this.#notifyText && !HudManager.activeSlider) {
             this.#notifyFont ??= gdi.Font('Segoe UI Semibold', GdiUtils.scale(11), 0);
             if (this.#notifyFont) {
@@ -3532,6 +3807,15 @@ class VolumeKnobController {
 
     onMouseLbtnDown(x, y, mask) {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return false;
+
+        if (this.properties.values.showLcdSyncBtn) {
+            const r = this.getLcdBtnRect();
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                this.cycleLcdTheme(1);
+                return true;
+            }
+        }
+
         if (utils.IsKeyPressed(0x11) || (mask && (mask & 8))) {
             if (InputManager.hitTest(x, y, this.state, window.Width, window.Height, this.properties.values)) {
                 if (HudManager.activeSlider) {
@@ -3552,10 +3836,34 @@ class VolumeKnobController {
 
     onMouseMove(x, y, mask) {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return false;
+
+        let needsRepaint = false;
+
+        if (this.properties.values.showLcdSyncBtn) {
+            const r = this.getLcdBtnRect();
+            const hovered = (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+            if (hovered !== this.isLcdBtnHovered) {
+                this.isLcdBtnHovered = hovered;
+                needsRepaint = true;
+                this.refreshSyncTooltip();
+            }
+        }
+
+        if (needsRepaint) window.Repaint();
+
         if (this.state.dragging && (mask !== undefined && !(mask & 1))) {
             return InputManager.handleDragEnd(this.state, this.properties.values);
         }
         return InputManager.handleDragMove(x, y, this.state, this.properties.values);
+    }
+
+    onMouseLeave() {
+        let changed = false;
+        if (this.isLcdBtnHovered) {
+            this.isLcdBtnHovered = false;
+            changed = true;
+        }
+        if (changed) { this.refreshSyncTooltip(); window.Repaint(); }
     }
 
     onMouseWheel(step) {
@@ -3575,6 +3883,22 @@ class VolumeKnobController {
     onMouseRbtnUp(x, y, mask) {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return false;
         if (mask & 4) return false;
+
+        if (this.properties.values.showLcdSyncBtn) {
+            const r = this.getLcdBtnRect();
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                const nextSync = !this.properties.values.syncLcdTheme;
+                this.properties.set('syncLcdTheme', nextSync);
+                if (nextSync) {
+                    // Re-announce the current theme so other panels catch up immediately
+                    try { window.NotifyOthers('LcdThemeSync', this.properties.values.currentLcdTheme); } catch {}
+                }
+                this.showNotification(`LCD Theme Sync: ${nextSync ? 'ON' : 'OFF'}`);
+                window.Repaint();
+                return true;
+            }
+        }
+
         this.contextMenu.show(x, y);
         return true;
     }
@@ -3606,7 +3930,16 @@ class VolumeKnobController {
         const isShift = utils.IsKeyPressed(0x10);
         const isAlt   = utils.IsKeyPressed(0x12);
 
-        // Ctrl + Shift + Left/Right OR Alt + Left/Right -> Cycle Themes
+        // Ctrl + Alt + Left/Right -> Cycle LCD Themes (Peak Meter & Timer)
+        if (isCtrl && isAlt && (vkey === 0x25 || vkey === 0x27)) {
+            this.cycleLcdTheme(vkey === 0x27 ? 1 : -1);
+            return true;
+        }
+
+        // Shift + Alt + Left/Right belongs to Library/Playlist panels; ignore here
+        if (isShift && isAlt && (vkey === 0x25 || vkey === 0x27)) return false;
+
+        // Ctrl + Shift + Left/Right OR Alt + Left/Right -> Cycle Volume Knob Themes
         if ((isCtrl && isShift && (vkey === 0x25 || vkey === 0x27)) || (isAlt && (vkey === 0x25 || vkey === 0x27))) {
             this.cycleTheme(vkey === 0x27 ? 1 : -1);
             return true;
@@ -3655,7 +3988,17 @@ class VolumeKnobController {
         return false;
     }
 
-     dispose() {
+    onNotifyData(name, info) {
+        if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return;
+
+        if (name === 'LcdThemeSync' && typeof info === 'string') {
+            if (!this.properties.values.syncLcdTheme) return; // sync OFF: ignore broadcasts
+            this.properties.set('currentLcdTheme', info);
+            window.Repaint();
+        }
+    }
+
+    dispose() {
         this.#panelState = VolumeConstants.LIFECYCLE.SHUTDOWN;
         if (this.#notifyTimeout) window.ClearTimeout(this.#notifyTimeout);
         this.properties.persistSync(this.themes);
@@ -3668,8 +4011,13 @@ class VolumeKnobController {
             try { this.#notifyFont.Dispose(); } catch {}
         }
         this.#notifyFont = null;
+        if (this.#pauseTimer) { window.ClearInterval(this.#pauseTimer); this.#pauseTimer = null; }
+        if (this.#syncTooltip) {
+            try { this.#syncTooltip.Deactivate(); } catch {}
+            try { this.#syncTooltip.Dispose(); } catch {}
+            this.#syncTooltip = null;
+        }
     }
-	
 }
 
 // ============================================================================================
@@ -3699,7 +4047,12 @@ function on_volume_change() {
 
 function on_playback_new_track() { 
     app.onPlaybackNewTrack(); 
+    app.onPlaybackStateChange();
 }
+
+function on_playback_starting() { app.onPlaybackStateChange(); }
+function on_playback_pause()    { app.onPlaybackStateChange(); }
+function on_playback_stop()     { app.onPlaybackStateChange(); }
 
 function on_mouse_lbtn_down(x, y, mask) { 
     return app.onMouseLbtnDown(x, y, mask); 
@@ -3711,6 +4064,10 @@ function on_mouse_lbtn_up() {
 
 function on_mouse_move(x, y, mask) { 
     return app.onMouseMove(x, y, mask); 
+}
+
+function on_mouse_leave() {
+    app.onMouseLeave();
 }
 
 function on_mouse_wheel(step) { 
@@ -3727,6 +4084,10 @@ function on_mouse_rbtn_up(x, y, mask) {
 
 function on_key_down(vkey) { 
     return app.onKeyDown(vkey); 
+}
+
+function on_notify_data(name, info) { 
+    app.onNotifyData(name, info); 
 }
 
 function on_script_unload() { 
