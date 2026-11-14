@@ -190,7 +190,9 @@ Using SMP to do this causes the memory to grow and shrink a little, its not a bu
 </details>
 
 <details>
-<summary><strong>The Play Buttons</strong> — Updated 01 Oct 2026 V2.2</summary>
+<summary><strong>The Play Buttons</strong> — Updated 14 Nov 2026 V2.3</summary>
+
+bug fix's
 
 ### Key Features
 * **Zero-Resampling Blit Engine:** Icon textures for Idle, Hover, and Click states are pre-baked at 1:1 pixel ratios to avoid runtime resampling.
