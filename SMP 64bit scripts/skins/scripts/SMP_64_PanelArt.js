@@ -1,6 +1,6 @@
 ﻿'use strict';
 		   // ============== AUTHOR L.E.D. ============== \\
-		  // ==-== Panel Artwork and Trackinfo v4.4  ==-== \\
+		  // ==-== Panel Artwork and Trackinfo v4.6  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,7 +16,7 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.4',
+    version: '4.6',
     features: { grab_focus: true } 
 });
 
@@ -88,16 +88,23 @@ class FontRegistry {
 
     get(name, size, style = 0) {
         const s = Math.max(4, Math.round(size));
-        const fontName = (typeof name === 'string' && name.trim().length > 0) ? name : 'Segoe UI';
+        const fontName = (typeof name === 'string' && name.trim().length > 0) ? name.trim() : 'Segoe UI';
         const key = `${fontName}_${s}_${style}`;
 
         let f = this.#cache.get(key);
-        if (!f) {
-            try {
-                f = gdi.Font(fontName, s, style);
-            } catch {
-                f = gdi.Font('Segoe UI', s, style);
-            }
+        if (f) {
+            this.#cache.delete(key);
+            this.#cache.set(key, f);
+            return f;
+        }
+
+        try {
+            f = gdi.Font(fontName, s, style);
+        } catch {
+            try { f = gdi.Font('Segoe UI', s, style); } catch { f = null; }
+        }
+
+        if (f) {
             this.#cache.set(key, f);
             if (this.#cache.size > this.#maxSize) {
                 const oldestKey = this.#cache.keys().next().value;
@@ -117,7 +124,7 @@ class FontRegistry {
         let high = Math.max(minBound, Math.round(startSize));
         let best = minBound;
         const testText = text && text.trim().length > 0 ? text : 'Sample Text';
-        const name = (typeof fontName === 'string' && fontName.trim().length > 0) ? fontName : 'Segoe UI';
+        const name = (typeof fontName === 'string' && fontName.trim().length > 0) ? fontName.trim() : 'Segoe UI';
 
         while (low <= high) {
             const mid = (low + high) >>> 1;
@@ -125,8 +132,9 @@ class FontRegistry {
             try {
                 tempFont = gdi.Font(name, mid, fontStyle);
             } catch {
-                tempFont = gdi.Font('Segoe UI', mid, fontStyle);
+                try { tempFont = gdi.Font('Segoe UI', mid, fontStyle); } catch { tempFont = null; }
             }
+            if (!tempFont) { high = mid - 1; continue; }
 
             const m = gr.MeasureString(testText, tempFont, 0, 0, 10000, 10000);
             if (tempFont && typeof tempFont.Dispose === 'function') {
@@ -173,6 +181,13 @@ class ArtScanner {
         this.#artPathCache.clear();
     }
 
+    isImageFilePath(filePath) {
+        if (!filePath || typeof filePath !== 'string') return false;
+        const dot = filePath.lastIndexOf('.');
+        if (dot === -1) return false;
+        return ArtScanner.EXTENSIONS.includes(filePath.substring(dot).toLowerCase());
+    }
+
     getArtworkIdentityKey(trackDir, album, disc, titleOrPath = '') {
         const alb = (album || '').trim().toLowerCase();
         const fallback = alb ? '' : `|${(titleOrPath || '').trim().toLowerCase()}`;
@@ -182,13 +197,13 @@ class ArtScanner {
     getArtFromMemoryCache(key) {
         if (!this.#artPathCache.has(key)) return null;
         const cachedPath = this.#artPathCache.get(key);
-        if (cachedPath && utils.IsFile(cachedPath)) return cachedPath;
+        if (cachedPath && this.isImageFilePath(cachedPath) && utils.IsFile(cachedPath)) return cachedPath;
         this.#artPathCache.delete(key);
         return null;
     }
 
     setArtMemoryCache(key, path) {
-        if (!path) return;
+        if (!path || !this.isImageFilePath(path)) return;
         if (this.#artPathCache.size > 500) {
             this.#artPathCache.delete(this.#artPathCache.keys().next().value);
         }
@@ -695,11 +710,11 @@ class PanelArtController {
     ];
 
     static MENU_ID = {
-        BEZEL_ENABLE:        970,
-        BEZEL_FOLDER:        972,
-        BEZEL_RELOAD:        973,
-        BEZEL_NONE:          975,
-        BEZEL_BASE:          976,
+        BEZEL_ENABLE:        3000,
+        BEZEL_FOLDER:        3001,
+        BEZEL_RELOAD:        3002,
+        BEZEL_NONE:          3005,
+        BEZEL_BASE:          3006,
         PHOSPHOR_THEME_BASE: 600,
         OVERLAY_ALL_OFF:     199,
         SHOW_REFLECTION:     200,
@@ -877,7 +892,7 @@ class PanelArtController {
         artistFontSize: 28,
         extraFontName: 'Segoe UI',
         extraFontSize: 20,
-        imageFolder: '',
+        imageFolder: 'profile\\skins\\images',
         imageMode: false,
         slideMode: false,
         bezelFolder: '',
@@ -972,12 +987,22 @@ class PanelArtController {
         cfg.extraFontName       = window.GetProperty('PA.ExtraFontName', 'Segoe UI');
         cfg.extraFontSize       = GdiUtils.clamp(window.GetProperty('PA.ExtraFontSize', 20), 8, 60);
 
-        cfg.imageFolder         = window.GetProperty('PA.ImageFolder', `${this.#profileBase}skins\\images`);
+        cfg.imageFolder         = GdiUtils.sanitizePath(window.GetProperty('PA.ImageFolder', 'profile\\skins\\images')) || 'profile\\skins\\images';
         cfg.bezelFolder         = GdiUtils.sanitizePath(window.GetProperty('PA.BezelFolder', `${this.#profileBase}skins\\overlay`)) || `${this.#profileBase}skins\\overlay`;
         cfg.bezelEnabled        = window.GetProperty('PA.BezelEnabled', false);
         cfg.bezelFile           = window.GetProperty('PA.BezelFile', '');
         cfg.imageMode           = window.GetProperty('PA.ImageMode', false);
         cfg.slideMode           = window.GetProperty('PA.SlideMode', false);
+    }
+
+    resolveProfileFolder(pathStr) {
+        const clean = GdiUtils.sanitizePath(pathStr);
+        if (!clean) return '';
+        if (/^profile(?:[\\\/]|$)/i.test(clean)) {
+            const sub = clean.replace(/^profile[\\\/]?/i, '').replace(/\//g, '\\');
+            return GdiUtils.sanitizePath(`${this.#profileBase}${sub}`);
+        }
+        return clean;
     }
 
     #loadCustomFolders() {
@@ -1293,8 +1318,8 @@ class PanelArtController {
         this.#rebuildBackground();
         window.Repaint();
     }
-	
-refreshColours() {
+
+    refreshColours() {
         if (this.config.bgUseUIColor) {
             this.#dirtyFlags |= PanelArtController.DIRTY.BACKGROUND;
             this.#rebuildBackground();
@@ -1342,6 +1367,17 @@ refreshColours() {
 
     clearTrackDisplay() {
         this.#currentTrackPath = '';
+        this.#trackInfo.title  = 'No track playing';
+        this.#trackInfo.artist = '';
+        this.#trackInfo.extra  = '';
+        this.#disposeTextBlock();
+
+        if (this.config.imageMode || this.config.slideMode) {
+            this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
+            window.Repaint();
+            return;
+        }
+
         this.#currentCoverPath = '';
         this.#currentArtKey    = '';
         this.#artGenerationToken++;
@@ -1349,19 +1385,14 @@ refreshColours() {
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
-        this.#disposeTextBlock();
-
-        this.#trackInfo.title  = 'No track playing';
-        this.#trackInfo.artist = '';
-        this.#trackInfo.extra  = '';
 
         this.#dirtyFlags = PanelArtController.DIRTY.ALL;
         this.#backdrop.dispose();
         this.#rebuildBackground();
         window.Repaint();
     }
-
-    // ========================================================================================
+	
+// ========================================================================================
     // 6. ENHANCED GLITCH SHADER & VIDEO DROPOUT ENGINE
     // ========================================================================================
     triggerGlitch() {
@@ -1474,7 +1505,7 @@ refreshColours() {
 
     #getSafeUIColour() {
         try {
-            // Corrected: DUI background is 0 (1 is text). CUI background is 3.
+            // DUI: 0 = text, 1 = background. CUI: 3 = background.
             return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
         } catch {
             return GdiUtils.RGB(32, 32, 32);
@@ -1487,17 +1518,18 @@ refreshColours() {
     startImageMode(interactive = true) {
         this.stopSlideMode(false);
         const thisToken = ++this.#artGenerationToken;
-        let images = this.#scanner.getFolderImagesList(this.config.imageFolder);
+        let images = this.#scanner.getFolderImagesList(this.resolveProfileFolder(this.config.imageFolder));
 
         if (!images.length) {
             if (interactive) {
                 const f = GdiUtils.prompt("No images found in image folder. Enter a valid path:", "Set Image Folder", this.config.imageFolder);
                 if (f) {
                     const cleaned = GdiUtils.sanitizePath(f);
-                    if (cleaned && utils.IsDirectory(cleaned)) {
+                    const resolved = this.resolveProfileFolder(cleaned);
+                    if (resolved && utils.IsDirectory(resolved)) {
                         this.config.imageFolder = cleaned;
                         this.saveAll();
-                        images = this.#scanner.getFolderImagesList(this.config.imageFolder);
+                        images = this.#scanner.getFolderImagesList(resolved);
                     }
                 }
             }
@@ -1543,17 +1575,18 @@ refreshColours() {
     startSlideMode(interactive = true) {
         this.stopImageMode(false);
         const thisToken = ++this.#artGenerationToken;
-        this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+        this.#slideImages = this.#scanner.getFolderImagesList(this.resolveProfileFolder(this.config.imageFolder));
 
         if (!this.#slideImages.length) {
             if (interactive) {
                 const f = GdiUtils.prompt("No images found in image folder. Enter a valid path:", "Set Image Folder", this.config.imageFolder);
                 if (f) {
                     const cleaned = GdiUtils.sanitizePath(f);
-                    if (cleaned && utils.IsDirectory(cleaned)) {
+                    const resolved = this.resolveProfileFolder(cleaned);
+                    if (resolved && utils.IsDirectory(resolved)) {
                         this.config.imageFolder = cleaned;
                         this.saveAll();
-                        this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+                        this.#slideImages = this.#scanner.getFolderImagesList(resolved);
                     }
                 }
             }
@@ -1574,7 +1607,7 @@ refreshColours() {
             if (thisToken !== this.#artGenerationToken) return;
 
             if (!this.#slideImages || !this.#slideImages.length) {
-                this.#slideImages = this.#scanner.getFolderImagesList(this.config.imageFolder);
+                this.#slideImages = this.#scanner.getFolderImagesList(this.resolveProfileFolder(this.config.imageFolder));
             }
             if (!this.#slideImages.length) {
                 this.stopSlideMode(true);
@@ -1637,6 +1670,12 @@ refreshColours() {
                 this.#rebuildOverlay();
             }
             if (this.#backdrop.overlayBmp) gr.DrawImage(this.#backdrop.overlayBmp, 0, 0, w, h, 0, 0, this.#backdrop.overlayBmp.Width, this.#backdrop.overlayBmp.Height);
+
+            if (this.#opacityTarget) {
+                this.#drawSliderHud(gr, w, h);
+            } else if (this.#bezelNotifyText) {
+                this.#drawBezelToast(gr, w, h);
+            }
             return;
         }
 
@@ -1662,7 +1701,7 @@ refreshColours() {
         }
 
         // Layer 2: Cover Art
-        if (this.#coverImg && this.config.albumArtEnabled && fb.IsPlaying && this.#layout.artRect.w > 0) {
+        if (this.#coverImg && this.config.albumArtEnabled && this.#layout.artRect.w > 0) {
             const ar = this.#layout.artRect;
 
             if (this.#glitchBlackout) {
@@ -1739,7 +1778,7 @@ refreshColours() {
         let artRect = { x: 0, y: 0, w: 0, h: 0 };
         let textRect = { x: inL + 8, y: inT + 8, w: Math.max(10, contentW - 16), h: Math.max(10, contentH - 16) };
 
-        if (this.#coverImg && this.config.albumArtEnabled && fb.IsPlaying) {
+        if (this.#coverImg && this.config.albumArtEnabled) {
             const flt = this.config.albumArtFloat;
             if (flt === 'left' || flt === 'right') {
                 const maxW = Math.max(10, Math.floor(contentW * 0.65) - pad);
@@ -1877,6 +1916,8 @@ refreshColours() {
             return 0;
         };
 
+        const shOff = Math.max(1, this.scale(2));
+
         let bmp = null, g = null;
         try {
             bmp = gdi.CreateImage(rw, rh);
@@ -1889,7 +1930,7 @@ refreshColours() {
             if (this.#trackInfo.title && fTitle) {
                 const rx = getAlignedRelX(mTitle.Width);
                 if (this.config.textShadowEnabled) {
-                    g.DrawString(this.#trackInfo.title, fTitle, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + 2, curY + 2, mTitle.Width + 4, mTitle.Height + 4);
+                    g.DrawString(this.#trackInfo.title, fTitle, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + shOff, curY + shOff, mTitle.Width + 4, mTitle.Height + 4);
                 }
                 g.DrawString(this.#trackInfo.title, fTitle, GdiUtils.RGB(255, 255, 255), rx, curY, mTitle.Width + 4, mTitle.Height + 4);
                 curY += mTitle.Height + gap1;
@@ -1899,7 +1940,7 @@ refreshColours() {
             if (hasArtist && fArtist) {
                 const rx = getAlignedRelX(mArtist.Width);
                 if (this.config.textShadowEnabled) {
-                    g.DrawString(this.#trackInfo.artist, fArtist, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + 2, curY + 2, mArtist.Width + 4, mArtist.Height + 4);
+                    g.DrawString(this.#trackInfo.artist, fArtist, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + shOff, curY + shOff, mArtist.Width + 4, mArtist.Height + 4);
                 }
                 g.DrawString(this.#trackInfo.artist, fArtist, GdiUtils.RGB(200, 200, 200), rx, curY, mArtist.Width + 4, mArtist.Height + 4);
                 curY += mArtist.Height + gap2;
@@ -1910,7 +1951,7 @@ refreshColours() {
                 const rx = getAlignedRelX(mExtra.Width);
                 const drawH = Math.max(mExtra.Height + 4, rh - curY);
                 if (this.config.textShadowEnabled) {
-                    g.DrawString(this.#trackInfo.extra, fExtra, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + 2, curY + 2, mExtra.Width + 4, drawH);
+                    g.DrawString(this.#trackInfo.extra, fExtra, GdiUtils.setAlpha(GdiUtils.RGB(0, 0, 0), 160), rx + shOff, curY + shOff, mExtra.Width + 4, drawH);
                 }
                 g.DrawString(this.#trackInfo.extra, fExtra, GdiUtils.RGB(170, 170, 170), rx, curY, mExtra.Width + 4, drawH);
             }
@@ -2133,7 +2174,8 @@ refreshColours() {
         }
         customFM.AppendTo(m, 0, "Custom Artwork Folders");
 
-        m.AppendMenuItem(0, MID.IMAGE_FOLDER_SET, (this.config.imageFolder && utils.IsDirectory(this.config.imageFolder)) ? "Change Image Folder..." : "Set Image Folder...");
+        const resolvedImageFolder = this.resolveProfileFolder(this.config.imageFolder);
+        m.AppendMenuItem(0, MID.IMAGE_FOLDER_SET, (resolvedImageFolder && utils.IsDirectory(resolvedImageFolder)) ? "Change Image Folder..." : "Set Image Folder...");
         m.AppendMenuItem(0, MID.SHOW_SINGLE_IMAGE, "Show Single Image");
         if (this.config.imageMode) m.CheckMenuRadioItem(MID.SHOW_SINGLE_IMAGE, MID.SHOW_SINGLE_IMAGE, MID.SHOW_SINGLE_IMAGE);
         m.AppendMenuItem(0, MID.SLIDE_SHOW, "Slide Show");
@@ -2375,7 +2417,8 @@ refreshColours() {
             const f = GdiUtils.prompt("Enter custom image folder path for slideshow/display:", "Set Image Folder", this.config.imageFolder);
             if (f) {
                 const cleaned = GdiUtils.sanitizePath(f);
-                if (cleaned && utils.IsDirectory(cleaned)) {
+                const resolved = this.resolveProfileFolder(cleaned);
+                if (resolved && utils.IsDirectory(resolved)) {
                     this.config.imageFolder = cleaned;
                     this.#slideImages = null;
                     this.saveAll();
@@ -2416,17 +2459,20 @@ refreshColours() {
                 extraFontName: 'Segoe UI', extraFontSize: 20, imageMode: false, slideMode: false,
                 bezelEnabled: false, bezelFile: ''
             });
+            this.#scanner.clearCaches();
             this.loadBezel();
             this.#dirtyFlags = PanelArtController.DIRTY.ALL;
             this.#rebuildBackground();
             this.#rebuildOverlay();
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else this.clearTrackDisplay();
         } else if (id === MID.FACTORY_RESET) {
             const confirm = GdiUtils.prompt("Type YES to reset all settings, custom folders and paths to factory defaults:", "Confirm Factory Reset", "");
             if (confirm?.toUpperCase() === 'YES') {
                 this.stopSlideMode(false);
                 this.stopImageMode(false);
                 this.#customFolders = [];
-                this.config.imageFolder = `${this.#profileBase}skins\\images`;
+                this.config.imageFolder = 'profile\\skins\\images';
                 this.config.bezelFolder = `${this.#profileBase}skins\\overlay`;
                 this.config.customPhosphorColor = 0xFFFFFFFF;
                 for (let p = 1; p <= 3; p++) window.SetProperty(`PA.Preset${p}`, '');
@@ -2489,7 +2535,7 @@ refreshColours() {
             if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} }
             this.#coverImg = image;
             this.#currentCoverPath = image_path || '';
-            if (this.#currentArtKey) {
+            if (this.#currentArtKey && this.#scanner.isImageFilePath(this.#currentCoverPath)) {
                 this.#scanner.setArtMemoryCache(this.#currentArtKey, this.#currentCoverPath);
             }
         } else {
@@ -2540,6 +2586,7 @@ refreshColours() {
     }
 
     setOpacityTarget(target) {
+        if (this.#opacityTarget === target) return;
         this.#opacityTarget = target;
         window.Repaint();
     }
@@ -2562,7 +2609,9 @@ refreshColours() {
             this.#rebuildOverlay();
             this.requestSave();
             window.Repaint();
-        } catch (err) {}
+        } catch (err) {
+            console.log(`[PanelArt] Failed to load preset ${slot}: ${err}`);
+        }
     }
 
     savePreset(slot) {
@@ -2633,7 +2682,7 @@ refreshColours() {
     }
 
     onKeyDown(vkey) {
-        if (vkey === 0x1B) { // Escape
+        if (vkey === 0x1B && this.#opacityTarget !== null) { // Escape
             this.setOpacityTarget(null);
             return true;
         }

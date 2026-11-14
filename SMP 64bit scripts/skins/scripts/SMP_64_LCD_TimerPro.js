@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.3 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.4 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,7 +16,7 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.3', 
+    version: '2.4', 
     features: { grab_focus: true } 
 });
 
@@ -54,9 +54,9 @@ class GdiUtils {
     static blendColours(c1, c2, f) {
         const r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
         const r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
-        const r = (r1 + f * (r2 - r1)) & 0xFF;
-        const g = (g1 + f * (g2 - g1)) & 0xFF;
-        const b = (b1 + f * (b2 - b1)) & 0xFF;
+        const r = Math.round(r1 + f * (r2 - r1)) & 0xFF;
+        const g = Math.round(g1 + f * (g2 - g1)) & 0xFF;
+        const b = Math.round(b1 + f * (b2 - b1)) & 0xFF;
         return (0xFF000000 | (r << 16) | (g << 8) | b) >>> 0;
     }
 
@@ -381,7 +381,7 @@ class DigitSpriteCache {
                     gg = null;
                     this.#ghostSprites.set(ch, { bmp: gBmp, w: gw, h: gh, bmpW, bmpH, margin });
                 } catch {
-                    if (gg && gBmp) { try { gBmp.Dispose(); } catch {} }
+                    if (gg && gBmp) { try { gBmp.ReleaseGraphics(gg); } catch {} }
                     if (gBmp) { try { gBmp.Dispose(); } catch {} }
                 }
             }
@@ -433,9 +433,9 @@ class DigitSpriteCache {
                     gg.DrawString(ghostCh, font, ghostCol, margin, margin, w + 2, h + 2);
                     gBmp.ReleaseGraphics(gg);
                     gg = null;
-                    this.#ghostSprites.set(ch, { bmp: gBmp, w: h, bmpW, bmpH, margin });
+                    this.#ghostSprites.set(ch, { bmp: gBmp, w, h, bmpW, bmpH, margin });
                 } catch {
-                    if (gg && gBmp) { try { gBmp.Dispose(); } catch {} }
+                    if (gg && gBmp) { try { gBmp.ReleaseGraphics(gg); } catch {} }
                     if (gBmp) { try { gBmp.Dispose(); } catch {} }
                 }
             }
@@ -728,11 +728,11 @@ class LcdTimerController {
         AUTO_FONT_SIZE:      501,
         SHOW_M0_CODEC:       106,
         SHOW_M0_TECH:        107,
-        CLOCK_FONT_DIGITAL:  405,
         CLOCK_FONT_EXTERNAL: 400,
+        CLOCK_FONT_DIGITAL:  401,
+        CODEC_FONT_NAME:     402,
+        TECH_FONT_NAME:      403,
         CLOCK_ITALIC_TOGGLE: 406,
-        CODEC_FONT_NAME:     401,
-        TECH_FONT_NAME:      402,
         CLOCK_FONT_SIZE:     410,
         CODEC_FONT_SIZE:     411,
         TECH_FONT_SIZE:      412,
@@ -747,11 +747,11 @@ class LcdTimerController {
         PLAY_ICON_BASE:      700,
         PRESET_LOAD_BASE:    901,
         PRESET_SAVE_BASE:    911,
-        BEZEL_ENABLE:        970,
-        BEZEL_FOLDER:        972,
-        BEZEL_RELOAD:        973,
-        BEZEL_NONE:          975,
-        BEZEL_BASE:          976,
+        BEZEL_ENABLE:        2000,
+        BEZEL_FOLDER:        2001,
+        BEZEL_RELOAD:        2002,
+        BEZEL_NONE:          2005,
+        BEZEL_BASE:          2006,
         PAD_LEFT:            3110,
         PAD_RIGHT:           3111,
         PAD_TOP:             3112,
@@ -938,7 +938,6 @@ class LcdTimerController {
     #lastDblClkTime     = 0;
     #positionAdjustMode = null;
     #opacityTarget      = null;
-    #blinkTarget        = null;
 
     #compoundTf = fb.TitleFormat('%codec%\x01%title%\x01%artist%\x01%album%\x01%bitrate%\x01%samplerate%\x01%__bitspersample%\x01%channels%');
 
@@ -956,8 +955,7 @@ class LcdTimerController {
         padL: 0, padR: 0, padT: 0, padB: 0, dw: 0, dh: 0,
         ghostW: 0, ghostH: 0, ghostStr: '',
         m0TechParts: [], m1TechParts: [],
-        iconW: 0, iconH: 0,
-        timeCache: { str: '', w: 0, h: 0 }
+        iconW: 0, iconH: 0
     };
 
     config = { ...LcdTimerController.DEFAULTS };
@@ -1000,16 +998,21 @@ class LcdTimerController {
         const out = { ...fallback };
         if (!raw || typeof raw !== 'object') return out;
 
-        out.themeIdx             = GdiUtils.clamp(parseInt(raw.themeIdx, 10) || 0, 0, LcdTimerController.THEMES.length);
+        const intOr = (val, def) => {
+            const n = parseInt(val, 10);
+            return Number.isNaN(n) ? def : n;
+        };
+
+        out.themeIdx             = GdiUtils.clamp(intOr(raw.themeIdx, fallback.themeIdx), 0, LcdTimerController.THEMES.length);
         out.syncTheme            = typeof raw.syncTheme === 'boolean' ? raw.syncTheme : fallback.syncTheme;
-        out.borderMode           = GdiUtils.clamp(parseInt(raw.borderMode, 10) || 0, 0, 50);
+        out.borderMode           = GdiUtils.clamp(intOr(raw.borderMode, fallback.borderMode), 0, 50);
         out.showGhost            = typeof raw.showGhost === 'boolean' ? raw.showGhost : fallback.showGhost;
         out.useReflection        = typeof raw.useReflection === 'boolean' ? raw.useReflection : fallback.useReflection;
         out.showShadow           = typeof raw.showShadow === 'boolean' ? raw.showShadow : fallback.showShadow;
         out.showGlow             = typeof raw.showGlow === 'boolean' ? raw.showGlow : fallback.showGlow;
         out.showScanlines        = typeof raw.showScanlines === 'boolean' ? raw.showScanlines : fallback.showScanlines;
         out.showPhosphor         = typeof raw.showPhosphor === 'boolean' ? raw.showPhosphor : fallback.showPhosphor;
-        out.displayMode          = GdiUtils.clamp(parseInt(raw.displayMode, 10) || 0, 0, 1);
+        out.displayMode          = GdiUtils.clamp(intOr(raw.displayMode, fallback.displayMode), 0, 1);
         out.autoFontSize         = typeof raw.autoFontSize === 'boolean' ? raw.autoFontSize : fallback.autoFontSize;
         out.modeRemaining        = typeof raw.modeRemaining === 'boolean' ? raw.modeRemaining : fallback.modeRemaining;
         out.italicSlant          = typeof raw.italicSlant === 'boolean' ? raw.italicSlant : fallback.italicSlant;
@@ -1022,48 +1025,48 @@ class LcdTimerController {
         out.showM1Codec          = typeof raw.showM1Codec === 'boolean' ? raw.showM1Codec : fallback.showM1Codec;
         out.showM1Tech           = typeof raw.showM1Tech === 'boolean' ? raw.showM1Tech : fallback.showM1Tech;
 
-        out.vOffset              = GdiUtils.clamp(parseInt(raw.vOffset, 10) || 0, -200, 200);
-        out.codecOffX            = GdiUtils.clamp(parseInt(raw.codecOffX, 10) || -10, -200, 200);
-        out.codecOffY            = GdiUtils.clamp(parseInt(raw.codecOffY, 10) || -20, -200, 200);
-        out.detailOffX           = GdiUtils.clamp(parseInt(raw.detailOffX, 10) || -10, -200, 200);
-        out.detailOffY           = GdiUtils.clamp(parseInt(raw.detailOffY, 10) || -5, -200, 200);
-        out.m1TitleOffX          = GdiUtils.clamp(parseInt(raw.m1TitleOffX, 10) || -10, -200, 200);
-        out.m1TitleOffY          = GdiUtils.clamp(parseInt(raw.m1TitleOffY, 10) || -20, -200, 200);
-        out.m1CodecOffX          = GdiUtils.clamp(parseInt(raw.m1CodecOffX, 10) || -10, -200, 200);
-        out.m1CodecOffY          = GdiUtils.clamp(parseInt(raw.m1CodecOffY, 10) || -5, -200, 200);
+        out.vOffset              = GdiUtils.clamp(intOr(raw.vOffset, fallback.vOffset), -200, 200);
+        out.codecOffX            = GdiUtils.clamp(intOr(raw.codecOffX, fallback.codecOffX), -200, 200);
+        out.codecOffY            = GdiUtils.clamp(intOr(raw.codecOffY, fallback.codecOffY), -200, 200);
+        out.detailOffX           = GdiUtils.clamp(intOr(raw.detailOffX, fallback.detailOffX), -200, 200);
+        out.detailOffY           = GdiUtils.clamp(intOr(raw.detailOffY, fallback.detailOffY), -200, 200);
+        out.m1TitleOffX          = GdiUtils.clamp(intOr(raw.m1TitleOffX, fallback.m1TitleOffX), -200, 200);
+        out.m1TitleOffY          = GdiUtils.clamp(intOr(raw.m1TitleOffY, fallback.m1TitleOffY), -200, 200);
+        out.m1CodecOffX          = GdiUtils.clamp(intOr(raw.m1CodecOffX, fallback.m1CodecOffX), -200, 200);
+        out.m1CodecOffY          = GdiUtils.clamp(intOr(raw.m1CodecOffY, fallback.m1CodecOffY), -200, 200);
 
-        out.opClock              = GdiUtils.clamp(parseInt(raw.opClock, 10) || 255, 0, 255);
-        out.opGhost              = GdiUtils.clamp(parseInt(raw.opGhost, 10) || 5, 0, 255);
-        out.opTech               = GdiUtils.clamp(parseInt(raw.opTech, 10) || 255, 0, 255);
-        out.opBorder             = GdiUtils.clamp(parseInt(raw.opBorder, 10) || 60, 0, 255);
-        out.opBG                 = GdiUtils.clamp(parseInt(raw.opBG, 10) || 255, 0, 255);
-        out.opReflection         = GdiUtils.clamp(parseInt(raw.opReflection, 10) || 20, 0, 255);
-        out.opShadow             = GdiUtils.clamp(parseInt(raw.opShadow, 10) || 60, 0, 255);
-        out.opGlow               = GdiUtils.clamp(parseInt(raw.opGlow, 10) || 110, 0, 255);
-        out.opScanlines          = GdiUtils.clamp(parseInt(raw.opScanlines, 10) || 50, 0, 255);
-        out.opPhosphor           = GdiUtils.clamp(parseInt(raw.opPhosphor, 10) || 10, 0, 255);
+        out.opClock              = GdiUtils.clamp(intOr(raw.opClock, fallback.opClock), 0, 255);
+        out.opGhost              = GdiUtils.clamp(intOr(raw.opGhost, fallback.opGhost), 0, 255);
+        out.opTech               = GdiUtils.clamp(intOr(raw.opTech, fallback.opTech), 0, 255);
+        out.opBorder             = GdiUtils.clamp(intOr(raw.opBorder, fallback.opBorder), 0, 255);
+        out.opBG                 = GdiUtils.clamp(intOr(raw.opBG, fallback.opBG), 0, 255);
+        out.opReflection         = GdiUtils.clamp(intOr(raw.opReflection, fallback.opReflection), 0, 255);
+        out.opShadow             = GdiUtils.clamp(intOr(raw.opShadow, fallback.opShadow), 0, 255);
+        out.opGlow               = GdiUtils.clamp(intOr(raw.opGlow, fallback.opGlow), 0, 255);
+        out.opScanlines          = GdiUtils.clamp(intOr(raw.opScanlines, fallback.opScanlines), 0, 255);
+        out.opPhosphor           = GdiUtils.clamp(intOr(raw.opPhosphor, fallback.opPhosphor), 0, 255);
 
         out.overlayAllOff        = typeof raw.overlayAllOff === 'boolean' ? raw.overlayAllOff : fallback.overlayAllOff;
         out.bezelFolder          = GdiUtils.sanitizePath(String(raw.bezelFolder || fallback.bezelFolder));
         out.bezelEnabled         = typeof raw.bezelEnabled === 'boolean' ? raw.bezelEnabled : fallback.bezelEnabled;
         out.bezelFile            = String(raw.bezelFile || '');
 
-        out.padLeft              = GdiUtils.clamp(parseInt(raw.padLeft, 10) || 0, 0, 100);
-        out.padRight             = GdiUtils.clamp(parseInt(raw.padRight, 10) || 0, 0, 100);
-        out.padTop               = GdiUtils.clamp(parseInt(raw.padTop, 10) || 0, 0, 100);
-        out.padBottom            = GdiUtils.clamp(parseInt(raw.padBottom, 10) || 0, 0, 100);
+        out.padLeft              = GdiUtils.clamp(intOr(raw.padLeft, fallback.padLeft), 0, 100);
+        out.padRight             = GdiUtils.clamp(intOr(raw.padRight, fallback.padRight), 0, 100);
+        out.padTop               = GdiUtils.clamp(intOr(raw.padTop, fallback.padTop), 0, 100);
+        out.padBottom            = GdiUtils.clamp(intOr(raw.padBottom, fallback.padBottom), 0, 100);
 
         out.clockFontName        = String(raw.clockFontName || 'Digital').trim() || 'Digital';
-        out.clockFontSize        = GdiUtils.clamp(parseInt(raw.clockFontSize, 10) || 48, 8, 120);
+        out.clockFontSize        = GdiUtils.clamp(intOr(raw.clockFontSize, fallback.clockFontSize), 8, 120);
         out.codecFontName        = String(raw.codecFontName || 'Segoe UI').trim() || 'Segoe UI';
-        out.codecFontSize        = GdiUtils.clamp(parseInt(raw.codecFontSize, 10) || 14, 8, 80);
+        out.codecFontSize        = GdiUtils.clamp(intOr(raw.codecFontSize, fallback.codecFontSize), 8, 80);
         out.techFontName         = String(raw.techFontName || 'Segoe UI').trim() || 'Segoe UI';
-        out.techFontSize         = GdiUtils.clamp(parseInt(raw.techFontSize, 10) || 14, 8, 80);
+        out.techFontSize         = GdiUtils.clamp(intOr(raw.techFontSize, fallback.techFontSize), 8, 80);
         out.textRowFontName      = String(raw.textRowFontName || 'Segoe UI').trim() || 'Segoe UI';
-        out.textRowFontSize      = GdiUtils.clamp(parseInt(raw.textRowFontSize, 10) || 20, 8, 100);
-        out.m1CodecFontSize      = GdiUtils.clamp(parseInt(raw.m1CodecFontSize, 10) || 0, 0, 80);
+        out.textRowFontSize      = GdiUtils.clamp(intOr(raw.textRowFontSize, fallback.textRowFontSize), 8, 100);
+        out.m1CodecFontSize      = GdiUtils.clamp(intOr(raw.m1CodecFontSize, fallback.m1CodecFontSize), 0, 80);
 
-        out.playIconType         = GdiUtils.clamp(parseInt(raw.playIconType, 10) || 2, 0, 3);
+        out.playIconType         = GdiUtils.clamp(intOr(raw.playIconType, fallback.playIconType), 0, 3);
         out.playIconBlink        = typeof raw.playIconBlink === 'boolean' ? raw.playIconBlink : fallback.playIconBlink;
 
         out.custBg               = (Number(raw.custBg) >>> 0) || fallback.custBg;
@@ -1261,14 +1264,16 @@ class LcdTimerController {
         const pad = this.scale(15) + (this.config.borderMode > 0 ? Math.ceil(this.scale(this.config.borderMode) / 2) + 4 : 0);
         const availW = Math.max(10, lo.dw - pad * 2);
         const minM1TextSize = Math.max(8, this.scale(9));
-        lo.timeCache.str = '';
 
         const isInternal = (this.config.clockFontName === 'Digital');
 
         if (this.config.displayMode === 0) {
             const maxLen = Math.max(fb.PlaybackLength || 0, fb.PlaybackTime || 0);
             const maxH = Math.floor(maxLen / 3600);
-            const curM = Math.floor(((fb.PlaybackTime || 0) % 3600) / 60);
+            const dispSec = this.config.modeRemaining
+                ? Math.ceil(Math.max(0, (fb.PlaybackLength || 0) - (fb.PlaybackTime || 0)))
+                : Math.floor(fb.PlaybackTime || 0);
+            const curM = Math.floor((dispSec % 3600) / 60);
             const maxSampleTime = maxH >= 10 ? '-88:88:88' : (maxH > 0 ? '-8:88:88' : '-88:88');
 
             if (this.config.autoFontSize) {
@@ -1321,9 +1326,8 @@ class LcdTimerController {
                 lo.ghostW = this.#digitSprites.getStringWidth(lo.ghostStr);
                 lo.ghostH = lo.clockSize;
             } else {
-                const gSize = gr.MeasureString(lo.ghostStr, lo.clockFont, 0, 0, 9999, 9999);
-                lo.ghostW = gSize.Width;
-                lo.ghostH = gSize.Height;
+                lo.ghostW = this.#digitSprites.getStringWidth(lo.ghostStr);
+                lo.ghostH = this.#digitSprites.digitH || lo.clockSize;
             }
 
             lo.m0TechParts = [
@@ -1417,8 +1421,8 @@ class LcdTimerController {
 
         this.#dirtyFlags &= ~LcdTimerController.DIRTY.LAYOUT;
     }
-	
-onPaint(gr) {
+
+    onPaint(gr) {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || !window.IsVisible) return;
         const w = window.Width;
         const h = window.Height;
@@ -1462,7 +1466,6 @@ onPaint(gr) {
             this.updateLayout(gr, w, h);
         }
         const lo = this.#layout;
-        const isInternal = (this.config.clockFontName === 'Digital');
         const pad = this.scale(15) + (this.config.borderMode > 0 ? Math.ceil(this.scale(this.config.borderMode) / 2) + 4 : 0);
 
         // MODE 0: DIGITAL TIMER
@@ -1471,10 +1474,7 @@ onPaint(gr) {
             let rawTime = this.#lastTimeStr;
             if (!isPlaying || !rawTime) rawTime = this.config.modeRemaining ? '-0:00' : ' 0:00';
 
-            const totalW = isInternal
-                ? this.#digitSprites.getStringWidth(lo.ghostStr)
-                : (lo.timeCache.str === rawTime ? lo.timeCache.w : gr.MeasureString(rawTime, lo.clockFont, 0, 0, 9999, 9999).Width);
-
+            const totalW = this.#digitSprites.getStringWidth(lo.ghostStr);
             const clockX = lo.padL + Math.round((lo.dw - totalW) / 2);
             const clockY = lo.padT + Math.round(lo.dh / 2) + this.config.vOffset - Math.round(lo.clockSize / 2);
 
@@ -1543,7 +1543,7 @@ onPaint(gr) {
         const barW = Math.min(this.scale(220), Math.round(w * 0.6));
         const bx = Math.floor((w - barW) / 2);
         const by = h - this.scale(18);
-        const font = this.#fonts.get('Segoe UI', 12);
+        const font = this.#fonts.get('Segoe UI', this.scale(12));
         const val = this.getOpacity(this.#opacityTarget);
         const label = `${this.#opacityTarget}: ${val}`;
         const lSize = gr.MeasureString(label, font, 0, 0, 9999, 9999);
@@ -1555,7 +1555,7 @@ onPaint(gr) {
 
     #drawPositionHud(gr, w, h) {
         const msg = `Adjusting ${this.#positionAdjustMode} (Arrows/Wheel | Esc/Click exit)`;
-        const font = this.#fonts.get('Segoe UI', 10);
+        const font = this.#fonts.get('Segoe UI', this.scale(10));
         const mSize = gr.MeasureString(msg, font, 0, 0, 9999, 9999);
         const mx = (w - mSize.Width) / 2;
         const my = h - this.scale(25);
@@ -1616,14 +1616,6 @@ onPaint(gr) {
 
         const maxLen = Math.max(fb.PlaybackLength || 0, fb.PlaybackTime || 0);
         const maxH = Math.floor(maxLen / 3600);
-        const curM = Math.floor(((fb.PlaybackTime || 0) % 3600) / 60);
-
-        const ghostTpl = this.getGhostTemplate(maxH, this.config.modeRemaining, curM);
-        const tplChanged = (ghostTpl !== this.#lastGhostTemplate);
-        if (tplChanged) {
-            this.#lastGhostTemplate = ghostTpl;
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
-        }
 
         const t = this.config.modeRemaining ? Math.max(0, fb.PlaybackLength - fb.PlaybackTime) : fb.PlaybackTime;
         const s = this.config.modeRemaining ? Math.ceil(t) : Math.floor(t);
@@ -1632,6 +1624,13 @@ onPaint(gr) {
         const sec = s % 60;
         const sStr = (sec < 10 ? '0' : '') + sec;
         const rem = this.config.modeRemaining;
+
+        const ghostTpl = this.getGhostTemplate(maxH, rem, m);
+        const tplChanged = (ghostTpl !== this.#lastGhostTemplate);
+        if (tplChanged) {
+            this.#lastGhostTemplate = ghostTpl;
+            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+        }
 
         let timeStr = '';
         if (maxH >= 10) {
@@ -1646,7 +1645,6 @@ onPaint(gr) {
 
         if (forceImmediate || tplChanged || timeStr !== this.#lastTimeStr) {
             this.#lastTimeStr = timeStr;
-            this.#layout.timeCache.str = '';
 
             if (tplChanged) {
                 window.Repaint();
@@ -1655,7 +1653,7 @@ onPaint(gr) {
                 const clockY = this.#layout.padT + (this.#layout.dh / 2) + this.config.vOffset - (this.#layout.clockSize / 2);
                 const clipY = Math.max(0, Math.round(clockY - padMargin));
                 const clipH = Math.min(window.Height - clipY, this.#layout.ghostH + (padMargin * 2) + Math.abs(this.config.vOffset));
-                window.RepaintRect(0, clipY, window.Width, clipH);
+                if (clipH > 0) window.RepaintRect(0, clipY, window.Width, clipH);
             }
         }
     }
@@ -1665,7 +1663,7 @@ onPaint(gr) {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
 
         const canBlink = (this.config.displayMode === 0 && this.config.showM0Codec && fb.IsPaused) ||
-                         (this.config.displayMode === 1 && this.config.playIconType > 0 && this.config.playIconBlink && (fb.IsPlaying || fb.IsPaused));
+                         (this.config.displayMode === 1 && this.config.playIconType > 0 && this.config.playIconBlink && fb.IsPlaying && !fb.IsPaused);
         if (!canBlink) return;
 
         if (!window.IsVisible) {
@@ -1694,16 +1692,14 @@ onPaint(gr) {
                 const cx = Math.max(0, this.#layout.padL + pad + this.config.codecOffX - 4);
                 const cy = Math.max(0, this.#layout.padT + pad + this.config.codecOffY - 4);
                 const cw = Math.min(window.Width - cx, Math.ceil((this.#layout.codecW || this.scale(60)) + 8));
-                const ch = Math.min(window.Height - cy, Math.ceil(this.#layout.codecSize + 8));
-                this.#blinkTarget = { x: cx, y: cy, w: cw, h: ch, type: 'codec' };
-                window.RepaintRect(cx, cy, cw, ch);
-            } else if (this.config.displayMode === 1 && this.config.playIconType > 0 && this.config.playIconBlink) {
+                const ch = Math.min(window.Height - cy, Math.ceil((this.#layout.codecFont?.Height || this.#layout.codecSize * 1.4) + 8));
+                if (cw > 0 && ch > 0) window.RepaintRect(cx, cy, cw, ch);
+            } else if (this.config.displayMode === 1 && this.config.playIconType > 0 && this.config.playIconBlink && fb.IsPlaying && !fb.IsPaused) {
                 const ix = Math.max(0, this.#layout.padL + this.#layout.dw - pad - this.#layout.iconW - 4);
                 const iy = Math.max(0, this.#layout.padT + this.#layout.dh - pad - this.#layout.iconH - 4);
-                const iw = Math.min(window.Width - ix, Math.ceil(this.#layout.iconW + 8));
-                const ih = Math.min(window.Height - iy, Math.ceil(this.#layout.iconH + 8));
-                this.#blinkTarget = { x: ix, y: iy, w: iw, h: ih, type: 'icon' };
-                window.RepaintRect(ix, iy, iw, ih);
+                const iw = Math.min(window.Width - ix, Math.ceil(this.#layout.iconW + 10));
+                const ih = Math.min(window.Height - iy, Math.ceil(this.#layout.iconH + 10));
+                if (iw > 0 && ih > 0) window.RepaintRect(ix, iy, iw, ih);
             }
         }, 500);
     }
@@ -1715,13 +1711,12 @@ onPaint(gr) {
         }
         this.#btnFlash = true;
         this.#codecFlash = true;
-        this.#blinkTarget = null;
         if (!fb.IsPlaying && !fb.IsPaused) {
             this.#lastTimeStr = '';
         }
     }
-
-    onSize() {
+	
+onSize() {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
         this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
         this.#digitSprites.invalidate();
@@ -1762,7 +1757,7 @@ onPaint(gr) {
         const clamped = GdiUtils.clamp(val, 0, 255);
         switch (key) {
             case 'Clock':      this.config.opClock = clamped; this.#digitSprites.invalidate(); this.#mode1Cache.invalidate(); break;
-            case 'Ghost':      this.config.opGhost = clamped; break;
+            case 'Ghost':      this.config.opGhost = clamped; this.#digitSprites.invalidate(); break;
             case 'Tech':       this.config.opTech = clamped; break;
             case 'Border':     this.config.opBorder = clamped; break;
             case 'Background': this.config.opBG = clamped; this.#dirtyFlags |= LcdTimerController.DIRTY.BACKPLATE; break;
@@ -1874,6 +1869,7 @@ onPaint(gr) {
             this.#mode1Cache.invalidate();
             this.#backplate.invalidate();
             this.startTimers();
+            if (this.config.displayMode === 0) this.refreshClock(true);
             window.Repaint();
         } catch (err) {
             console.log(`Failed to load preset ${slot}: ${err}`);
@@ -2149,11 +2145,11 @@ onPaint(gr) {
             this.#backplate.invalidateOverlay(); 
         } else if (id === MID.SHOW_SHADOW) { 
             this.config.showShadow = !this.config.showShadow; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS;
+            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
             this.#digitSprites.invalidate();
         } else if (id === MID.SHOW_GLOW) { 
             this.config.showGlow = !this.config.showGlow; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS;
+            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
             this.#digitSprites.invalidate();
         } else if (id === MID.SHOW_SCANLINES) { 
             this.config.showScanlines = !this.config.showScanlines; 
@@ -2231,10 +2227,10 @@ onPaint(gr) {
             this.#mode1Cache.invalidate();
         } else if (id === MID.SHOW_M1_TITLE) { 
             this.config.showM1Title = !this.config.showM1Title; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.MODE1; 
+            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
         } else if (id === MID.SHOW_M1_ALBUM) { 
             this.config.showM1Album = !this.config.showM1Album; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.MODE1; 
+            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
         } else if (id === MID.SHOW_M1_CODEC) { 
             this.config.showM1Codec = !this.config.showM1Codec; 
             this.#dirtyFlags |= LcdTimerController.DIRTY.MODE1; 
@@ -2289,25 +2285,25 @@ onPaint(gr) {
         } else if (id === MID.CLOCK_FONT_SIZE) {
             const s = GdiUtils.prompt('Clock Font Size (pt):', 'Font Size', this.config.clockFontSize);
             if (s) { 
-                this.config.clockFontSize = Math.max(8, parseInt(s, 10) || 48); 
+                this.config.clockFontSize = GdiUtils.clamp(parseInt(s, 10) || 48, 8, 120); 
                 this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
                 this.#digitSprites.invalidate();
             }
         } else if (id === MID.CODEC_FONT_SIZE) {
             const s = GdiUtils.prompt('Codec Font Size (pt):', 'Font Size', this.config.codecFontSize);
-            if (s) { this.config.codecFontSize = Math.max(8, parseInt(s, 10) || 14); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+            if (s) { this.config.codecFontSize = GdiUtils.clamp(parseInt(s, 10) || 14, 8, 80); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
         } else if (id === MID.TECH_FONT_SIZE) {
             const s = GdiUtils.prompt('Tech Font Size (pt):', 'Font Size', this.config.techFontSize);
-            if (s) { this.config.techFontSize = Math.max(8, parseInt(s, 10) || 14); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+            if (s) { this.config.techFontSize = GdiUtils.clamp(parseInt(s, 10) || 14, 8, 80); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
         } else if (id === MID.M1_TEXT_FONT_NAME) {
             const f = GdiUtils.prompt('Mode 1 Text Font Name:', 'Font Selection', this.config.textRowFontName);
             if (f?.trim()) { this.config.textRowFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
         } else if (id === MID.M1_TEXT_FONT_SIZE) {
             const s = GdiUtils.prompt('Mode 1 Text Font Size (pt):', 'Font Size', this.config.textRowFontSize);
-            if (s) { this.config.textRowFontSize = Math.max(12, parseInt(s, 10) || 20); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+            if (s) { this.config.textRowFontSize = GdiUtils.clamp(parseInt(s, 10) || 20, 8, 100); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
         } else if (id === MID.M1_CODEC_FONT_SIZE) {
             const s = GdiUtils.prompt('Mode 1 Codec Font Size (pt, 0=auto):', 'Font Size', this.config.m1CodecFontSize);
-            if (s !== null && s !== '') { this.config.m1CodecFontSize = Math.max(0, parseInt(s, 10) || 0); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+            if (s !== null && s !== '') { this.config.m1CodecFontSize = GdiUtils.clamp(parseInt(s, 10) || 0, 0, 80); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
         } else if (id >= MID.PRESET_LOAD_BASE && id <= MID.PRESET_LOAD_BASE + 2) {
             this.loadPreset((id - MID.PRESET_LOAD_BASE) + 1);
         } else if (id >= MID.PRESET_SAVE_BASE && id <= MID.PRESET_SAVE_BASE + 2) {
@@ -2322,6 +2318,7 @@ onPaint(gr) {
             this.#mode1Cache.invalidate();
             this.loadBezel();
             this.startTimers();
+            if (this.config.displayMode === 0) this.refreshClock(true);
         } else if (id === MID.FACTORY_RESET) {
             const confirm = GdiUtils.prompt("Type YES to reset all settings, custom colors and bezel paths to factory defaults:", "Confirm Factory Reset", "");
             if (confirm?.toUpperCase() === 'YES') {
@@ -2341,6 +2338,7 @@ onPaint(gr) {
                 this.#digitSprites.invalidate();
                 this.#mode1Cache.invalidate();
                 this.startTimers();
+                if (this.config.displayMode === 0) this.refreshClock(true);
             }
         }
 
@@ -2417,7 +2415,6 @@ function on_playback_new_track() {
 
 function on_playback_stop(reason) { 
     app.stopTimers();
-    app.config.modeRemaining = window.GetProperty('LCD.ModeRemaining', false);
     app.updateInfo();
     if (reason !== 2) {
         window.Repaint(); 

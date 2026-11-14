@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.2 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.3 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.2', 
+    version: '2.3', 
     features: { grab_focus: true } 
 });
 
@@ -104,7 +104,7 @@ class MeterConstants {
     static OPACITY_VALUE_KEYS = {
         Glow: 'glowOpacity',
         Phosphor: 'phosphorOpacity',
-        ScanlineOpacity: 'scanlineOpacity',
+        Scanlines: 'scanlineOpacity',
         Reflection: 'reflectionOpacity',
         OnSegments: 'onSegmentOpacity',
         OffSegments: 'offSegmentOpacity'
@@ -200,6 +200,12 @@ const DPI_SCALE  = SYSTEM_DPI / 96;
 
 function scaleDpi(px) {
     return Math.round(px * DPI_SCALE);
+}
+
+function getEffectiveSpectrumSegments(span, requestedSegs) {
+    const gap = Math.max(1, scaleDpi(1));
+    const maxFit = Math.max(1, Math.floor((span + gap) / (1 + gap)));
+    return Math.max(1, Math.min(Math.max(1, requestedSegs), maxFit));
 }
 
 function getProfilePath() {
@@ -600,13 +606,16 @@ class SpectrumForegroundCache {
     #key = '';
     #bmp = null;
     #segOffsets = null;
+    #effSegs = 0;
 
     get(barW, barH, vertical, theme, flatMode, flatGradient, onOpacity, gradCache, segmentCount) {
-        const key = `${barW}|${barH}|${vertical ? 'V' : 'H'}|${theme.name}|${flatMode ? 1 : 0}|${flatGradient}|${onOpacity}|${segmentCount}`;
-        if (key === this.#key && this.#bmp) return { bmp: this.#bmp, segOffsets: this.#segOffsets };
+        const effSegs = flatMode ? segmentCount : getEffectiveSpectrumSegments(vertical ? barH : barW, segmentCount);
+        const key = `${barW}|${barH}|${vertical ? 'V' : 'H'}|${theme.name}|${flatMode ? 1 : 0}|${flatGradient}|${onOpacity}|${effSegs}`;
+        if (key === this.#key && this.#bmp) return { bmp: this.#bmp, segOffsets: this.#segOffsets, effSegs: this.#effSegs };
 
         this.dispose();
         this.#key = key;
+        this.#effSegs = effSegs;
 
         let bmp = null;
         let g = null;
@@ -671,7 +680,7 @@ class SpectrumForegroundCache {
                 }
             } else {
                 // Segmented LCD Mode for Spectrum Analyzer Bars
-                const segs = Math.max(1, segmentCount);
+                const segs = effSegs;
                 const colors = getCachedSegmentColourTable(theme, segs, 0, MeterConstants.SPECTRUM_MIN_DB);
                 this.#segOffsets = new Int32Array(segs);
 
@@ -682,7 +691,7 @@ class SpectrumForegroundCache {
                         const y = barH - (i + 1) * segH - i * gap;
                         const h = Math.max(1, segH);
                         g.FillSolidRect(0, y, barW, h, GdiUtils.withAlpha(colors[i], onAlpha));
-                        this.#segOffsets[i] = barH - y;
+                        this.#segOffsets[i] = Math.min(barH, barH - y);
                     }
                 } else {
                     const gap = Math.max(1, scaleDpi(1));
@@ -691,7 +700,7 @@ class SpectrumForegroundCache {
                         const x = i * (segW + gap);
                         const w = Math.max(1, segW);
                         g.FillSolidRect(x, 0, w, barH, GdiUtils.withAlpha(colors[i], onAlpha));
-                        this.#segOffsets[i] = x + w;
+                        this.#segOffsets[i] = Math.min(barW, x + w);
                     }
                 }
             }
@@ -699,11 +708,11 @@ class SpectrumForegroundCache {
             bmp.ReleaseGraphics(g);
             g = null;
             this.#bmp = bmp;
-            return { bmp: this.#bmp, segOffsets: this.#segOffsets };
+            return { bmp: this.#bmp, segOffsets: this.#segOffsets, effSegs: this.#effSegs };
         } catch {
             if (g && bmp) { try { bmp.ReleaseGraphics(g); } catch {} }
             if (bmp) { try { bmp.Dispose(); } catch {} }
-            return { bmp: null, segOffsets: null };
+            return { bmp: null, segOffsets: null, effSegs: 0 };
         }
     }
 
@@ -713,6 +722,7 @@ class SpectrumForegroundCache {
             this.#bmp = null;
         }
         this.#segOffsets = null;
+        this.#effSegs = 0;
         this.#key = '';
     }
 }
@@ -1473,11 +1483,12 @@ class SpectrumRenderer {
         const vertical = geometry.vertical;
         const onAlpha = onOpacity ?? 255;
 
-        const { bmp: barBmp, segOffsets } = this._fgCache.get(
+        const { bmp: barBmp, segOffsets, effSegs } = this._fgCache.get(
             firstBar.w, firstBar.h, vertical, theme, flatMode, flatGradient, onOpacity, gradCache, segmentCount
         );
 
         if (!barBmp) return;
+        const segs = effSegs || segmentCount;
 
         for (let i = 0; i < n; i++) {
             const bar = geometry.bars[i];
@@ -1490,8 +1501,8 @@ class SpectrumRenderer {
                 if (flatMode || !segOffsets) {
                     litH = Math.round(level * bar.h);
                 } else {
-                    const litCount = Math.min(Math.round(level * segmentCount), segmentCount);
-                    if (litCount > 0) litH = segOffsets[litCount - 1];
+                    const litCount = Math.min(Math.round(level * segs), segs);
+                    if (litCount > 0) litH = Math.min(bar.h, segOffsets[litCount - 1]);
                 }
 
                 if (litH > 0) {
@@ -1507,10 +1518,10 @@ class SpectrumRenderer {
                         const tickY = GdiUtils.clamp(Math.round(peakY - th / 2), bar.y, bar.baseY - th);
                         gr.FillSolidRect(bar.x, tickY, bar.w, th, peakColor);
                     } else {
-                        const peakIdx = GdiUtils.clamp(Math.ceil(peak * segmentCount) - 1, 0, segmentCount - 1);
+                        const peakIdx = GdiUtils.clamp(Math.ceil(peak * segs) - 1, 0, segs - 1);
                         const gap = Math.max(1, scaleDpi(1));
-                        const segH = Math.max(1, Math.floor((bar.h - gap * (segmentCount - 1)) / segmentCount));
-                        const y = bar.y + bar.h - (peakIdx + 1) * segH - peakIdx * gap;
+                        const segH = Math.max(1, Math.floor((bar.h - gap * (segs - 1)) / segs));
+                        const y = Math.max(bar.y, bar.y + bar.h - (peakIdx + 1) * segH - peakIdx * gap);
                         gr.FillSolidRect(bar.x, y, bar.w, Math.max(1, segH), peakColor);
                     }
                 }
@@ -1519,8 +1530,8 @@ class SpectrumRenderer {
                 if (flatMode || !segOffsets) {
                     litW = Math.round(level * bar.w);
                 } else {
-                    const litCount = Math.min(Math.round(level * segmentCount), segmentCount);
-                    if (litCount > 0) litW = segOffsets[litCount - 1];
+                    const litCount = Math.min(Math.round(level * segs), segs);
+                    if (litCount > 0) litW = Math.min(bar.w, segOffsets[litCount - 1]);
                 }
 
                 if (litW > 0) {
@@ -1535,10 +1546,10 @@ class SpectrumRenderer {
                         const tickX = GdiUtils.clamp(Math.round(peakX - th / 2), bar.x, bar.x + bar.w - th);
                         gr.FillSolidRect(tickX, bar.y, th, bar.h, peakColor);
                     } else {
-                        const peakIdx = GdiUtils.clamp(Math.ceil(peak * segmentCount) - 1, 0, segmentCount - 1);
+                        const peakIdx = GdiUtils.clamp(Math.ceil(peak * segs) - 1, 0, segs - 1);
                         const gap = Math.max(1, scaleDpi(1));
-                        const segW = Math.max(1, Math.floor((bar.w - gap * (segmentCount - 1)) / segmentCount));
-                        const x = bar.x + peakIdx * (segW + gap);
+                        const segW = Math.max(1, Math.floor((bar.w - gap * (segs - 1)) / segs));
+                        const x = Math.min(bar.x + bar.w - Math.max(1, segW), bar.x + peakIdx * (segW + gap));
                         gr.FillSolidRect(x, bar.y, Math.max(1, segW), bar.h, peakColor);
                     }
                 }
@@ -1907,7 +1918,10 @@ class SpectrumBackgroundCache {
     #bitmap = null;
 
     get(width, height, geometry, theme, offOpacity, flatMode, segmentCount) {
-        const key = `${width}|${height}|${geometry.vertical ? 'V' : 'H'}|${geometry.bars.length}|${theme.name}|${offOpacity}|${flatMode ? 1 : 0}|${segmentCount}`;
+        const firstBar = geometry.bars[0];
+        const span = firstBar ? (geometry.vertical ? firstBar.h : firstBar.w) : (geometry.vertical ? height : width);
+        const effSegs = flatMode ? segmentCount : getEffectiveSpectrumSegments(span, segmentCount);
+        const key = `${width}|${height}|${geometry.vertical ? 'V' : 'H'}|${geometry.bars.length}|${theme.name}|${offOpacity}|${flatMode ? 1 : 0}|${effSegs}`;
         if (key === this.#key && this.#bitmap) return this.#bitmap;
 
         this.dispose();
@@ -1922,7 +1936,7 @@ class SpectrumBackgroundCache {
 
             const offFill = GdiUtils.withAlpha(theme.inactive, offOpacity ?? 255);
             const vertical = geometry.vertical;
-            const segs = Math.max(1, segmentCount);
+            const segs = effSegs;
 
             for (let i = 0; i < geometry.bars.length; i++) {
                 const b = geometry.bars[i];
@@ -2618,7 +2632,6 @@ class MenuManager {
             fb.ShowPopupMessage(`Color picker unavailable:\n${e.message || e}`, MeterConstants.SCRIPT_NAME);
             return;
         }
-        // Corrected: ignore cancel (-1) and identical selections
         if (newColor === -1 || newColor === startColor) return;
 
         this.main.themes.updateDraft(key, newColor);
@@ -3449,6 +3462,10 @@ class LCDPeakMeter {
         const customThemeFile = persistedFile?.trim() ? persistedFile : `${PROFILE_BASE}lcd_custom_themes.json`;
         this.properties.set('customThemeFile', customThemeFile, true);
 
+        try {
+            this.themes.loadFromFile(customThemeFile);
+        } catch {}
+
         if (this.properties.values.theme === '~Preview') {
             const fallback = this.properties.lastFinalizedTheme;
             this.themes.clearPreview();
@@ -3492,14 +3509,6 @@ class LCDPeakMeter {
         });
 
         this.loadBezel();
-
-        // Defer JSON disk parsing so audio meters boot instantly
-        window.SetTimeout(() => {
-            if (panelState === MeterConstants.LIFECYCLE.SHUTDOWN) return;
-            try {
-                this.themes.loadFromFile(customThemeFile);
-            } catch {}
-        }, 60);
     }
 
     start() {
@@ -3806,7 +3815,7 @@ class LCDPeakMeter {
                     this.glow.drawFlat(gr, geometry.channels[1], this.right.value, this.right.peak, geometry.vertical, theme, props.glowOpacity, dynamicMult);
                 } else {
                     this.glow.draw(gr, geometry.channels[0], this.left.value, this.left.peak, geometry, geometry.vertical, theme, props.glowOpacity, dynamicMult);
-                    this.glow.draw(gr, geometry.channels[1], this.right.value, this.right.peak, geometry.vertical, theme, props.glowOpacity, dynamicMult);
+                    this.glow.draw(gr, geometry.channels[1], this.right.value, this.right.peak, geometry, geometry.vertical, theme, props.glowOpacity, dynamicMult);
                 }
             }
 
@@ -3967,7 +3976,12 @@ class LCDPeakMeter {
 
     onKeyDown(vkey) {
         if (panelState !== MeterConstants.LIFECYCLE.LIVE) return false;
-        if (utils.IsKeyPressed(MeterConstants.VK_CONTROL)) {
+        if (vkey === 0x1B && this.opacitySliderTarget) {
+            this.opacitySliderTarget = null;
+            this.invalidate();
+            return true;
+        }
+        if (utils.IsKeyPressed(MeterConstants.VK_CONTROL) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
             if (vkey === MeterConstants.VK_UP) {
                 this.cycleBezel(-1);
                 return true;
@@ -4143,6 +4157,7 @@ function on_playback_stop(reason) {
     if (panelState !== MeterConstants.LIFECYCLE.LIVE) return;
     if (meter) {
         meter.audio.isSilent = false;
+        meter.spectrumAnalyzer.isDirty = true;
         meter.ensureTimer();
         meter.invalidate();
     }
@@ -4152,6 +4167,7 @@ function on_playback_pause(state) {
     if (panelState !== MeterConstants.LIFECYCLE.LIVE) return;
     if (meter) {
         meter.audio.isSilent = false;
+        meter.spectrumAnalyzer.isDirty = true;
         meter.ensureTimer();
         meter.invalidate();
     }
