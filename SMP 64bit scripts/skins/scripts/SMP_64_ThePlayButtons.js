@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.2    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v2.3    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -15,9 +15,9 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Playback Buttons Pro v2.0', { 
+window.DefineScript('Playback Buttons Pro v2.3', { 
     author: 'L.E.D.', 
-    version: '2.1', 
+    version: '2.3', 
     features: { grab_focus: true } 
 });
 
@@ -73,22 +73,57 @@ class GdiUtils {
         const w = img.Width;
         const h = img.Height;
         let bmp = null;
+        let mask = null;
+        let inverted = null;
         try {
+            let isLight = true;
+            try {
+                const scheme = img.GetColourScheme(1);
+                if (Array.isArray(scheme) && scheme.length > 0) {
+                    const [r, g, b] = this.toRGB(scheme[0]);
+                    isLight = (0.299 * r + 0.587 * g + 0.114 * b) >= 128;
+                }
+            } catch {}
+
+            let maskSrc = img;
+            if (isLight && typeof img.Clone === 'function') {
+                try {
+                    inverted = img.Clone(0, 0, w, h);
+                    if (inverted && typeof inverted.InvertColours === 'function') {
+                        inverted.InvertColours();
+                        maskSrc = inverted;
+                    }
+                } catch {
+                    maskSrc = img;
+                }
+            }
+
+            mask = gdi.CreateImage(w, h);
+            const mg = mask.GetGraphics();
+            try {
+                mg.FillSolidRect(0, 0, w, h, this.RGB(255, 255, 255));
+                mg.SetInterpolationMode(7);
+                mg.DrawImage(maskSrc, 0, 0, w, h, 0, 0, w, h, 0, 255);
+            } finally {
+                mask.ReleaseGraphics(mg);
+            }
+
             bmp = gdi.CreateImage(w, h);
             const g = bmp.GetGraphics();
             try {
-                g.SetInterpolationMode(7);
-                g.DrawImage(img, 0, 0, w, h, 0, 0, w, h, 0, 255);
                 const rgb = this.toRGB(tintColour);
-                g.FillSolidRect(0, 0, w, h, this.RGBA(rgb[0], rgb[1], rgb[2], 90));
+                g.FillSolidRect(0, 0, w, h, this.RGBA(rgb[0], rgb[1], rgb[2], 255));
             } finally {
                 bmp.ReleaseGraphics(g);
             }
-            try { bmp.ApplyMask(img); } catch {}
+            bmp.ApplyMask(mask);
             return bmp;
         } catch {
             if (bmp) { try { bmp.Dispose(); } catch {} }
             return null;
+        } finally {
+            if (mask) { try { mask.Dispose(); } catch {} }
+            if (inverted) { try { inverted.Dispose(); } catch {} }
         }
     }
 }
@@ -503,7 +538,8 @@ class PlayButtonsController {
 
         this.buttonsBaseDir = this.#resolveButtonsBaseDir();
         this.#loadProperties();
-        this.#applyConfig(this.#loadStyleConfig(this.config.buttonStyle) || PlayButtonsController.DEFAULTS);
+        const savedStyleCfg = this.#loadStyleConfig(this.config.buttonStyle);
+        if (savedStyleCfg) this.#applyConfig(savedStyleCfg);
     }
 
     scale(size) {
@@ -514,12 +550,12 @@ class PlayButtonsController {
         this.#lifecycle = PlayButtonsController.LIFECYCLE.LIVE;
         this.loadBezel();
         this.initButtons();
+        this.updatePlayState();
         this.buildLayout(window.Width, window.Height);
         window.Repaint();
 
         window.SetTimeout(() => {
             if (this.#lifecycle === PlayButtonsController.LIFECYCLE.SHUTDOWN) return;
-            this.reloadAssets();
             this.buildLayout(window.Width, window.Height);
             window.Repaint();
         }, 0);
@@ -557,6 +593,23 @@ class PlayButtonsController {
         cfg.bezelFolder   = GdiUtils.sanitizePath(String(window.GetProperty('Buttons: Bezel Folder', `${this.#profileBase}skins\\overlay`))) || `${this.#profileBase}skins\\overlay`;
         cfg.bezelEnabled  = Boolean(window.GetProperty('Buttons: Bezel Enabled', PlayButtonsController.DEFAULTS.bezelEnabled));
         cfg.bezelFile     = String(window.GetProperty('Buttons: Bezel File', PlayButtonsController.DEFAULTS.bezelFile));
+    }
+
+    #saveCoreProperties() {
+        const cfg = this.config;
+        window.SetProperty('Buttons: Size', cfg.btnSize);
+        window.SetProperty('Buttons: Padding Gap', cfg.paddingGap);
+        window.SetProperty('Buttons: Padding Border', cfg.paddingBorder);
+        window.SetProperty('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', cfg.alignV);
+        window.SetProperty('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', cfg.alignH);
+        window.SetProperty('Buttons: Size Mode', cfg.sizeMode);
+        window.SetProperty('Buttons: Stretch Fill', cfg.stretchFill);
+        window.SetProperty('Colors: Use Tint', cfg.useTint);
+        window.SetProperty('Colors: Normal', cfg.colorNormal);
+        window.SetProperty('Colors: Hover', cfg.colorHover);
+        window.SetProperty('Colors: Down', cfg.colorDown);
+        window.SetProperty('Colors: Use Background', cfg.useBgColor);
+        window.SetProperty('Colors: Background', cfg.bgColor);
     }
 
     saveBezelConfig() {
@@ -601,11 +654,11 @@ class PlayButtonsController {
         this.config.sizeMode      = GdiUtils.clamp(cfg.sizeMode ?? this.config.sizeMode, 0, 2);
         this.config.stretchFill   = Boolean(cfg.stretchFill ?? this.config.stretchFill);
         this.config.useTint       = Boolean(cfg.useTint ?? this.config.useTint);
-        this.config.colorNormal   = (Number(cfg.colorNormal) >>> 0) || this.config.colorNormal;
-        this.config.colorHover    = (Number(cfg.colorHover)  >>> 0) || this.config.colorHover;
-        this.config.colorDown     = (Number(cfg.colorDown)   >>> 0) || this.config.colorDown;
+        this.config.colorNormal   = cfg.colorNormal !== undefined ? (Number(cfg.colorNormal) >>> 0) : this.config.colorNormal;
+        this.config.colorHover    = cfg.colorHover  !== undefined ? (Number(cfg.colorHover)  >>> 0) : this.config.colorHover;
+        this.config.colorDown     = cfg.colorDown   !== undefined ? (Number(cfg.colorDown)   >>> 0) : this.config.colorDown;
         this.config.useBgColor    = Boolean(cfg.useBgColor ?? this.config.useBgColor);
-        this.config.bgColor       = (Number(cfg.bgColor)     >>> 0) || this.config.bgColor;
+        this.config.bgColor       = cfg.bgColor     !== undefined ? (Number(cfg.bgColor)     >>> 0) : this.config.bgColor;
     }
 
     saveStyleConfig(styleName) {
@@ -719,7 +772,7 @@ class PlayButtonsController {
         if (this.config.buttonStyle) {
             const styleDir = `${this.buttonsBaseDir}${this.config.buttonStyle}\\`;
             const found = this.findIconExt(styleDir, targetName);
-            if (found) return `${styleDir}${found.name}${found.ext}`;
+            return found ? `${styleDir}${found.name}${found.ext}` : '';
         }
         const foundDef = this.findIconExt(this.buttonsBaseDir, targetName);
         if (foundDef) return `${this.buttonsBaseDir}${foundDef.name}${foundDef.ext}`;
@@ -1008,6 +1061,7 @@ class PlayButtonsController {
             this.config.buttonStyle = selected;
             window.SetProperty('Buttons: Style', this.config.buttonStyle);
             this.#applyConfig(this.#loadStyleConfig(this.config.buttonStyle) || PlayButtonsController.DEFAULTS);
+            this.#saveCoreProperties();
             this.reloadAssets();
             this.buildLayout(window.Width, window.Height);
         }
@@ -1057,8 +1111,15 @@ class PlayButtonsController {
         }
     }
 
-    onMouseMove(mx, my) {
+    onMouseMove(mx, my, mask) {
         if (this.#lifecycle !== PlayButtonsController.LIFECYCLE.LIVE) return;
+
+        if (this.#pressed && mask !== undefined && !(mask & 1)) {
+            this.#pressed.state = 'normal';
+            this.invalidateButton(this.#pressed);
+            this.#pressed = null;
+        }
+
         let hit = null;
         for (const item of this.#items) {
             if (item.contains(mx, my)) { hit = item; break; }
@@ -1084,6 +1145,9 @@ class PlayButtonsController {
 
     onMouseDown(mx, my) {
         if (this.#lifecycle !== PlayButtonsController.LIFECYCLE.LIVE) return;
+        if (!this.#hovered || !this.#hovered.contains(mx, my)) {
+            this.onMouseMove(mx, my);
+        }
         if (this.#hovered) {
             this.#pressed = this.#hovered;
             this.#hovered.state = 'down';
@@ -1281,6 +1345,7 @@ class PlayButtonsController {
                 this.config.buttonStyle = selected;
                 window.SetProperty('Buttons: Style', this.config.buttonStyle);
                 this.#applyConfig(this.#loadStyleConfig(this.config.buttonStyle) || PlayButtonsController.DEFAULTS);
+                this.#saveCoreProperties();
                 this.reloadAssets();
                 this.buildLayout(window.Width, window.Height);
                 window.Repaint();
@@ -1561,6 +1626,7 @@ class PlayButtonsController {
 
             case M_ID.RESET_STYLE:
                 this.#applyConfig(PlayButtonsController.DEFAULTS);
+                this.#saveCoreProperties();
                 this.saveStyleConfig(this.config.buttonStyle);
                 this.reloadAssets();
                 changed = true;
@@ -1576,6 +1642,7 @@ class PlayButtonsController {
                     this.config.buttonStyle = PlayButtonsController.DEFAULTS.buttonStyle;
                     window.SetProperty('Buttons: Style', this.config.buttonStyle);
                     this.#applyConfig(PlayButtonsController.DEFAULTS);
+                    this.#saveCoreProperties();
                     this.config.padLeft = PlayButtonsController.DEFAULTS.padLeft;
                     this.config.padRight = PlayButtonsController.DEFAULTS.padRight;
                     this.config.padTop = PlayButtonsController.DEFAULTS.padTop;
@@ -1648,8 +1715,8 @@ function on_playback_starting() {
     app.updatePlayState();
 }
 
-function on_mouse_move(x, y) {
-    app.onMouseMove(x, y);
+function on_mouse_move(x, y, mask) {
+    app.onMouseMove(x, y, mask);
 }
 
 function on_mouse_leave() {
