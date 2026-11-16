@@ -190,7 +190,7 @@ Using SMP to do this causes the memory to grow and shrink a little, its not a bu
 </details>
 
 <details>
-<summary><strong>The Play Buttons</strong> — Updated 16 Nov 2026 V2.4</summary>
+<summary><strong>The Play Buttons</strong> — Updated 16 Nov 2026 V2.5</summary>
 
 bug fix's
 
