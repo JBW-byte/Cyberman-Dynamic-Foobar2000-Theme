@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.5 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.6 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,7 +16,7 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.5', 
+    version: '2.6', 
     features: { grab_focus: true } 
 });
 
@@ -657,8 +657,10 @@ class LcdBackplateEngine {
             }
 
             if (hasBorder) {
-                const b = Math.round(config.borderMode * dpiScale);
-                g.DrawRect(b / 2, b / 2, w - b, h - b, b, GdiUtils.setAlpha(borderColor, config.opBorder));
+                const b = Math.min(Math.round(config.borderMode * dpiScale), Math.floor(Math.min(w, h) / 2));
+                if (b > 0 && w > b && h > b) {
+                    g.DrawRect(b / 2, b / 2, w - b, h - b, b, GdiUtils.setAlpha(borderColor, config.opBorder));
+                }
             }
 
             if (hasBezel) {
@@ -1162,7 +1164,9 @@ class LcdTimerController {
             const all = utils.Glob(`${cleanFolder}\\*.*`);
             if (!Array.isArray(all)) return [];
             this.#cachedBezelImages = all.filter(f => {
-                const ext = f.substring(f.lastIndexOf('.')).toLowerCase();
+                const dot = f.lastIndexOf('.');
+                if (dot === -1) return false;
+                const ext = f.substring(dot).toLowerCase();
                 return LcdTimerController.BEZEL_EXTS.includes(ext);
             }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
             return this.#cachedBezelImages;
@@ -1440,8 +1444,10 @@ class LcdTimerController {
         if (this.#displayOff) {
             gr.FillSolidRect(0, 0, w, h, GdiUtils.RGB(0, 0, 0));
             if (this.config.borderMode > 0) {
-                const b = this.scale(this.config.borderMode);
-                gr.DrawRect(b / 2, b / 2, w - b, h - b, b, GdiUtils.setAlpha(this.getBorderColor(), this.config.opBorder));
+                const b = Math.min(this.scale(this.config.borderMode), Math.floor(Math.min(w, h) / 2));
+                if (b > 0 && w > b && h > b) {
+                    gr.DrawRect(b / 2, b / 2, w - b, h - b, b, GdiUtils.setAlpha(this.getBorderColor(), this.config.opBorder));
+                }
             }
             if (this.config.bezelEnabled && this.#bezelBmp) {
                 try {
@@ -1611,7 +1617,7 @@ class LcdTimerController {
     }
 
     refreshClock(forceImmediate = false) {
-        if (this.config.displayMode !== 0 || this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || !window.IsVisible) return;
+        if (this.#displayOff || this.config.displayMode !== 0 || this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || !window.IsVisible) return;
         if (!fb.IsPlaying && !fb.IsPaused) return;
 
         const maxLen = Math.max(fb.PlaybackLength || 0, fb.PlaybackTime || 0);
@@ -2100,19 +2106,23 @@ onSize() {
             this.#digitSprites.invalidate();
             this.#mode1Cache.invalidate();
         } else if (id === MID.CUST_LCD_COLOR) {
-            const c = utils.ColourPicker(window.ID, this.config.custLcd);
-            if (c !== -1) { 
-                this.config.custLcd = (c | 0xFF000000) >>> 0; 
-                this.config.themeIdx = LcdTimerController.THEMES.length; 
+            const prev = this.config.custLcd >>> 0;
+            const c = utils.ColourPicker(window.ID, prev);
+            const next = (c | 0xFF000000) >>> 0;
+            if (c !== -1 && next !== prev) {
+                this.config.custLcd = next;
+                this.config.themeIdx = LcdTimerController.THEMES.length;
                 this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
-                this.#backplate.invalidate(); 
+                this.#backplate.invalidate();
                 this.#digitSprites.invalidate();
                 this.#mode1Cache.invalidate();
             }
         } else if (id === MID.CUST_BG_COLOR) {
-            const c = utils.ColourPicker(window.ID, this.config.custBg);
-            if (c !== -1) {
-                this.config.custBg = (c | 0xFF000000) >>> 0;
+            const prev = this.config.custBg >>> 0;
+            const c = utils.ColourPicker(window.ID, prev);
+            const next = (c | 0xFF000000) >>> 0;
+            if (c !== -1 && next !== prev) {
+                this.config.custBg = next;
                 this.config.themeIdx = LcdTimerController.THEMES.length;
                 this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
                 this.#backplate.invalidate();
@@ -2120,12 +2130,14 @@ onSize() {
                 this.#mode1Cache.invalidate();
             }
         } else if (id === MID.CUST_BORDER_COLOR || id === MID.BORDER_CUSTOM_SETUP) {
-            const c = utils.ColourPicker(window.ID, this.config.custBorder);
-            if (c !== -1) { 
-                this.config.custBorder = (c | 0xFF000000) >>> 0; 
-                this.config.useCustomBorder = true; 
+            const prev = this.config.custBorder >>> 0;
+            const c = utils.ColourPicker(window.ID, prev);
+            const next = (c | 0xFF000000) >>> 0;
+            if (c !== -1 && next !== prev) {
+                this.config.custBorder = next;
+                this.config.useCustomBorder = true;
                 this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-                this.#backplate.invalidate(); 
+                this.#backplate.invalidate();
             }
         } else if (id === MID.BORDER_SIZE) {
             const val = GdiUtils.prompt('Enter border thickness in px (0-50):', 'Border Thickness', this.config.borderMode);
