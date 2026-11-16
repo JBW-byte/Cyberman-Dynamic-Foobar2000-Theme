@@ -1,7 +1,7 @@
 'use strict';
 
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V4.7  ========\\
+		 // ========  SMP 64bit Volume Knob V4.8  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -15,9 +15,9 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Volume Knob v4.7', { 
+window.DefineScript('Volume Knob v4.8', { 
     author: 'L.E.D.', 
-    version: '4.7',
+    version: '4.8',
     features: { grab_focus: true } 
 });
 
@@ -2213,6 +2213,7 @@ class VolumeState {
     targetAngle = 0;
     dragTargetAngle = 0;
     needsRepaint = false;
+    isMuted = false;
 
     #animationTimer = null;
     muteResyncTimer = null;
@@ -2383,6 +2384,11 @@ class VolumeEngine {
 
     static syncFromFoobar(state, props, snap = true) {
         try {
+            state.isMuted = fb.IsMainMenuCommandChecked('Playback/Volume/Mute');
+        } catch {
+            state.isMuted = false;
+        }
+        try {
             const fbVol = GdiUtils.clamp(fb.Volume, -100, 0);
             state.uiVolume = this.dbToUi(fbVol, props);
             state.targetAngle = state.dragTargetAngle = this.uiToAngle(state.uiVolume);
@@ -2426,8 +2432,7 @@ class MainRenderer {
         gr.SetSmoothingMode(2);
 
         try {
-            let isMuted = false;
-            try { isMuted = fb.IsMainMenuCommandChecked('Playback/Volume/Mute'); } catch {}
+            const isMuted = state.isMuted;
 
             gr.SetInterpolationMode(2);
             const baseBmp = sceneCache.getScene(w, h, cache, props, theme, bgRenderer, dialRenderer, assetManager, VolumeConfig);
@@ -2777,6 +2782,7 @@ class InputManager {
         state.dragging = false;
         try {
             fb.RunMainMenuCommand('Playback/Volume/Mute');
+            try { state.isMuted = fb.IsMainMenuCommandChecked('Playback/Volume/Mute'); } catch {}
             if (state.muteResyncTimer) { window.ClearTimeout(state.muteResyncTimer); state.muteResyncTimer = null; }
             state.muteResyncTimer = window.SetTimeout(() => {
                 state.muteResyncTimer = null;
@@ -3067,7 +3073,7 @@ class ContextMenuManager {
         lcdBtnSideMenu.AppendMenuItem(0, 8014, 'Right');
         lcdBtnSideMenu.CheckMenuRadioItem(8013, 8014, props.lcdBtnSide === 'left' ? 8013 : 8014);
         lcdBtnSideMenu.AppendTo(syncStylesMenu, 0, 'LCD Button Side');
-        syncStylesMenu.AppendMenuItem(0, 8012, 'Show Button Text (LCD / STYLE)');
+        syncStylesMenu.AppendMenuItem(0, 8012, 'Show Button Text (LCD)');
         if (props.syncBtnShowText) syncStylesMenu.CheckMenuRadioItem(8012, 8012, 8012);
 
         bgMenu.AppendMenuItem(0, 6000, 'Solid (Theme Color)');
@@ -3271,6 +3277,9 @@ class ContextMenuManager {
         } else if (selected === 8000) {
             const next = !props.syncLcdTheme;
             this.controller.properties.set('syncLcdTheme', next);
+            if (next) {
+                try { window.NotifyOthers('LcdThemeSync', this.controller.properties.values.currentLcdTheme); } catch {}
+            }
             this.controller.showNotification(`LCD Theme Sync: ${next ? 'ON' : 'OFF'}`);
             window.Repaint();
         } else if (selected === 8010 || selected === 8011) {
@@ -3391,13 +3400,15 @@ class ContextMenuManager {
             this.controller.state.requestRepaint();
         } else if (selected === 7013) {
             const startArgb = (this.controller.properties.values.customGlowColor >>> 0) || this.controller.themes.get(props.theme).marker;
-            let picked;
+            let picked = -1;
             try { picked = utils.ColourPicker(window.ID, startArgb); } catch { picked = -1; }
             if (picked !== -1) {
                 const newArgb = (0xFF000000 | picked) >>> 0;
-                this.controller.properties.set('customGlowColor', newArgb);
-                this.controller.properties.set('glowSource', 'custom');
-                this.controller.state.requestRepaint();
+                if (newArgb !== startArgb) {
+                    this.controller.properties.set('customGlowColor', newArgb);
+                    this.controller.properties.set('glowSource', 'custom');
+                    this.controller.state.requestRepaint();
+                }
             }
         } else if (selected === 7004) {
             this.controller.properties.set('showDialMarker', !props.showDialMarker);
