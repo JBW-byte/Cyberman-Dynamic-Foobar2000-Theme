@@ -168,7 +168,7 @@ Majot ReWrite. Bezel and Overlay Support. v2.5 theme sync fix, bug fix
 </details>
 
 <details>
-<summary><strong>LCD Peakmeter</strong> — Updated 16 Nov 2026 V2.4</summary>
+<summary><strong>LCD Peakmeter</strong> — Updated 16 Nov 2026 V2.5</summary>
 
 ### Key Features
 * **Dual Operation Modes:** Seamlessly toggles between Stereo Peak/RMS Metering and a 10–120 band Logarithmic FFT Spectrum Analyzer.
