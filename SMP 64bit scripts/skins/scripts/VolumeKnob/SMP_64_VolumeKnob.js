@@ -1,7 +1,7 @@
 'use strict';
 
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V4.6  ========\\
+		 // ========  SMP 64bit Volume Knob V4.7  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -15,13 +15,13 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Volume Knob v4.6', { 
+window.DefineScript('Volume Knob v4.7', { 
     author: 'L.E.D.', 
-    version: '4.6',
+    version: '4.7',
     features: { grab_focus: true } 
 });
 
-window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
+if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode = 0x0004; // DLGC_WANTALLKEYS: Preserves Ctrl/Shift + Arrow key capture
 
 // ============================================================================================
@@ -3437,6 +3437,14 @@ class ContextMenuManager {
             if (confirm?.toUpperCase() === 'YES') {
                 this.controller.properties.resetAll(this.controller.themes);
                 this.controller.themes.clearPreview();
+                for (const ct of [...this.controller.themes.customThemes]) {
+                    this.controller.themes.removeCustom(ct.name);
+                }
+                try {
+                    window.SetProperty('VolumeKnob.CustomThemes', '[]');
+                    window.SetProperty('VolumeKnob.DraftTheme', '');
+                } catch {}
+                this.controller.themes.seedDraftFromTheme(this.controller.themes.get(this.controller.properties.values.theme));
                 this.controller.assetManager.clear();
                 this.controller.dialRenderer.invalidate();
                 this.controller.state.invalidateGeometry();
@@ -4038,13 +4046,13 @@ class VolumeKnobController {
         }
 
         if (HudManager.activeSlider) {
-            if (vkey === 0x26 || vkey === 0x27) { 
-                HudManager.adjustSlider(this.properties, this.dialRenderer, this.sceneCache, this.state, HudManager.activeSlider, 1); 
-                return true; 
+            if (vkey === 0x26 || vkey === 0x27) {
+                HudManager.adjustSlider(this.properties, this.dialRenderer, this.sceneCache, this.state, HudManager.activeSlider, 1);
+                return true;
             }
-            if (vkey === 0x28 || vkey === 0x25) { 
-                HudManager.adjustSlider(this.properties, this.dialRenderer, this.sceneCache, this.state, HudManager.activeSlider, -1); 
-                return true; 
+            if (vkey === 0x28 || vkey === 0x25) {
+                HudManager.adjustSlider(this.properties, this.dialRenderer, this.sceneCache, this.state, HudManager.activeSlider, -1);
+                return true;
             }
         }
 
@@ -4053,7 +4061,7 @@ class VolumeKnobController {
         const isAlt   = utils.IsKeyPressed(0x12);
 
         // Ctrl + Alt + Left/Right -> Cycle LCD Themes (Peak Meter & Timer)
-        if (isCtrl && isAlt && (vkey === 0x25 || vkey === 0x27)) {
+        if (isCtrl && isAlt && !isShift && (vkey === 0x25 || vkey === 0x27)) {
             this.cycleLcdTheme(vkey === 0x27 ? 1 : -1);
             return true;
         }
@@ -4062,49 +4070,51 @@ class VolumeKnobController {
         if (isShift && isAlt && (vkey === 0x25 || vkey === 0x27)) return false;
 
         // Ctrl + Shift + Left/Right OR Alt + Left/Right -> Cycle Volume Knob Themes
-        if ((isCtrl && isShift && (vkey === 0x25 || vkey === 0x27)) || (isAlt && (vkey === 0x25 || vkey === 0x27))) {
+        if ((isCtrl && isShift && (vkey === 0x25 || vkey === 0x27)) || (!isCtrl && !isShift && isAlt && (vkey === 0x25 || vkey === 0x27))) {
             this.cycleTheme(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
         // Ctrl + Shift + Up/Down OR Alt + Up/Down -> Cycle Specular Lighting Styles
-        if ((isCtrl && isShift && (vkey === 0x26 || vkey === 0x28)) || (isAlt && (vkey === 0x26 || vkey === 0x28))) {
+        if ((isCtrl && isShift && (vkey === 0x26 || vkey === 0x28)) || (!isCtrl && !isShift && isAlt && (vkey === 0x26 || vkey === 0x28))) {
             this.cycleLightStyle(vkey === 0x28 ? 1 : -1);
             return true;
         }
 
         // Ctrl + Up/Down -> Cycle Dial Face Finishes
-        if (isCtrl && !isShift && (vkey === 0x26 || vkey === 0x28)) {
+        if (isCtrl && !isShift && !isAlt && (vkey === 0x26 || vkey === 0x28)) {
             this.cycleDialMode(vkey === 0x28 ? 1 : -1);
             return true;
         }
 
         // Ctrl + Left/Right -> Cycle Tick Marker Styles
-        if (isCtrl && !isShift && (vkey === 0x25 || vkey === 0x27)) {
+        if (isCtrl && !isShift && !isAlt && (vkey === 0x25 || vkey === 0x27)) {
             this.cycleTickStyle(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
         // Shift + Up/Down -> Cycle Pointer Styles
-        if (isShift && !isCtrl && (vkey === 0x26 || vkey === 0x28)) {
+        if (isShift && !isCtrl && !isAlt && (vkey === 0x26 || vkey === 0x28)) {
             this.cycleMarkerStyle(vkey === 0x28 ? 1 : -1);
             return true;
         }
 
         // Shift + Left/Right -> Cycle Backplate Styles
-        if (isShift && !isCtrl && (vkey === 0x25 || vkey === 0x27)) {
+        if (isShift && !isCtrl && !isAlt && (vkey === 0x25 || vkey === 0x27)) {
             this.cycleBgMode(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
-        // Standard Volume Wheel Steps
-        if (vkey === 0x26 || vkey === 0x27) { 
-            InputManager.handleWheel(1, this.state, this.properties.values); 
-            return true; 
-        }
-        if (vkey === 0x28 || vkey === 0x25) { 
-            InputManager.handleWheel(-1, this.state, this.properties.values); 
-            return true; 
+        // Standard Volume Wheel Steps (unmodified arrow keys only)
+        if (!isCtrl && !isShift && !isAlt) {
+            if (vkey === 0x26 || vkey === 0x27) {
+                InputManager.handleWheel(1, this.state, this.properties.values);
+                return true;
+            }
+            if (vkey === 0x28 || vkey === 0x25) {
+                InputManager.handleWheel(-1, this.state, this.properties.values);
+                return true;
+            }
         }
 
         return false;
