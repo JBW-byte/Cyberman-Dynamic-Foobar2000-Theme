@@ -1,6 +1,6 @@
 ﻿'use strict';
 		   // ============== AUTHOR L.E.D. ============== \\
-		  // ==-== Panel Artwork and Trackinfo v4.7  ==-== \\
+		  // ==-== Panel Artwork and Trackinfo v4.8  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,7 +16,7 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.7',
+    version: '4.8',
     features: { grab_focus: true } 
 });
 
@@ -530,9 +530,10 @@ class VisualBackdrop {
             thumb.ReleaseGraphics(g);
             g = null;
 
-            const maxSafeRadius = Math.max(1, Math.min(Math.floor(tw / 2) - 1, Math.floor(th / 2) - 1));
-            const effectiveRadius = GdiUtils.clamp(Math.round(blurR / scale), 1, Math.min(120, maxSafeRadius));
-            thumb.StackBlur(effectiveRadius);
+            const maxSafeRadius = Math.max(0, Math.min(Math.floor(tw / 2) - 1, Math.floor(th / 2) - 1));
+            const rawRadius = Math.min(Math.round(blurR / scale), 120, maxSafeRadius);
+            const effectiveRadius = (rawRadius >= 2) ? rawRadius : (maxSafeRadius >= 2 ? 2 : 0);
+            if (effectiveRadius >= 2) thumb.StackBlur(effectiveRadius);
 
             this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
             this.#bgBlurredBmp = thumb;
@@ -1064,7 +1065,9 @@ class PanelArtController {
             const all = utils.Glob(`${cleanFolder}\\*.*`);
             if (!Array.isArray(all)) return [];
             this.#cachedBezelImages = all.filter(f => {
-                const ext = f.substring(f.lastIndexOf('.')).toLowerCase();
+                const dot = f.lastIndexOf('.');
+                if (dot === -1) return false;
+                const ext = f.substring(dot).toLowerCase();
                 return PanelArtController.BEZEL_EXTS.includes(ext);
             }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
             return this.#cachedBezelImages;
@@ -1285,8 +1288,8 @@ class PanelArtController {
                 const asyncHandle = this.#getSafeHandle(handle);
                 if (asyncHandle) {
 				this.#asyncArtToken = thisToken;
-				this.#asyncArtRawPath = asyncHandle.RawPath || '';
-				utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
+                this.#asyncArtRawPath = asyncHandle.RawPath || '';
+                utils.GetAlbumArtAsync(window.ID, asyncHandle, 0, false, false, false);
 				}
             } catch {
                 this.applyNewArtwork(null, thisToken);
@@ -2043,11 +2046,11 @@ class PanelArtController {
         }
         if (bezelNames.length > 0) {
             const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
-            const selIdx = curClean ? bezelNames.findIndex(n => n.toLowerCase() === curClean) : -1;
+            const selIdx = (this.config.bezelEnabled && curClean) ? bezelNames.findIndex(n => n.toLowerCase() === curClean) : -1;
             const checkId = selIdx >= 0 ? MID.BEZEL_BASE + selIdx : bzStart;
             bezelM.CheckMenuRadioItem(bzStart, MID.BEZEL_BASE + bezelNames.length - 1, checkId);
         } else {
-            if (!this.config.bezelFile) bezelM.CheckMenuRadioItem(bzStart, bzStart, bzStart);
+            bezelM.CheckMenuRadioItem(bzStart, bzStart, bzStart);
         }
         bezelM.AppendMenuSeparator();
         bezelM.AppendMenuItem(0, MID.BEZEL_FOLDER, "Set Bezel Folder...");
@@ -2216,9 +2219,11 @@ class PanelArtController {
             this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
             this.#rebuildOverlay();
         } else if (id === MID.PHOSPHOR_THEME_BASE + PanelArtController.PHOSPHOR_THEMES.length) {
-            const c = utils.ColourPicker(window.ID, this.config.customPhosphorColor);
-            if (c !== -1) {
-                this.config.customPhosphorColor = (c | 0xFF000000) >>> 0;
+            const prevCol = this.config.customPhosphorColor >>> 0;
+            const c = utils.ColourPicker(window.ID, prevCol);
+            const newCol = (c | 0xFF000000) >>> 0;
+            if (c !== -1 && newCol !== prevCol) {
+                this.config.customPhosphorColor = newCol;
                 this.config.phosphorTheme = PanelArtController.PHOSPHOR_THEMES.length;
                 this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
                 this.#rebuildOverlay();
@@ -2443,8 +2448,13 @@ class PanelArtController {
         } else if (id === MID.RELOAD_ART) {
             this.#scanner.clearCaches();
             this.#slideImages = null;
+            this.#cachedBezelImages = null;
+            this.#currentCoverPath = '';
+            this.#currentArtKey = '';
             this.loadBezel();
-            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            if (this.config.slideMode) this.startSlideMode(false);
+            else if (this.config.imageMode) this.startImageMode(false);
+            else if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
             else this.clearTrackDisplay();
         } else if (id === MID.RESET_DEFAULTS) {
             this.stopSlideMode(false);
