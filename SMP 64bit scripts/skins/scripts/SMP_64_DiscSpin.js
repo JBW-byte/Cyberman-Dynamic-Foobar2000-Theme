@@ -1,6 +1,6 @@
 ﻿'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.5 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.6 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -18,7 +18,7 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { 
     author: 'L.E.D.', 
-    version: '5.5',
+    version: '5.6',
     features: { grab_focus: true } 
 });
 
@@ -895,9 +895,10 @@ class VisualBackdrop {
             thumb.ReleaseGraphics(g);
             g = null;
 
-            const maxSafeRadius = Math.max(1, Math.min(Math.floor(tw / 2) - 1, Math.floor(th / 2) - 1));
-            const effectiveRadius = GdiUtils.clamp(Math.round(blurR / scale), 1, Math.min(120, maxSafeRadius));
-            thumb.StackBlur(effectiveRadius);
+            const maxSafeRadius = Math.max(0, Math.min(Math.floor(tw / 2) - 1, Math.floor(th / 2) - 1));
+            const rawRadius = Math.min(Math.round(blurR / scale), 120, maxSafeRadius);
+            const effectiveRadius = (rawRadius >= 2) ? rawRadius : (maxSafeRadius >= 2 ? 2 : 0);
+            if (effectiveRadius >= 2) thumb.StackBlur(effectiveRadius);
 
             this.#bgBlurredBmp = VisualBackdrop.#disposeBmp(this.#bgBlurredBmp);
             this.#bgBlurredBmp = thumb;
@@ -1958,7 +1959,7 @@ class DiscSpinController {
                     if (asyncHandle) {
                         this.#expectedAsyncToken = thisToken;
                         this.#expectedAsyncRawPath = asyncHandle.RawPath || '';
-                        utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
+                        utils.GetAlbumArtAsync(window.ID, asyncHandle, 0, false, false, false);
                     } else {
                         this.loadDefaultArt();
                     }
@@ -2366,8 +2367,9 @@ class DiscSpinController {
         const clamped = GdiUtils.clamp(val, 0, 255);
         switch (target) {
             case 'Reflection': this.config.opReflection = clamped; break;
-            case 'Glow':       
-                this.config.opGlow = clamped; 
+            case 'Glow':
+                this.config.opGlow = clamped;
+                this.#geom.valid = false;
                 this.#refreshGlow();
                 break;
             case 'Scanlines':  this.config.opScanlines  = clamped; break;
@@ -2788,11 +2790,13 @@ class DiscSpinController {
             this.#rebuildOverlay(); 
             this.#needsFullRepaint = true;
         } else if (id === MID.PHOSPHOR_BASE + DiscSpinController.PHOSPHOR_THEMES.length) {
-            const c = utils.ColourPicker(window.ID, this.config.customPhosphorColor);
-            if (c !== -1) { 
-                this.config.customPhosphorColor = (c | 0xFF000000) >>> 0; 
-                this.config.phosphorTheme = DiscSpinController.PHOSPHOR_THEMES.length; 
-                this.#rebuildOverlay(); 
+            const prevCol = this.config.customPhosphorColor >>> 0;
+            const c = utils.ColourPicker(window.ID, prevCol);
+            const newCol = (c | 0xFF000000) >>> 0;
+            if (c !== -1 && newCol !== prevCol) {
+                this.config.customPhosphorColor = newCol;
+                this.config.phosphorTheme = DiscSpinController.PHOSPHOR_THEMES.length;
+                this.#rebuildOverlay();
                 this.#needsFullRepaint = true;
             }
         } else if (id === MID.OVERLAY_ALL_OFF) { 
@@ -2804,8 +2808,9 @@ class DiscSpinController {
             this.config.showReflection = !this.config.showReflection; 
             this.#rebuildOverlay(); 
             this.#needsFullRepaint = true;
-        } else if (id === MID.SHOW_GLOW) { 
-            this.config.showGlow = !this.config.showGlow; 
+        } else if (id === MID.SHOW_GLOW) {
+            this.config.showGlow = !this.config.showGlow;
+            this.#geom.valid = false;
             this.#refreshGlow();
             this.#needsFullRepaint = true;
             window.Repaint(); 
@@ -2947,6 +2952,9 @@ class DiscSpinController {
             this.#scanner.clearCaches();
             this.#discProc.clearNormalizedCache();
             this.#cachedBezelImages = null;
+            this.#currentCoverPath = '';
+            this.#currentDiscPath = '';
+            this.#currentArtKey = '';
             this.loadBezel();
             this.loadArtworkForTrack(null, false);
         } else if (id === MID.RESET_DEFAULTS) {
