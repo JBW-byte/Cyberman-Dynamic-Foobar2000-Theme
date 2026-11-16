@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.3 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.4 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -17,11 +17,11 @@
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.3', 
+    version: '2.4', 
     features: { grab_focus: true } 
 });
 
-window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
+if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode  = 0x0004; // DLGC_WANTALLKEYS
 
 const HAS_AUDIO_CHUNK = typeof fb.GetAudioChunk === 'function';
@@ -2562,7 +2562,6 @@ class ThemeManager {
             list = this.themes;
         } else if (!themeName) {
             list = this.customThemes;
-            if (!list.length) return { ok: false, error: 'No custom themes to save.' };
         } else {
             const t = this.themeMap.get(themeName);
             if (!t) return { ok: false, error: `Theme "${themeName}" not found.` };
@@ -2727,6 +2726,11 @@ class MenuManager {
             this.main.properties.lastFinalizedTheme = fallback;
             this.main.themes.clearPreview();
             this.main.properties.setTheme(fallback);
+        }
+
+        const savePath = this.main.properties.values.customThemeFile;
+        if (savePath?.trim()) {
+            this.main.themes.saveToFile(savePath, null);
         }
 
         this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
@@ -2945,7 +2949,7 @@ class MenuManager {
         bezelMenu.CheckMenuRadioItem(bezelStart, bezelEnd, checkedIdx);
 
         bezelMenu.AppendMenuSeparator();
-        bezelMenu.AppendMenuItem(hasBezelFolder ? 0 : 0x0001, MID.BEZEL_FOLDER, `Set Bezel Folder…${hasBezelFolder ? `  (${this.#shortPath(bezelFolder)})` : ''}`);
+        bezelMenu.AppendMenuItem(0, MID.BEZEL_FOLDER, `Set Bezel Folder…${hasBezelFolder ? `  (${this.#shortPath(bezelFolder)})` : ''}`);
         bezelMenu.AppendMenuItem(0, MID.BEZEL_RELOAD, 'Reload Bezel List');
         bezelMenu.AppendMenuSeparator();
         bezelMenu.AppendMenuItem(0, MID.PAD_LEFT, `Left padding…  (${props.padLeft}px)`);
@@ -3106,6 +3110,9 @@ class MenuManager {
         } else if (selected === MID.FACTORY_RESET) {
             const confirm = GdiUtils.prompt('Type YES to perform a full factory reset (resets all themes, overlays, and paths):', 'Confirm Factory Reset', '');
             if (confirm?.toUpperCase() === 'YES') {
+                for (const ct of [...this.main.themes.customThemes]) {
+                    this.main.themes.removeCustom(ct.name);
+                }
                 this.main.properties.resetAll();
                 this.main.properties.lastFinalizedTheme = this.main.properties.values.theme;
                 this.main.properties.extraSegmentsPreFlat = 0;

@@ -1,6 +1,6 @@
 ﻿'use strict';
 		   // ============== AUTHOR L.E.D. ============== \\
-		  // ==-== Panel Artwork and Trackinfo v4.6  ==-== \\
+		  // ==-== Panel Artwork and Trackinfo v4.7  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,11 +16,11 @@
 
 window.DefineScript('SMP 64bit PanelArt', { 
     author: 'L.E.D.', 
-    version: '4.6',
+    version: '4.7',
     features: { grab_focus: true } 
 });
 
-window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
+if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode = 0x0004; // DLGC_WANTALLKEYS: Captures arrow keys and modifier shortcuts
 
 // ============================================================================================
@@ -811,6 +811,7 @@ class PanelArtController {
 
     #artGenerationToken = 0;
     #asyncArtToken      = 0;
+    #asyncArtRawPath    = '';
     #pendingSearchTimer = null;
     #glitchTimer        = null;
     #slideTimer         = null;
@@ -1283,9 +1284,10 @@ class PanelArtController {
             try {
                 const asyncHandle = this.#getSafeHandle(handle);
                 if (asyncHandle) {
-                    this.#asyncArtToken = thisToken;
-                    utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
-                }
+				this.#asyncArtToken = thisToken;
+				this.#asyncArtRawPath = asyncHandle.RawPath || '';
+				utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
+				}
             } catch {
                 this.applyNewArtwork(null, thisToken);
             }
@@ -1382,6 +1384,7 @@ class PanelArtController {
         this.#currentArtKey    = '';
         this.#artGenerationToken++;
         this.#asyncArtToken = 0;
+		this.#asyncArtRawPath = '';
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} this.#coverImg = null; }
@@ -2525,11 +2528,13 @@ class PanelArtController {
             return;
         }
 
-        if (!this.#asyncArtToken || this.#asyncArtToken !== this.#artGenerationToken) {
+        if (!this.#asyncArtToken || this.#asyncArtToken !== this.#artGenerationToken ||
+            (this.#asyncArtRawPath && handle?.RawPath && handle.RawPath !== this.#asyncArtRawPath)) {
             if (image) { try { image.Dispose(); } catch {} }
             return;
         }
         this.#asyncArtToken = 0;
+        this.#asyncArtRawPath = '';
 
         if (image) {
             if (this.#coverImg) { try { this.#coverImg.Dispose(); } catch {} }
@@ -2597,10 +2602,24 @@ class PanelArtController {
         if (!raw) return;
         try {
             const d = JSON.parse(raw);
+            if (!d || typeof d !== 'object') return;
             for (const [k, v] of Object.entries(d)) {
                 if (k === 'imageMode' || k === 'slideMode') continue;
                 if (Object.prototype.hasOwnProperty.call(this.config, k)) this.config[k] = v;
             }
+            const cfg = this.config;
+            cfg.albumArtFloat   = PanelArtController.VALID_FLOATS.includes(cfg.albumArtFloat) ? cfg.albumArtFloat : 'left';
+            cfg.albumArtPadding = GdiUtils.clamp(cfg.albumArtPadding, 0, 100);
+            cfg.padLeft         = GdiUtils.clamp(cfg.padLeft, 0, 100);
+            cfg.padRight        = GdiUtils.clamp(cfg.padRight, 0, 100);
+            cfg.padTop          = GdiUtils.clamp(cfg.padTop, 0, 100);
+            cfg.padBottom       = GdiUtils.clamp(cfg.padBottom, 0, 100);
+            cfg.borderSize      = GdiUtils.clamp(cfg.borderSize, 0, 50);
+            cfg.blurRadius      = GdiUtils.clamp(cfg.blurRadius, 0, 254);
+            cfg.darkenValue     = GdiUtils.clamp(cfg.darkenValue, 0, 50);
+            cfg.bezelFolder     = GdiUtils.sanitizePath(String(cfg.bezelFolder || `${this.#profileBase}skins\\overlay`)) || `${this.#profileBase}skins\\overlay`;
+            cfg.imageFolder     = GdiUtils.sanitizePath(String(cfg.imageFolder || 'profile\\skins\\images')) || 'profile\\skins\\images';
+
             this.#dirtyFlags = PanelArtController.DIRTY.ALL;
             this.#scanner.clearCaches();
             this.#slideImages = null;
@@ -2686,7 +2705,7 @@ class PanelArtController {
             this.setOpacityTarget(null);
             return true;
         }
-        if (utils.IsKeyPressed(0x11)) { // VK_CONTROL
+        if (utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) { // Ctrl only
             if (vkey === 0x26) { this.cycleBezel(-1); return true; } // UP
             if (vkey === 0x28) { this.cycleBezel(1);  return true; } // DOWN
         }

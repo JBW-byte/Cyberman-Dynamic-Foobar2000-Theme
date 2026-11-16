@@ -1,6 +1,6 @@
 ﻿'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.4 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.5 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -18,11 +18,11 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { 
     author: 'L.E.D.', 
-    version: '5.4',
+    version: '5.5',
     features: { grab_focus: true } 
 });
 
-window.DrawMode = 0; // 0 - GDI+ mode, 1 - D2D mode Jsplitter etc.
+if ('DrawMode' in window) window.DrawMode = 0; // 0 - GDI+ mode, 1 - D2D mode Jsplitter etc.
 window.DlgCode  = 0x0004; // DLGC_WANTALLKEYS: Captures arrow keys and modifier shortcuts
 
 // ============================================================================================
@@ -1171,6 +1171,7 @@ class DiscSpinController {
 
     #artSearchToken     = 0;
     #expectedAsyncToken = 0;
+    #expectedAsyncRawPath = '';
     #pendingSearchTimer = null;
     #spinTimer          = null;
     #saveTimeout        = null;
@@ -1850,6 +1851,7 @@ class DiscSpinController {
 
         const thisToken = ++this.#artSearchToken;
         this.#expectedAsyncToken = 0;
+        this.#expectedAsyncRawPath = '';
 
         const cached = this.#scanner.getMemoryCache(artKey);
         if (cached) {
@@ -1948,12 +1950,14 @@ class DiscSpinController {
 
             if (discPath || coverPath) {
                 this.#expectedAsyncToken = 0;
+                this.#expectedAsyncRawPath = '';
                 this.applyLoadedArtwork(discPath, coverPath, trackDir);
             } else {
                 try {
                     const asyncHandle = this.#getSafeHandle(handle);
                     if (asyncHandle) {
                         this.#expectedAsyncToken = thisToken;
+                        this.#expectedAsyncRawPath = asyncHandle.RawPath || '';
                         utils.GetAlbumArtAsync(window.ID, asyncHandle, 0);
                     } else {
                         this.loadDefaultArt();
@@ -1971,11 +1975,13 @@ class DiscSpinController {
             return;
         }
 
-        if (!this.#expectedAsyncToken || this.#expectedAsyncToken !== this.#artSearchToken) {
+        if (!this.#expectedAsyncToken || this.#expectedAsyncToken !== this.#artSearchToken ||
+            (this.#expectedAsyncRawPath && handle?.RawPath && handle.RawPath !== this.#expectedAsyncRawPath)) {
             if (image) { try { image.Dispose(); } catch {} }
             return;
         }
         this.#expectedAsyncToken = 0;
+        this.#expectedAsyncRawPath = '';
 
         if (image) {
             this.#discProc.clearNormalizedCache();

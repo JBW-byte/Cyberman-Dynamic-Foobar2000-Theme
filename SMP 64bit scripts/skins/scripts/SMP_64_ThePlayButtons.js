@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.3    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v2.4    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -15,13 +15,13 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Playback Buttons Pro v2.3', { 
+window.DefineScript('Playback Buttons Pro v2.4', { 
     author: 'L.E.D.', 
-    version: '2.3', 
+    version: '2.4', 
     features: { grab_focus: true } 
 });
 
-window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
+if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode = 0x0004; // DLGC_WANTALLKEYS
 
 // ============================================================================================

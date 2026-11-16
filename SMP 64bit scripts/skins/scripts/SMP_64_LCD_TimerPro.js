@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.4 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.5 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,11 +16,11 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.4', 
+    version: '2.5', 
     features: { grab_focus: true } 
 });
 
-window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
+if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode  = 0x0004; // DLGC_WANTALLKEYS
 
 // ============================================================================================
@@ -1832,7 +1832,7 @@ onSize() {
             }
         }
 
-        if (utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
+        if (!this.#positionAdjustMode && utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
             if (vkey === 0x26) { this.cycleBezel(-1); return true; } // UP
             if (vkey === 0x28) { this.cycleBezel(1);  return true; } // DOWN
         }
@@ -2111,11 +2111,13 @@ onSize() {
             }
         } else if (id === MID.CUST_BG_COLOR) {
             const c = utils.ColourPicker(window.ID, this.config.custBg);
-            if (c !== -1) { 
-                this.config.custBg = (c | 0xFF000000) >>> 0; 
-                this.config.themeIdx = LcdTimerController.THEMES.length; 
-                this.#dirtyFlags |= LcdTimerController.DIRTY.BACKPLATE;
-                this.#backplate.invalidate(); 
+            if (c !== -1) {
+                this.config.custBg = (c | 0xFF000000) >>> 0;
+                this.config.themeIdx = LcdTimerController.THEMES.length;
+                this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
+                this.#backplate.invalidate();
+                this.#digitSprites.invalidate();
+                this.#mode1Cache.invalidate();
             }
         } else if (id === MID.CUST_BORDER_COLOR || id === MID.BORDER_CUSTOM_SETUP) {
             const c = utils.ColourPicker(window.ID, this.config.custBorder);
@@ -2231,12 +2233,14 @@ onSize() {
         } else if (id === MID.SHOW_M1_ALBUM) { 
             this.config.showM1Album = !this.config.showM1Album; 
             this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-        } else if (id === MID.SHOW_M1_CODEC) { 
-            this.config.showM1Codec = !this.config.showM1Codec; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.MODE1; 
-        } else if (id === MID.SHOW_M1_TECH) { 
-            this.config.showM1Tech = !this.config.showM1Tech; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.MODE1; 
+        } else if (id === MID.SHOW_M1_CODEC) {
+            this.config.showM1Codec = !this.config.showM1Codec;
+            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+            this.#mode1Cache.invalidate();
+        } else if (id === MID.SHOW_M1_TECH) {
+            this.config.showM1Tech = !this.config.showM1Tech;
+            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+            this.#mode1Cache.invalidate();
         } else if (id === MID.AUTO_FONT_SIZE) { 
             this.config.autoFontSize = !this.config.autoFontSize; 
             this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; 
