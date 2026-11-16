@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.4 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.5 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.4', 
+    version: '2.5', 
     features: { grab_focus: true } 
 });
 
@@ -2578,7 +2578,7 @@ class ThemeManager {
             }
             const arr  = list.map(t => this.#themeToJson(t));
             const json = JSON.stringify(arr, null, 2);
-            const ok = utils.WriteTextFile(cleanPath, json);
+            const ok = utils.WriteTextFile(cleanPath, json, false);
             if (!ok || !utils.IsFile(cleanPath)) return { ok: false, error: `Write failed to: ${cleanPath}` };
             return { ok: true, count: arr.length, path: cleanPath };
         } catch (e) {
@@ -3099,6 +3099,7 @@ class MenuManager {
             this.main.properties.extraSegmentsPreFlat = 0;
             this.main.opacitySliderTarget = null;
             this.main.themes.clearPreview();
+            this.main.loadBezel();
             this.main.performance.setEnabled(this.main.properties.values.profiler);
             this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
             this.main.spectrumAnalyzer.setFftSize(MeterConstants.SPECTRUM_FFT_SIZE);
