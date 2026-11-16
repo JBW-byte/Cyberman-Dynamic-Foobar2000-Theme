@@ -78,7 +78,8 @@ Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D su
 ### Update Overview
 Custom Themes and json save, Major update to themes. v4.8, Added theme changer/sync button for lcd timerpro and peakmeter, also functions as a play indicator.
 
-Press Control+left click for a random theme. don't forget to save any you like.
+Press Control+left click for a random theme. don't forget to save any you like. Add a new custom theme with new color's for the random picker, it only uses colours from the saved themes.
+
 Place your custom images in the scripts/VolumeKnob folder.
 
 ### Controls & Shortcuts
