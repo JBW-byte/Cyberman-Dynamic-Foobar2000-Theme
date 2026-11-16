@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.4    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v2.5    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -15,9 +15,9 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Playback Buttons Pro v2.4', { 
+window.DefineScript('Playback Buttons Pro v2.5', { 
     author: 'L.E.D.', 
-    version: '2.4', 
+    version: '2.5', 
     features: { grab_focus: true } 
 });
 
@@ -698,6 +698,8 @@ class PlayButtonsController {
                 if (Array.isArray(subdirs)) {
                     for (const s of subdirs) {
                         const cleanSub = GdiUtils.sanitizePath(s);
+                        const folderName = cleanSub.substring(cleanSub.lastIndexOf('\\') + 1);
+                        if (folderName === '.' || folderName === '..') continue;
                         if (utils.IsDirectory(cleanSub)) {
                             const subPath = `${cleanSub}\\`;
                             for (const ext of PlayButtonsController.EXTENSIONS) {
@@ -738,9 +740,10 @@ class PlayButtonsController {
                 if (Array.isArray(subdirs)) {
                     for (const s of subdirs) {
                         const cleanSub = GdiUtils.sanitizePath(s);
+                        const folderName = cleanSub.substring(cleanSub.lastIndexOf('\\') + 1);
+                        if (folderName === '.' || folderName === '..') continue;
                         if (utils.IsDirectory(cleanSub)) {
                             const subPath = `${cleanSub}\\`;
-                            const folderName = cleanSub.substring(cleanSub.lastIndexOf('\\') + 1);
                             if (this.findIconExt(subPath, 'stop') || this.findIconExt(subPath, 'play') ||
                                 this.findIconExt(subPath, 'previous') || this.findIconExt(subPath, 'next')) {
                                 if (!styles.includes(folderName)) styles.push(folderName);
@@ -1307,7 +1310,7 @@ class PlayButtonsController {
             bezelNamesList.forEach((name, bi) => bez.AppendMenuItem(0, M_ID.BEZEL_NAMES_BASE + bi, name));
         }
 
-        if (!this.config.bezelFile) {
+        if (!this.config.bezelEnabled || !this.config.bezelFile) {
             bez.CheckMenuRadioItem(M_ID.BEZEL_NONE, bezLastId, M_ID.BEZEL_NONE);
         } else {
             const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
