@@ -109,7 +109,7 @@ Place your custom images in the scripts/VolumeKnob folder.
 <summary><strong>PanelArt</strong> — Updated 16 Nov 2026</summary>
 
 ### Update Overview
-Major Rewrite. Bezel and Overlay support. v4.6 bug fix
+Major Rewrite. Bezel and Overlay support. v4.8 bug fix
 
 ### Features
 
