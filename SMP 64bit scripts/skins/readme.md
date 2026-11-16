@@ -76,7 +76,7 @@ Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D su
 <summary><strong>VolumeKnob</strong> — Updated 16 Nov 2026</summary>
 
 ### Update Overview
-Custom Themes and json save, Major update to themes. v4.7, Added theme changer/sync button for lcd timerpro and peakmeter, also functions as a play indicator.
+Custom Themes and json save, Major update to themes. v4.8, Added theme changer/sync button for lcd timerpro and peakmeter, also functions as a play indicator.
 
 Press Control+left click for a random theme. don't forget to save any you like.
 Place your custom images in the scripts/VolumeKnob folder.
