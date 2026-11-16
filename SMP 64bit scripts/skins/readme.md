@@ -42,10 +42,10 @@ For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable 
 Major rewrite 28 Sep 2026, Bezel and Overlay options.
 
 <details>
-<summary><strong>DiscSpin</strong> — Updated 14 Nov 2026</summary>
+<summary><strong>DiscSpin</strong> — Updated 16 Nov 2026</summary>
 
 ### Update Overview
-Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.4
+Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.5
 
 ### Features
 
@@ -73,10 +73,10 @@ Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D su
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 14 Nov 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 16 Nov 2026</summary>
 
 ### Update Overview
-Custom Themes and json save, Major update to themes. v4.6, Added theme changer/sync button for lcd timerpro and peakmeter, also functions as a play indicator.
+Custom Themes and json save, Major update to themes. v4.7, Added theme changer/sync button for lcd timerpro and peakmeter, also functions as a play indicator.
 
 Press Control+left click for a random theme. don't forget to save any you like.
 Place your custom images in the scripts/VolumeKnob folder.
@@ -106,10 +106,10 @@ Place your custom images in the scripts/VolumeKnob folder.
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 14 Nov 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 16 Nov 2026</summary>
 
 ### Update Overview
-Major Rewrite. Bezel and Overlay support. v4.5 bug fix
+Major Rewrite. Bezel and Overlay support. v4.6 bug fix
 
 ### Features
 
@@ -138,10 +138,10 @@ Major Rewrite. Bezel and Overlay support. v4.5 bug fix
 </details>
 
 <details>
-<summary><strong>LCD TimerPro</strong> — Updated 14 Nov 2026</summary>
+<summary><strong>LCD TimerPro</strong> — Updated 16 Nov 2026</summary>
 
 ### Update Overview
-Majot ReWrite. Bezel and Overlay Support. v2.4 theme sync fix, bug fix
+Majot ReWrite. Bezel and Overlay Support. v2.5 theme sync fix, bug fix
 
 ### Features
 
@@ -168,7 +168,7 @@ Majot ReWrite. Bezel and Overlay Support. v2.4 theme sync fix, bug fix
 </details>
 
 <details>
-<summary><strong>LCD Peakmeter</strong> — Updated 14 Nov 2026 V2.3</summary>
+<summary><strong>LCD Peakmeter</strong> — Updated 16 Nov 2026 V2.4</summary>
 
 ### Key Features
 * **Dual Operation Modes:** Seamlessly toggles between Stereo Peak/RMS Metering and a 10–120 band Logarithmic FFT Spectrum Analyzer.
@@ -190,7 +190,7 @@ Using SMP to do this causes the memory to grow and shrink a little, its not a bu
 </details>
 
 <details>
-<summary><strong>The Play Buttons</strong> — Updated 14 Nov 2026 V2.3</summary>
+<summary><strong>The Play Buttons</strong> — Updated 16 Nov 2026 V2.4</summary>
 
 bug fix's
 
