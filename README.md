@@ -6,7 +6,7 @@
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/led_jbw)
 
-**Cyberman-Dynamic** is a clean, modern Foobar2000 skin built on the **Default User Interface (DUI)** for **Foobar2000 2.0+ 64-bit**, designed for **portable mode**.
+**Cyberman-Dynamic** is a clean, modern Foobar2000 skin built on the **Default User Interface (DUI)** for **Foobar2000 2.0+ 64-bit**, designed for **portable mode**. Easy to customize.
 
 It features a **dynamic colour scheme based on album artwork**, custom playback controls, multiple VU meter skins, and configurable spectrum and layout presets.
 
