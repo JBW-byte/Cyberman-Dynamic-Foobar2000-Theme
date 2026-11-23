@@ -42,7 +42,7 @@ For portable mode the files go in Foobar2000\Profile\Skins<br> For non portable 
 Major rewrite 28 Sep 2026, Bezel and Overlay options.
 
 <details>
-<summary><strong>DiscSpin</strong> — Updated 23 Nov 2026</summary>
+<summary><strong>DiscSpin</strong> — Updated 23 Nov 2026 v5.7</summary>
 
 ### Update Overview
 Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D support, GDI+/D2D toggle(may be buggy). v5.7
@@ -73,7 +73,7 @@ Mask and extra artwork not needed now, in engine mask and disc, JSplitter D2D su
 
 
 <details>
-<summary><strong>VolumeKnob</strong> — Updated 23 Nov 2026</summary>
+<summary><strong>VolumeKnob</strong> — Updated 23 Nov 2026 v4.9</summary>
 
 ### Update Overview
 Custom Themes and json save, Major update to themes. v4.9, Added theme changer/sync button for lcd timerpro and peakmeter, also functions as a play indicator.
@@ -107,7 +107,7 @@ Place your custom images in the scripts/VolumeKnob folder.
 </details>
 
 <details>
-<summary><strong>PanelArt</strong> — Updated 23 Nov 2026</summary>
+<summary><strong>PanelArt</strong> — Updated 23 Nov 2026 v4.9</summary>
 
 ### Update Overview
 Major Rewrite. Bezel and Overlay support. v4.9 bug fix
@@ -139,7 +139,7 @@ Major Rewrite. Bezel and Overlay support. v4.9 bug fix
 </details>
 
 <details>
-<summary><strong>LCD TimerPro</strong> — Updated 23 Nov 2026</summary>
+<summary><strong>LCD TimerPro</strong> — Updated 23 Nov 2026 v2.7</summary>
 
 ### Update Overview
 Majot ReWrite. Bezel and Overlay Support. v2.7 theme sync fix, bug fix
