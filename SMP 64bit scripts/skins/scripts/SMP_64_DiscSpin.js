@@ -1,6 +1,6 @@
 ﻿'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.6 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.7 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -18,7 +18,7 @@
 
 window.DefineScript('SMP 64bit Disc Spin', { 
     author: 'L.E.D.', 
-    version: '5.6',
+    version: '5.7',
     features: { grab_focus: true } 
 });
 
@@ -26,7 +26,7 @@ if ('DrawMode' in window) window.DrawMode = 0; // 0 - GDI+ mode, 1 - D2D mode Js
 window.DlgCode  = 0x0004; // DLGC_WANTALLKEYS: Captures arrow keys and modifier shortcuts
 
 // ============================================================================================
-// 1. HELPERS & MATH UTILITIES
+// 1. HELPERS, MENU BUILDER, ASYNC LOADER & SETTINGS SCHEMA
 // ============================================================================================
 class GdiUtils {
     static clamp(val, min, max) {
@@ -61,6 +61,10 @@ class GdiUtils {
             return clean.replace(/[\\\/]+$/, '') + '\\';
         }
         return clean.replace(/[\/\\]+$/, '');
+    }
+
+    static escapeMenuLabel(str) {
+        return String(str ?? '').replace(/&/g, '&&');
     }
 
     static normalize(str) {
@@ -99,6 +103,239 @@ class GdiUtils {
     }
 }
 
+class MenuBuilder {
+    #menu;
+    #state;
+
+    constructor(state = null, startId = 1) {
+        this.#menu = window.CreatePopupMenu();
+        this.#state = state || {
+            nextId: startId,
+            callbacks: new Map(),
+            menus: []
+        };
+        this.#state.menus.push(this.#menu);
+    }
+
+    get raw() {
+        return this.#menu;
+    }
+
+    addItem(label, callback, opts = {}) {
+        const id = this.#state.nextId++;
+        const flags = opts.disabled ? 0x0001 : 0;
+        this.#menu.AppendMenuItem(flags, id, label);
+        if (opts.checked || opts.radio) {
+            this.#menu.CheckMenuRadioItem(id, id, id);
+        }
+        if (typeof callback === 'function') {
+            this.#state.callbacks.set(id, callback);
+        }
+        return this;
+    }
+
+    addSeparator() {
+        this.#menu.AppendMenuSeparator();
+        return this;
+    }
+
+    addSubMenu(title, buildFn, disabled = false) {
+        const sub = new MenuBuilder(this.#state);
+        buildFn(sub);
+        sub.#menu.AppendTo(this.#menu, disabled ? 0x0001 : 0, title);
+        return this;
+    }
+
+    track(x, y) {
+        let selected = 0;
+        try {
+            selected = this.#menu.TrackPopupMenu(x, y);
+        } finally {
+            for (const m of this.#state.menus) {
+                try { if (m && typeof m.Dispose === 'function') m.Dispose(); } catch {}
+            }
+            this.#state.menus.length = 0;
+        }
+        if (selected > 0) {
+            const cb = this.#state.callbacks.get(selected);
+            if (cb) cb();
+        }
+        return selected;
+    }
+}
+
+class AsyncImageLoader {
+    #pending = new Map();
+
+    load(path) {
+        if (!path || !utils.IsFile(path)) return Promise.resolve(null);
+
+        if (typeof gdi.LoadImageAsyncV2 === 'function') {
+            try {
+                return gdi.LoadImageAsyncV2(window.ID, path).catch(() => null);
+            } catch {}
+        }
+
+        if (typeof gdi.LoadImageAsync === 'function') {
+            return new Promise((resolve) => {
+                try {
+                    const cookie = gdi.LoadImageAsync(window.ID, path);
+                    this.#pending.set(cookie, resolve);
+                } catch {
+                    resolve(null);
+                }
+            });
+        }
+
+        try {
+            return Promise.resolve(gdi.Image(path) || null);
+        } catch {
+            return Promise.resolve(null);
+        }
+    }
+
+    onLoadImageDone(cookie, image) {
+        const resolve = this.#pending.get(cookie);
+        if (resolve) {
+            this.#pending.delete(cookie);
+            resolve(image || null);
+            return true;
+        }
+        return false;
+    }
+
+    clear() {
+        for (const resolve of this.#pending.values()) {
+            try { resolve(null); } catch {}
+        }
+        this.#pending.clear();
+    }
+}
+
+class SettingsSchema {
+    static FIELDS = [
+        { key: 'spinningEnabled',     prop: 'RP.SpinningEnabled',         type: 'bool',  def: true,  group: 'style' },
+        { key: 'spinSpeed',           prop: 'RP.SpinSpeed',               type: 'float', def: 2.0,   min: 0.5, max: 5.0, group: 'style' },
+        { key: 'spinFPS',             prop: 'RP.SpinFPS',                 type: 'enum',  def: 30,    values: [30, 60], num: true, group: 'style' },
+        { key: 'useAlbumArtOnly',     prop: 'RP.UseAlbumArtOnly',         type: 'bool',  def: false, group: 'style' },
+        { key: 'keepAspectRatio',     prop: 'RP.KeepAspectRatio',         type: 'bool',  def: true,  group: 'style' },
+        { key: 'interpolationMode',   prop: 'RP.InterpolationMode',       type: 'int',   def: 0,     min: 0,   max: 2, group: 'style' },
+        { key: 'maxImageSize',        prop: 'RP.MaxImageSize',            type: 'int',   def: 500,   min: 125, max: 2000, group: 'style' },
+        { key: 'maskType',            prop: 'RP.MaskType',                type: 'int',   def: 0,     min: 0,   max: 2, group: 'style' },
+        { key: 'userOverrideMask',    prop: 'RP.UserOverrideMask',        type: 'bool',  def: false, group: 'style' },
+        { key: 'customFolderDepth',   prop: 'RP.CustomFolderDepth',       type: 'int',   def: 2,     min: 1,   max: 4, group: 'panel' },
+
+        { key: 'showReflection',      prop: 'Disc.ShowReflection',        type: 'bool',  def: true,  group: 'style' },
+        { key: 'opReflection',        prop: 'Disc.OpReflection',          type: 'int',   def: 25,    min: 0,   max: 255, group: 'style' },
+        { key: 'showGlow',            prop: 'Disc.ShowGlow',              type: 'bool',  def: false, group: 'style' },
+        { key: 'opGlow',              prop: 'Disc.OpGlow',                type: 'int',   def: 80,    min: 0,   max: 255, group: 'style' },
+        { key: 'showScanlines',       prop: 'Disc.ShowScanlines',         type: 'bool',  def: false, group: 'style' },
+        { key: 'opScanlines',         prop: 'Disc.OpScanlines',           type: 'int',   def: 100,   min: 0,   max: 255, group: 'style' },
+        { key: 'showPhosphor',        prop: 'Disc.ShowPhosphor',          type: 'bool',  def: true,  group: 'style' },
+        { key: 'opPhosphor',          prop: 'Disc.OpPhosphor',            type: 'int',   def: 20,    min: 0,   max: 255, group: 'style' },
+        { key: 'phosphorTheme',       prop: 'Disc.PhosphorTheme',         type: 'int',   def: 8,     min: 0,   max: 10, group: 'style' },
+        { key: 'customPhosphorColor', prop: 'Disc.CustomPhosphorColor',   type: 'color', def: 0xFFFFFFFF, group: 'style' },
+        { key: 'overlayAllOff',       prop: 'Disc.OverlayAllOff',         type: 'bool',  def: false, group: 'style' },
+
+        { key: 'borderSize',          prop: 'Disc.BorderSize',            type: 'int',   def: 0,     min: 0,   max: 50, group: 'style' },
+        { key: 'borderColor',         prop: 'Disc.BorderColor',           type: 'color', def: 0xFF202020, group: 'style' },
+        { key: 'discPadding',         prop: 'Disc.Padding',               type: 'int',   def: 20,    min: 0,   max: 100, group: 'style' },
+        { key: 'albumPadding',        prop: 'Disc.AlbumPadding',          type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
+        { key: 'padLeft',             prop: 'Disc.PadLeft',               type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
+        { key: 'padRight',            prop: 'Disc.PadRight',              type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
+        { key: 'padTop',              prop: 'Disc.PadTop',                type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
+        { key: 'padBottom',           prop: 'Disc.PadBottom',             type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
+
+        { key: 'bezelFolder',         prop: 'Disc.BezelFolder',           type: 'path',  def: '',    group: 'panel', resetAll: true },
+        { key: 'bezelEnabled',        prop: 'Disc.BezelEnabled',          type: 'bool',  def: false, group: 'style' },
+        { key: 'bezelFile',           prop: 'Disc.BezelFile',             type: 'str',   def: '',    group: 'style' },
+
+        { key: 'backgroundEnabled',   prop: 'Disc.BackgroundEnabled',     type: 'bool',  def: true,  group: 'style' },
+        { key: 'blurRadius',          prop: 'Disc.BlurRadius',            type: 'int',   def: 240,   min: 0,   max: 254, group: 'style' },
+        { key: 'blurEnabled',         prop: 'Disc.BlurEnabled',           type: 'bool',  def: true,  group: 'style' },
+        { key: 'darkenValue',         prop: 'Disc.DarkenValue',           type: 'int',   def: 10,    min: 0,   max: 50, group: 'style' },
+        { key: 'customBgColor',       prop: 'Disc.CustomBackgroundColor', type: 'color', def: 0xFF191919, group: 'style' },
+        { key: 'bgUseUIColor',        prop: 'Disc.BgUseUIColor',          type: 'bool',  def: false, group: 'style' }
+    ];
+
+    static defaults(overrides = null) {
+        const out = {};
+        for (const f of this.FIELDS) out[f.key] = f.def;
+        if (overrides) Object.assign(out, overrides);
+        return out;
+    }
+
+    static coerce(f, raw, defVal) {
+        const fallback = defVal !== undefined ? defVal : f.def;
+        if (raw === null || raw === undefined) return fallback;
+        switch (f.type) {
+            case 'bool':
+                if (typeof raw === 'boolean') return raw;
+                if (typeof raw === 'string') return raw !== 'false' && raw !== '0' && raw !== '';
+                return Boolean(raw);
+            case 'int': {
+                const n = parseInt(raw, 10);
+                return Number.isNaN(n) ? fallback : GdiUtils.clamp(n, f.min, f.max);
+            }
+            case 'float': {
+                const n = Number(raw);
+                return Number.isFinite(n) ? GdiUtils.clamp(n, f.min, f.max) : fallback;
+            }
+            case 'enum': {
+                const v = f.num ? Number(raw) : raw;
+                return f.values.includes(v) ? v : fallback;
+            }
+            case 'color': {
+                const n = Number(raw);
+                return (Number.isFinite(n) && (n >>> 0) !== 0) ? (n >>> 0) : fallback;
+            }
+            case 'path':
+                return GdiUtils.sanitizePath(String(raw || fallback));
+            default:
+                return String(raw ?? fallback);
+        }
+    }
+
+    static sanitize(raw, fallback) {
+        const base = fallback || this.defaults();
+        const out = { ...base };
+        if (!raw || typeof raw !== 'object') return out;
+        for (const f of this.FIELDS) {
+            if (Object.prototype.hasOwnProperty.call(raw, f.key)) {
+                out[f.key] = this.coerce(f, raw[f.key], base[f.key]);
+            }
+        }
+        return out;
+    }
+
+    static loadProperties(fallbackDefaults) {
+        const out = {};
+        for (const f of this.FIELDS) {
+            const def = (fallbackDefaults && f.key in fallbackDefaults) ? fallbackDefaults[f.key] : f.def;
+            out[f.key] = this.coerce(f, window.GetProperty(f.prop, def), def);
+        }
+        return out;
+    }
+
+    static saveProperties(config) {
+        for (const f of this.FIELDS) {
+            if (Object.prototype.hasOwnProperty.call(config, f.key)) {
+                window.SetProperty(f.prop, config[f.key]);
+            }
+        }
+    }
+
+    static reset(currentConfig, { includeResetAll = false, defaults = null } = {}) {
+        const base = defaults || this.defaults();
+        const out = { ...currentConfig };
+        for (const f of this.FIELDS) {
+            if (f.resetAll && !includeResetAll) continue;
+            out[f.key] = base[f.key] ?? f.def;
+        }
+        return out;
+    }
+}
+
 // ============================================================================================
 // 2. ARTWORK & DISCOVERY SCANNER (BUDGET-GUARDED ENGINE)
 // ============================================================================================
@@ -130,7 +367,6 @@ class ArtScanner {
 
     getArtworkIdentityKey(trackDir, album, disc, titleOrPath = '') {
         const alb = (album || '').trim().toLowerCase();
-        // Fallback to title/path if no album tag exists to prevent loose singles from colliding
         const fallback = alb ? '' : `|${(titleOrPath || '').trim().toLowerCase()}`;
         return `${trackDir || ''}|${alb}|${(disc || '').trim().toLowerCase()}${fallback}`;
     }
@@ -139,6 +375,7 @@ class ArtScanner {
         if (!this.#artPathCache.has(key)) return null;
         const cached = this.#artPathCache.get(key);
         if (cached) {
+            if (cached.embedded || cached.isNone) return cached;
             const discOk  = !cached.disc  || (this.isImageFilePath(cached.disc)  && utils.IsFile(cached.disc));
             const coverOk = !cached.cover || (this.isImageFilePath(cached.cover) && utils.IsFile(cached.cover));
             if (discOk && coverOk && (cached.disc || cached.cover)) return cached;
@@ -149,14 +386,25 @@ class ArtScanner {
 
     setMemoryCache(key, val) {
         if (!val) return;
+        if (val.embedded || val.isNone) {
+            if (this.#artPathCache.size > 500) {
+                this.#artPathCache.delete(this.#artPathCache.keys().next().value);
+            }
+            this.#artPathCache.set(key, {
+                disc: null,
+                cover: null,
+                embedded: Boolean(val.embedded),
+                isNone: Boolean(val.isNone)
+            });
+            return;
+        }
         const disc  = (val.disc  && this.isImageFilePath(val.disc))  ? val.disc  : null;
         const cover = (val.cover && this.isImageFilePath(val.cover)) ? val.cover : null;
-        // Prevent negative or non-image caching
         if (!disc && !cover) return;
         if (this.#artPathCache.size > 500) {
             this.#artPathCache.delete(this.#artPathCache.keys().next().value);
         }
-        this.#artPathCache.set(key, { disc, cover });
+        this.#artPathCache.set(key, { disc, cover, embedded: false, isNone: false });
     }
 
     getSubfolders(dirPath) {
@@ -214,25 +462,18 @@ class ArtScanner {
     }
 
     getFastDiscAndCover(dirPath) {
-        if (!dirPath || !utils.IsDirectory(dirPath)) return { disc: null, cover: null };
-        const sep = dirPath.endsWith('\\') ? '' : '\\';
+        const images = this.getFolderImagesList(dirPath);
+        if (!images.length) return { disc: null, cover: null };
+
         let disc = null;
         let cover = null;
-
-        for (const name of ArtScanner.FAST_DISC) {
-            for (const ext of ArtScanner.EXTENSIONS) {
-                const p = `${dirPath}${sep}${name}${ext}`;
-                if (utils.IsFile(p)) { disc = p; break; }
-            }
-            if (disc) break;
+        for (const target of ArtScanner.FAST_DISC) {
+            const hit = images.find(img => img.name === target);
+            if (hit) { disc = hit.path; break; }
         }
-
-        for (const name of ArtScanner.FAST_COVER) {
-            for (const ext of ArtScanner.EXTENSIONS) {
-                const p = `${dirPath}${sep}${name}${ext}`;
-                if (utils.IsFile(p)) { cover = p; break; }
-            }
-            if (cover) break;
+        for (const target of ArtScanner.FAST_COVER) {
+            const hit = images.find(img => img.name === target);
+            if (hit) { cover = hit.path; break; }
         }
         return { disc, cover };
     }
@@ -288,7 +529,7 @@ class ArtScanner {
     }
 
     searchDirectory(dirPath, specificDisc, specificCover, allowFallback = true, isRootCustom = false, maxDepth = 2, deadline = Infinity, _depth = 0) {
-        if (!dirPath || !utils.IsDirectory(dirPath) || Date.now() > deadline) {
+        if (!dirPath || Date.now() > deadline || !utils.IsDirectory(dirPath)) {
             return { disc: null, cover: null };
         }
 
@@ -331,37 +572,43 @@ class ArtScanner {
         return { disc, cover };
     }
 
-    findInCustomFolder(cFolder, artistVariants, albumVariants, folderVariants, specificDisc, specificCover, maxDepth, deadline = Infinity) {
+    findInCustomFolder(cFolder, artistVariants, albumVariants, folderVariants, specificDisc, specificCover, maxDepth, deadline = Infinity, needDisc = true, needCover = true) {
         let discPath = null;
         let coverPath = null;
+        const done = () => (!needDisc || discPath) && (!needCover || coverPath);
+
+        if (Date.now() > deadline) return { disc: null, cover: null };
 
         const sep = cFolder.endsWith('\\') ? '' : '\\';
-        const candidateSubfolders = [];
+        const candidateSubfolders = new Set();
 
         for (const art of artistVariants) {
             for (const alb of albumVariants) {
-                candidateSubfolders.push(`${cFolder}${sep}${art} - ${alb}`, `${cFolder}${sep}${art}\\${alb}`, `${cFolder}${sep}${art}_${alb}`, `${cFolder}${sep}${art} ${alb}`);
+                candidateSubfolders.add(`${cFolder}${sep}${art} - ${alb}`);
+                candidateSubfolders.add(`${cFolder}${sep}${art}\\${alb}`);
+                candidateSubfolders.add(`${cFolder}${sep}${art}_${alb}`);
+                candidateSubfolders.add(`${cFolder}${sep}${art} ${alb}`);
             }
         }
-        for (const art of artistVariants) candidateSubfolders.push(`${cFolder}${sep}${art}`);
-        for (const alb of albumVariants) candidateSubfolders.push(`${cFolder}${sep}${alb}`);
-        for (const f of folderVariants) candidateSubfolders.push(`${cFolder}${sep}${f}`);
+        for (const art of artistVariants) candidateSubfolders.add(`${cFolder}${sep}${art}`);
+        for (const alb of albumVariants) candidateSubfolders.add(`${cFolder}${sep}${alb}`);
+        for (const f of folderVariants) candidateSubfolders.add(`${cFolder}${sep}${f}`);
 
-        for (const subDir of Array.from(new Set(candidateSubfolders))) {
+        for (const subDir of candidateSubfolders) {
             if (Date.now() > deadline) return { disc: discPath, cover: coverPath };
             if (utils.IsDirectory(subDir)) {
                 const res = this.searchDirectory(subDir, specificDisc, specificCover, true, false, maxDepth, deadline);
-                discPath  ||= res.disc;
-                coverPath ||= res.cover;
-                if (discPath && coverPath) return { disc: discPath, cover: coverPath };
+                if (needDisc)  discPath  ||= res.disc;
+                if (needCover) coverPath ||= res.cover;
+                if (done()) return { disc: discPath, cover: coverPath };
             }
         }
 
-        if (specificDisc?.length || specificCover?.length) {
+        if (Date.now() <= deadline && (specificDisc?.length || specificCover?.length)) {
             const rootRes = this.searchDirectory(cFolder, specificDisc, specificCover, false, true, maxDepth, deadline);
-            discPath  ||= rootRes.disc;
-            coverPath ||= rootRes.cover;
-            if (discPath && coverPath) return { disc: discPath, cover: coverPath };
+            if (needDisc)  discPath  ||= rootRes.disc;
+            if (needCover) coverPath ||= rootRes.cover;
+            if (done()) return { disc: discPath, cover: coverPath };
         }
 
         const matchTargets = [];
@@ -373,7 +620,7 @@ class ArtScanner {
         matchTargets.push(...albumVariants, ...folderVariants);
 
         const scanLevel = (dir, depth) => {
-            if (depth > maxDepth || !utils.IsDirectory(dir) || (discPath && coverPath) || Date.now() > deadline) return;
+            if (depth > maxDepth || Date.now() > deadline || done() || !utils.IsDirectory(dir)) return;
 
             const subs = this.getSubfolders(dir);
             if (!subs?.length) return;
@@ -384,9 +631,9 @@ class ArtScanner {
                 const fName = subs[i].substring(subs[i].lastIndexOf('\\') + 1);
                 if (this.#matchesList(fName, matchTargets) || this.#matchesList(fName, artistVariants)) {
                     const res = this.searchDirectory(subs[i], specificDisc, specificCover, true, false, maxDepth, deadline);
-                    discPath  ||= res.disc;
-                    coverPath ||= res.cover;
-                    if (discPath && coverPath) return;
+                    if (needDisc)  discPath  ||= res.disc;
+                    if (needCover) coverPath ||= res.cover;
+                    if (done()) return;
 
                     const aSubs = this.getSubfolders(subs[i]);
                     const aLimit = Math.min(aSubs.length, 60);
@@ -395,9 +642,9 @@ class ArtScanner {
                         const aName = aSubs[j].substring(aSubs[j].lastIndexOf('\\') + 1);
                         if (this.#matchesList(aName, matchTargets) || this.#matchesList(aName, albumVariants)) {
                             const aRes = this.searchDirectory(aSubs[j], specificDisc, specificCover, true, false, maxDepth, deadline);
-                            discPath  ||= aRes.disc;
-                            coverPath ||= aRes.cover;
-                            if (discPath && coverPath) return;
+                            if (needDisc)  discPath  ||= aRes.disc;
+                            if (needCover) coverPath ||= aRes.cover;
+                            if (done()) return;
                         }
                     }
                 }
@@ -405,10 +652,11 @@ class ArtScanner {
 
             if (depth < maxDepth && subs.length <= 60 && Date.now() <= deadline) {
                 for (const sub of subs) {
+                    if (Date.now() > deadline) return;
                     const fName = sub.substring(sub.lastIndexOf('\\') + 1).toLowerCase();
                     if (!ArtScanner.ART_SUBDIRS.includes(fName)) {
                         scanLevel(sub, depth + 1);
-                        if (discPath && coverPath) return;
+                        if (done()) return;
                     }
                 }
             }
@@ -890,7 +1138,7 @@ class VisualBackdrop {
 
             thumb = gdi.CreateImage(tw, th);
             g = thumb.GetGraphics();
-            g.SetInterpolationMode(interpMode === 0 ? 2 : interpMode);
+            g.SetInterpolationMode(0);
             g.DrawImage(activeImg, 0, 0, tw, th, 0, 0, activeImg.Width, activeImg.Height);
             thumb.ReleaseGraphics(g);
             g = null;
@@ -1054,58 +1302,6 @@ class DiscSpinController {
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
     static BEZEL_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
 
-    static MENU_ID = {
-        ALBUM_ART_ONLY:    1,
-        SPINNING_ENABLE:   2,
-        KEEP_ASPECT_RATIO: 3,
-        SPEED_BASE:        10,
-        MASK_BASE:         20,
-        MASK_LOCK:         23,
-        INTERP_BASE:       30,
-        SIZE_BASE:         40,
-        SIZE_CUSTOM:       45,
-        CUSTOM_FOLDER_ADD: 50,
-        FOLDER_DEPTH_BASE: 51,
-        FPS_30:            70,
-        FPS_60:            71,
-        OVERLAY_ALL_OFF:   199,
-        SHOW_REFLECTION:   200,
-        OPACITY_REFL:      201,
-        SHOW_GLOW:         210,
-        OPACITY_GLOW:      211,
-        SHOW_SCANLINES:    220,
-        OPACITY_SCAN:      221,
-        SHOW_PHOSPHOR:     230,
-        OPACITY_PHOS:      231,
-        BORDER_SIZE:       250,
-        BORDER_COLOR:      251,
-        DISC_PADDING:      252,
-        ALBUM_PADDING:     253,
-        BG_ENABLE:         260,
-        BG_CUSTOM_COLOR:   261,
-        BG_USE_UI_COLOR:   263,
-        BG_BLUR_ENABLE:    270,
-        BLUR_RADIUS_BASE:  271,
-        DARKEN_BASE:       290,
-        PRESET_LOAD_BASE:  301,
-        PRESET_SAVE_BASE:  401,
-        PHOSPHOR_BASE:     600,
-        RELOAD_ART:        900,
-        CLEAR_CUSTOM_FOLDERS: 2000,
-        REMOVE_FOLDER_BASE:   2100,
-        PAD_LEFT:          3110,
-        PAD_RIGHT:         3111,
-        PAD_TOP:           3112,
-        PAD_BOTTOM:        3113,
-        BEZEL_ENABLE:      4000,
-        BEZEL_FOLDER:      4001,
-        BEZEL_RELOAD:      4002,
-        BEZEL_NONE:        4005,
-        BEZEL_BASE:        4006,
-        RESET_DEFAULTS:    5000,
-        FACTORY_RESET:     5001
-    };
-
     static MASK_TYPES = [
         { name: 'CD Mask',    id: 0 },
         { name: 'Vinyl Mask', id: 1 },
@@ -1124,46 +1320,7 @@ class DiscSpinController {
         { name: 'Magenta', color: GdiUtils.RGB(255, 0, 255) }
     ];
 
-    static DEFAULTS = {
-        spinningEnabled: true,
-        spinSpeed: 2.0,
-        spinFPS: 30,
-        useAlbumArtOnly: false,
-        keepAspectRatio: true,
-        interpolationMode: 0,
-        maxImageSize: 500,
-        maskType: 0,
-        userOverrideMask: false,
-        customFolderDepth: 2,
-        showReflection: true,
-        opReflection: 25,
-        showGlow: false,
-        opGlow: 80,
-        showScanlines: false,
-        opScanlines: 100,
-        showPhosphor: true,
-        opPhosphor: 20,
-        phosphorTheme: 8,
-        customPhosphorColor: 0xFFFFFFFF,
-        overlayAllOff: false,
-        borderSize: 0,
-        borderColor: 0xFF202020,
-        discPadding: 20,
-        albumPadding: 0,
-        padLeft: 0,
-        padRight: 0,
-        padTop: 0,
-        padBottom: 0,
-        bezelFolder: '',
-        bezelEnabled: false,
-        bezelFile: '',
-        backgroundEnabled: true,
-        blurRadius: 240,
-        blurEnabled: true,
-        darkenValue: 10,
-        customBgColor: 0xFF191919,
-        bgUseUIColor: false
-    };
+    static DEFAULTS = SettingsSchema.defaults();
 
     #lifecycle        = DiscSpinController.LIFECYCLE.BOOT;
     #dpiScale         = 1;
@@ -1171,6 +1328,7 @@ class DiscSpinController {
     #wasHidden        = false;
 
     #artSearchToken     = 0;
+    #bezelLoadToken     = 0;
     #expectedAsyncToken = 0;
     #expectedAsyncRawPath = '';
     #pendingSearchTimer = null;
@@ -1178,9 +1336,10 @@ class DiscSpinController {
     #saveTimeout        = null;
     #bezelNotifyTimeout = null;
 
-    #scanner  = new ArtScanner();
-    #discProc = new ProceduralDiscEngine();
-    #backdrop = new VisualBackdrop();
+    #scanner   = new ArtScanner();
+    #discProc  = new ProceduralDiscEngine();
+    #backdrop  = new VisualBackdrop();
+    #imgLoader = new AsyncImageLoader();
 
     #discImg       = null;
     #scaledDiscBmp = null;
@@ -1249,7 +1408,7 @@ class DiscSpinController {
             this.#updateGeometry(window.Width, window.Height);
         }
         this.#rebuildOverlay();
-        
+
         // Promote to LIVE only after state initialization is complete
         this.#lifecycle = DiscSpinController.LIFECYCLE.LIVE;
         window.Repaint();
@@ -1266,111 +1425,11 @@ class DiscSpinController {
     }
 
     static sanitizeConfig(raw, fallback = DiscSpinController.DEFAULTS) {
-        const out = { ...fallback };
-        if (!raw || typeof raw !== 'object') return out;
-
-        const intOr = (val, def) => {
-            const n = parseInt(val, 10);
-            return Number.isNaN(n) ? def : n;
-        };
-        const numOr = (val, def) => {
-            const n = Number(val);
-            return Number.isFinite(n) ? n : def;
-        };
-
-        out.spinningEnabled     = typeof raw.spinningEnabled === 'boolean' ? raw.spinningEnabled : fallback.spinningEnabled;
-        out.spinSpeed           = GdiUtils.clamp(numOr(raw.spinSpeed, fallback.spinSpeed), 0.5, 5.0);
-        out.spinFPS             = Number(raw.spinFPS) === 60 ? 60 : 30;
-        out.useAlbumArtOnly     = typeof raw.useAlbumArtOnly === 'boolean' ? raw.useAlbumArtOnly : fallback.useAlbumArtOnly;
-        out.keepAspectRatio     = typeof raw.keepAspectRatio === 'boolean' ? raw.keepAspectRatio : fallback.keepAspectRatio;
-        out.interpolationMode   = GdiUtils.clamp(intOr(raw.interpolationMode, fallback.interpolationMode), 0, 2);
-        out.maxImageSize        = GdiUtils.clamp(intOr(raw.maxImageSize, fallback.maxImageSize), 125, 2000);
-        out.maskType            = GdiUtils.clamp(intOr(raw.maskType, fallback.maskType), 0, 2);
-        out.userOverrideMask    = typeof raw.userOverrideMask === 'boolean' ? raw.userOverrideMask : fallback.userOverrideMask;
-        out.customFolderDepth   = GdiUtils.clamp(intOr(raw.customFolderDepth, fallback.customFolderDepth), 1, 4);
-
-        out.showReflection      = typeof raw.showReflection === 'boolean' ? raw.showReflection : fallback.showReflection;
-        out.opReflection        = GdiUtils.clamp(intOr(raw.opReflection, fallback.opReflection), 0, 255);
-        out.showGlow            = typeof raw.showGlow === 'boolean' ? raw.showGlow : fallback.showGlow;
-        out.opGlow              = GdiUtils.clamp(intOr(raw.opGlow, fallback.opGlow), 0, 255);
-        out.showScanlines       = typeof raw.showScanlines === 'boolean' ? raw.showScanlines : fallback.showScanlines;
-        out.opScanlines         = GdiUtils.clamp(intOr(raw.opScanlines, fallback.opScanlines), 0, 255);
-        out.showPhosphor        = typeof raw.showPhosphor === 'boolean' ? raw.showPhosphor : fallback.showPhosphor;
-        out.opPhosphor          = GdiUtils.clamp(intOr(raw.opPhosphor, fallback.opPhosphor), 0, 255);
-        out.phosphorTheme       = GdiUtils.clamp(intOr(raw.phosphorTheme, fallback.phosphorTheme), 0, DiscSpinController.PHOSPHOR_THEMES.length);
-        out.customPhosphorColor = (Number(raw.customPhosphorColor) >>> 0) || fallback.customPhosphorColor;
-        out.overlayAllOff       = typeof raw.overlayAllOff === 'boolean' ? raw.overlayAllOff : fallback.overlayAllOff;
-
-        out.borderSize          = GdiUtils.clamp(intOr(raw.borderSize, fallback.borderSize), 0, 50);
-        out.borderColor         = (Number(raw.borderColor) >>> 0) || fallback.borderColor;
-        out.discPadding         = GdiUtils.clamp(intOr(raw.discPadding, fallback.discPadding), 0, 100);
-        out.albumPadding        = GdiUtils.clamp(intOr(raw.albumPadding, fallback.albumPadding), 0, 100);
-        out.padLeft             = GdiUtils.clamp(intOr(raw.padLeft, fallback.padLeft), 0, 100);
-        out.padRight            = GdiUtils.clamp(intOr(raw.padRight, fallback.padRight), 0, 100);
-        out.padTop              = GdiUtils.clamp(intOr(raw.padTop, fallback.padTop), 0, 100);
-        out.padBottom           = GdiUtils.clamp(intOr(raw.padBottom, fallback.padBottom), 0, 100);
-
-        out.bezelFolder         = GdiUtils.sanitizePath(String(raw.bezelFolder || fallback.bezelFolder));
-        out.bezelEnabled        = typeof raw.bezelEnabled === 'boolean' ? raw.bezelEnabled : fallback.bezelEnabled;
-        out.bezelFile           = String(raw.bezelFile || '');
-
-        out.backgroundEnabled   = typeof raw.backgroundEnabled === 'boolean' ? raw.backgroundEnabled : fallback.backgroundEnabled;
-        out.blurRadius          = GdiUtils.clamp(intOr(raw.blurRadius, fallback.blurRadius), 0, 254);
-        out.blurEnabled         = typeof raw.blurEnabled === 'boolean' ? raw.blurEnabled : fallback.blurEnabled;
-        out.darkenValue         = GdiUtils.clamp(intOr(raw.darkenValue, fallback.darkenValue), 0, 50);
-        out.customBgColor       = (Number(raw.customBgColor) >>> 0) || fallback.customBgColor;
-        out.bgUseUIColor        = typeof raw.bgUseUIColor === 'boolean' ? raw.bgUseUIColor : fallback.bgUseUIColor;
-
-        return out;
+        return SettingsSchema.sanitize(raw, fallback);
     }
 
     #loadProperties() {
-        const raw = {
-            spinningEnabled:     window.GetProperty('RP.SpinningEnabled', true),
-            spinSpeed:           window.GetProperty('RP.SpinSpeed', 2.0),
-            spinFPS:             window.GetProperty('RP.SpinFPS', 30),
-            useAlbumArtOnly:     window.GetProperty('RP.UseAlbumArtOnly', false),
-            keepAspectRatio:     window.GetProperty('RP.KeepAspectRatio', true),
-            interpolationMode:   window.GetProperty('RP.InterpolationMode', 0),
-            maxImageSize:        window.GetProperty('RP.MaxImageSize', 500),
-            maskType:            window.GetProperty('RP.MaskType', 0),
-            userOverrideMask:    window.GetProperty('RP.UserOverrideMask', false),
-            customFolderDepth:   window.GetProperty('RP.CustomFolderDepth', 2),
-
-            showReflection:      window.GetProperty('Disc.ShowReflection', true),
-            opReflection:        window.GetProperty('Disc.OpReflection', 25),
-            showGlow:            window.GetProperty('Disc.ShowGlow', false),
-            opGlow:              window.GetProperty('Disc.OpGlow', 80),
-            showScanlines:       window.GetProperty('Disc.ShowScanlines', false),
-            opScanlines:         window.GetProperty('Disc.OpScanlines', 100),
-            showPhosphor:        window.GetProperty('Disc.ShowPhosphor', true),
-            opPhosphor:          window.GetProperty('Disc.OpPhosphor', 20),
-            phosphorTheme:       window.GetProperty('Disc.PhosphorTheme', 8),
-            customPhosphorColor: window.GetProperty('Disc.CustomPhosphorColor', 0xFFFFFFFF),
-            overlayAllOff:       window.GetProperty('Disc.OverlayAllOff', false),
-
-            borderSize:          window.GetProperty('Disc.BorderSize', 0),
-            borderColor:         window.GetProperty('Disc.BorderColor', 0xFF202020),
-            discPadding:         window.GetProperty('Disc.Padding', 20),
-            albumPadding:        window.GetProperty('Disc.AlbumPadding', 0),
-            padLeft:             window.GetProperty('Disc.PadLeft', 0),
-            padRight:            window.GetProperty('Disc.PadRight', 0),
-            padTop:              window.GetProperty('Disc.PadTop', 0),
-            padBottom:           window.GetProperty('Disc.PadBottom', 0),
-
-            bezelFolder:         window.GetProperty('Disc.BezelFolder', `${this.#profileBase}skins\\overlay`),
-            bezelEnabled:        window.GetProperty('Disc.BezelEnabled', false),
-            bezelFile:           window.GetProperty('Disc.BezelFile', ''),
-
-            backgroundEnabled:   window.GetProperty('Disc.BackgroundEnabled', true),
-            blurRadius:          window.GetProperty('Disc.BlurRadius', 240),
-            blurEnabled:         window.GetProperty('Disc.BlurEnabled', true),
-            darkenValue:         window.GetProperty('Disc.DarkenValue', 10),
-            customBgColor:       window.GetProperty('Disc.CustomBackgroundColor', 0xFF191919),
-            bgUseUIColor:        window.GetProperty('Disc.BgUseUIColor', false)
-        };
-
-        this.config = DiscSpinController.sanitizeConfig(raw, DiscSpinController.DEFAULTS);
+        this.config = SettingsSchema.loadProperties(DiscSpinController.DEFAULTS);
     }
 
     #loadCustomFolders() {
@@ -1387,49 +1446,7 @@ class DiscSpinController {
     }
 
     saveAll() {
-        const cfg = this.config;
-        window.SetProperty('RP.SpinningEnabled', cfg.spinningEnabled);
-        window.SetProperty('RP.SpinSpeed', cfg.spinSpeed);
-        window.SetProperty('RP.SpinFPS', cfg.spinFPS);
-        window.SetProperty('RP.UseAlbumArtOnly', cfg.useAlbumArtOnly);
-        window.SetProperty('RP.KeepAspectRatio', cfg.keepAspectRatio);
-        window.SetProperty('RP.InterpolationMode', cfg.interpolationMode);
-        window.SetProperty('RP.MaxImageSize', cfg.maxImageSize);
-        window.SetProperty('RP.MaskType', cfg.maskType);
-        window.SetProperty('RP.UserOverrideMask', cfg.userOverrideMask);
-        window.SetProperty('RP.CustomFolderDepth', cfg.customFolderDepth);
-
-        window.SetProperty('Disc.ShowReflection', cfg.showReflection);
-        window.SetProperty('Disc.OpReflection', cfg.opReflection);
-        window.SetProperty('Disc.ShowGlow', cfg.showGlow);
-        window.SetProperty('Disc.OpGlow', cfg.opGlow);
-        window.SetProperty('Disc.ShowScanlines', cfg.showScanlines);
-        window.SetProperty('Disc.OpScanlines', cfg.opScanlines);
-        window.SetProperty('Disc.ShowPhosphor', cfg.showPhosphor);
-        window.SetProperty('Disc.OpPhosphor', cfg.opPhosphor);
-        window.SetProperty('Disc.PhosphorTheme', cfg.phosphorTheme);
-        window.SetProperty('Disc.CustomPhosphorColor', cfg.customPhosphorColor);
-        window.SetProperty('Disc.OverlayAllOff', cfg.overlayAllOff);
-
-        window.SetProperty('Disc.BorderSize', cfg.borderSize);
-        window.SetProperty('Disc.BorderColor', cfg.borderColor);
-        window.SetProperty('Disc.Padding', cfg.discPadding);
-        window.SetProperty('Disc.AlbumPadding', cfg.albumPadding);
-        window.SetProperty('Disc.PadLeft', cfg.padLeft);
-        window.SetProperty('Disc.PadRight', cfg.padRight);
-        window.SetProperty('Disc.PadTop', cfg.padTop);
-        window.SetProperty('Disc.PadBottom', cfg.padBottom);
-
-        window.SetProperty('Disc.BezelFolder', cfg.bezelFolder);
-        window.SetProperty('Disc.BezelEnabled', cfg.bezelEnabled);
-        window.SetProperty('Disc.BezelFile', cfg.bezelFile);
-
-        window.SetProperty('Disc.BackgroundEnabled', cfg.backgroundEnabled);
-        window.SetProperty('Disc.BlurRadius', cfg.blurRadius);
-        window.SetProperty('Disc.BlurEnabled', cfg.blurEnabled);
-        window.SetProperty('Disc.DarkenValue', cfg.darkenValue);
-        window.SetProperty('Disc.CustomBackgroundColor', cfg.customBgColor);
-        window.SetProperty('Disc.BgUseUIColor', cfg.bgUseUIColor);
+        SettingsSchema.saveProperties(this.config);
         window.SetProperty('RP.CustomFolders', JSON.stringify(this.#customFolders));
     }
 
@@ -1506,17 +1523,36 @@ class DiscSpinController {
     }
 
     loadBezel() {
-        if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
-        if (!this.config.bezelEnabled || !this.config.bezelFile) return;
+        const bezelToken = ++this.#bezelLoadToken;
+        if (!this.config.bezelEnabled || !this.config.bezelFile) {
+            if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+            return;
+        }
 
         const target = this.resolveBezelPath(this.config.bezelFile);
-        if (target) {
-            try { this.#bezelBmp = gdi.Image(target); } catch { this.#bezelBmp = null; }
-        }
-        if (!this.#bezelBmp) {
+        if (!target) {
+            if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
             this.config.bezelEnabled = false;
             this.config.bezelFile = '';
+            return;
         }
+
+        this.#imgLoader.load(target).then((img) => {
+            if (this.#lifecycle === DiscSpinController.LIFECYCLE.SHUTDOWN || bezelToken !== this.#bezelLoadToken || !this.config.bezelEnabled) {
+                if (img) { try { img.Dispose(); } catch {} }
+                return;
+            }
+            if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+            if (img) {
+                this.#bezelBmp = img;
+            } else {
+                this.config.bezelEnabled = false;
+                this.config.bezelFile = '';
+            }
+            this.#rebuildOverlay();
+            this.#needsFullRepaint = true;
+            window.Repaint();
+        });
     }
 
     cycleBezel(direction) {
@@ -1559,7 +1595,6 @@ class DiscSpinController {
         this.#rebuildOverlay();
         this.requestSave();
 
-        // Immediately force full-window redraw so the new bezel renders instantly
         this.#needsFullRepaint = true;
 
         if (this.#bezelNotifyTimeout) window.ClearTimeout(this.#bezelNotifyTimeout);
@@ -1722,76 +1757,85 @@ class DiscSpinController {
         this.config.maskType = (filePath && this.#scanner.isVinylDisc(filePath)) ? 1 : 0;
     }
 
-    applyLoadedArtwork(discPath, coverPath, folder = '') {
-        if (discPath === this.#currentDiscPath && coverPath === this.#currentCoverPath && (this.#discImgSource || this.#coverImg)) {
+    applyLoadedArtwork(discPath, coverPath, folder = '', expectedToken = null) {
+        if ((discPath || '') === this.#currentDiscPath && (coverPath || '') === this.#currentCoverPath && (this.#discImgSource || this.#coverImg)) {
             if (fb.IsPlaying && !this.#isPaused && this.config.spinningEnabled && !this.config.useAlbumArtOnly && !this.#spinTimer) {
                 this.startSpinTimer();
             }
             return;
         }
 
-        this.#discProc.clearNormalizedCache();
-        if (this.#discImg)       { try { this.#discImg.Dispose(); }       catch {} this.#discImg = null; }
-        if (this.#scaledDiscBmp) { try { this.#scaledDiscBmp.Dispose(); } catch {} this.#scaledDiscBmp = null; }
-        if (this.#discImgSource) { try { this.#discImgSource.Dispose(); } catch {} this.#discImgSource = null; }
-        if (this.#coverImg)      { try { this.#coverImg.Dispose(); }      catch {} this.#coverImg = null; }
+        const loadToken = expectedToken ?? ++this.#artSearchToken;
+        if (!discPath && !coverPath) {
+            this.loadDefaultArt(loadToken);
+            return;
+        }
 
-        this.#isDedicated = false;
-        this.#isDefault   = false;
-        this.#currentCoverPath = '';
-        this.#currentDiscPath  = '';
+        Promise.all([
+            discPath  ? this.#imgLoader.load(discPath)  : Promise.resolve(null),
+            coverPath ? this.#imgLoader.load(coverPath) : Promise.resolve(null)
+        ]).then(([discImg, coverImg]) => {
+            if (this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE || loadToken !== this.#artSearchToken) {
+                if (discImg)  { try { discImg.Dispose(); }  catch {} }
+                if (coverImg) { try { coverImg.Dispose(); } catch {} }
+                return;
+            }
 
-        this.autoDetectMask(discPath);
+            this.#discProc.clearNormalizedCache();
+            if (this.#discImg)       { try { this.#discImg.Dispose(); }       catch {} this.#discImg = null; }
+            if (this.#scaledDiscBmp) { try { this.#scaledDiscBmp.Dispose(); } catch {} this.#scaledDiscBmp = null; }
+            if (this.#discImgSource) { try { this.#discImgSource.Dispose(); } catch {} this.#discImgSource = null; }
+            if (this.#coverImg)      { try { this.#coverImg.Dispose(); }      catch {} this.#coverImg = null; }
 
-        if (discPath) {
-            try {
-                this.#discImgSource = gdi.Image(discPath);
-                this.#isDedicated   = true;
+            this.#isDedicated = false;
+            this.#isDefault   = false;
+            this.#currentCoverPath = '';
+            this.#currentDiscPath  = '';
+
+            this.autoDetectMask(discImg ? discPath : null);
+
+            if (discImg) {
+                this.#discImgSource   = discImg;
+                this.#isDedicated     = true;
                 this.#currentDiscPath = discPath;
-            } catch {
-                this.#discImgSource = null;
             }
-        }
 
-        if (coverPath) {
-            try {
-                this.#coverImg = gdi.Image(coverPath);
+            if (coverImg) {
+                this.#coverImg         = coverImg;
                 this.#currentCoverPath = coverPath;
-            } catch {
-                this.#coverImg = null;
             }
-        }
 
-        if (!this.#discImgSource && this.#coverImg) {
-            try {
-                this.#discImgSource = this.#coverImg.Clone(0, 0, this.#coverImg.Width, this.#coverImg.Height);
-                this.#isDedicated = false;
-            } catch {
-                this.#discImgSource = null;
+            if (!this.#discImgSource && this.#coverImg) {
+                try {
+                    this.#discImgSource = this.#coverImg.Clone(0, 0, this.#coverImg.Width, this.#coverImg.Height);
+                    this.#isDedicated = false;
+                } catch {
+                    this.#discImgSource = null;
+                }
             }
-        }
 
-        if (this.#discImgSource && !this.#coverImg) {
-            try {
-                this.#coverImg = this.#discImgSource.Clone(0, 0, this.#discImgSource.Width, this.#discImgSource.Height);
-            } catch {
-                this.#coverImg = null;
+            if (this.#discImgSource && !this.#coverImg) {
+                try {
+                    this.#coverImg = this.#discImgSource.Clone(0, 0, this.#discImgSource.Width, this.#discImgSource.Height);
+                } catch {
+                    this.#coverImg = null;
+                }
             }
-        }
 
-        if (folder) {
-            window.SetProperty('RP.SavedFolder', folder);
-            window.SetProperty('Last Folder Path', folder);
-        }
+            if (folder) {
+                window.SetProperty('RP.SavedFolder', folder);
+                window.SetProperty('Last Folder Path', folder);
+            }
 
-        if (this.#discImgSource || this.#coverImg) {
-            this.updateDiscArtwork();
-            this.#needsFullRepaint = true;
-            this.startSpinTimer();
-            window.Repaint();
-        } else {
-            this.loadDefaultArt();
-        }
+            if (this.#discImgSource || this.#coverImg) {
+                this.updateDiscArtwork();
+                this.#needsFullRepaint = true;
+                this.startSpinTimer();
+                window.Repaint();
+            } else {
+                this.loadDefaultArt(loadToken);
+            }
+        });
     }
 
     loadArtworkForTrack(metadb, isTrackChange = false) {
@@ -1811,7 +1855,7 @@ class DiscSpinController {
         let trackDir = '', rawArtist = '', rawAlbum = '', rawFolder = '', rawDisc = '', rawAlbArtist = '';
         let raw = '';
         try {
-            raw = this.#tf.compound.EvalWithMetadb(handle, true) ?? '';
+            raw = this.#tf.compound.EvalWithMetadb(handle) ?? '';
             const parts = raw.split('\x01');
             trackDir     = parts[0] ?? '';
             rawArtist    = parts[1] ?? '';
@@ -1823,7 +1867,7 @@ class DiscSpinController {
 
         const artKey = this.#scanner.getArtworkIdentityKey(trackDir, rawAlbum, rawDisc, trackPath);
 
-        if (isTrackChange && this.#currentArtKey && artKey === this.#currentArtKey && (this.#discImgSource || this.#coverImg) && !this.#isDefault) {
+        if (this.#currentArtKey && artKey === this.#currentArtKey && (this.#discImgSource || this.#coverImg)) {
             this.#currentTrackPath = trackPath;
             this.#currentMetaStr = raw;
             if (fb.IsPlaying && !this.#isPaused && this.config.spinningEnabled && !this.config.useAlbumArtOnly && !this.#spinTimer) {
@@ -1832,23 +1876,10 @@ class DiscSpinController {
             return;
         }
 
-        if (artKey !== this.#currentArtKey) {
-            if (this.#discImg)       { try { this.#discImg.Dispose(); }       catch {} this.#discImg = null; }
-            if (this.#scaledDiscBmp) { try { this.#scaledDiscBmp.Dispose(); } catch {} this.#scaledDiscBmp = null; }
-            if (this.#discImgSource) { try { this.#discImgSource.Dispose(); } catch {} this.#discImgSource = null; }
-            if (this.#coverImg)      { try { this.#coverImg.Dispose(); }      catch {} this.#coverImg = null; }
-            this.#currentCoverPath = '';
-            this.#currentDiscPath  = '';
-            this.#currentArtKey    = artKey;
-            this.#rebuildBackground();
-            this.#needsFullRepaint = true;
-            window.Repaint();
-        } else {
-            this.#currentArtKey = artKey;
-        }
-
+        // Keep existing artwork visible until the new image finishes loading
+        this.#currentArtKey    = artKey;
         this.#currentTrackPath = trackPath;
-        this.#currentMetaStr = raw;
+        this.#currentMetaStr   = raw;
 
         const thisToken = ++this.#artSearchToken;
         this.#expectedAsyncToken = 0;
@@ -1856,27 +1887,47 @@ class DiscSpinController {
 
         const cached = this.#scanner.getMemoryCache(artKey);
         if (cached) {
-            this.applyLoadedArtwork(cached.disc, cached.cover, trackDir);
-            return;
-        }
-
-        if (trackDir && utils.IsDirectory(trackDir)) {
-            const fast = this.#scanner.getFastDiscAndCover(trackDir);
-            if (fast.disc && fast.cover) {
-                this.#scanner.setMemoryCache(artKey, fast);
-                this.applyLoadedArtwork(fast.disc, fast.cover, trackDir);
+            if (cached.isNone) {
+                this.loadDefaultArt(thisToken);
                 return;
             }
+            if (cached.embedded) {
+                try {
+                    const asyncHandle = this.#getSafeHandle(handle);
+                    if (asyncHandle) {
+                        this.#expectedAsyncToken = thisToken;
+                        this.#expectedAsyncRawPath = asyncHandle.RawPath || '';
+                        utils.GetAlbumArtAsync(window.ID, asyncHandle, 0, false, false, false);
+                        return;
+                    }
+                } catch {}
+                this.loadDefaultArt(thisToken);
+                return;
+            }
+            this.applyLoadedArtwork(cached.disc, cached.cover, trackDir, thisToken);
+            return;
         }
 
         if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
         this.#pendingSearchTimer = window.SetTimeout(() => {
+            this.#pendingSearchTimer = null;
             if (thisToken !== this.#artSearchToken || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) return;
 
-            const deadline = Date.now() + 35;
             let discPath = null;
             let coverPath = null;
 
+            if (trackDir && utils.IsDirectory(trackDir)) {
+                const fast = this.#scanner.getFastDiscAndCover(trackDir);
+                discPath  = fast.disc;
+                coverPath = fast.cover;
+                if (discPath && coverPath) {
+                    this.#scanner.setMemoryCache(artKey, { disc: discPath, cover: coverPath });
+                    this.applyLoadedArtwork(discPath, coverPath, trackDir, thisToken);
+                    return;
+                }
+            }
+
+            const deadline = Date.now() + 25;
             const artistVariants = this.#scanner.cleanVariants(rawArtist);
             if (rawAlbArtist && rawAlbArtist !== rawArtist) {
                 for (const v of this.#scanner.cleanVariants(rawAlbArtist)) {
@@ -1918,16 +1969,6 @@ class DiscSpinController {
                 specificDiscPatterns.push(`disc${rawDisc}`, `disc ${rawDisc}`, `disc_${rawDisc}`, `cd${rawDisc}`, `cd ${rawDisc}`, `cd_${rawDisc}`);
             }
 
-            if (this.#customFolders.length > 0) {
-                for (const cFolder of this.#customFolders) {
-                    if (Date.now() > deadline) break;
-                    const res = this.#scanner.findInCustomFolder(cFolder, artistVariants, albumVariants, folderVariants, specificDiscPatterns, specificCoverPatterns, this.config.customFolderDepth, deadline);
-                    discPath  ||= res.disc;
-                    coverPath ||= res.cover;
-                    if (discPath && coverPath) break;
-                }
-            }
-
             if ((!discPath || !coverPath) && trackDir && utils.IsDirectory(trackDir) && Date.now() <= deadline) {
                 const localRes = this.#scanner.searchDirectory(trackDir, specificDiscPatterns, specificCoverPatterns, true, false, this.config.customFolderDepth, deadline);
                 discPath  ||= localRes.disc;
@@ -1943,16 +1984,27 @@ class DiscSpinController {
                 }
             }
 
-            if (thisToken !== this.#artSearchToken || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) return;
-
-            if (trackDir && (discPath || coverPath)) {
-                this.#scanner.setMemoryCache(artKey, { disc: discPath, cover: coverPath });
+            if ((!discPath || !coverPath) && this.#customFolders.length > 0 && Date.now() <= deadline) {
+                for (const cFolder of this.#customFolders) {
+                    if (Date.now() > deadline) break;
+                    const res = this.#scanner.findInCustomFolder(
+                        cFolder, artistVariants, albumVariants, folderVariants,
+                        specificDiscPatterns, specificCoverPatterns, this.config.customFolderDepth,
+                        deadline, !discPath, !coverPath
+                    );
+                    discPath  ||= res.disc;
+                    coverPath ||= res.cover;
+                    if (discPath && coverPath) break;
+                }
             }
 
+            if (thisToken !== this.#artSearchToken || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) return;
+
             if (discPath || coverPath) {
+                this.#scanner.setMemoryCache(artKey, { disc: discPath, cover: coverPath });
                 this.#expectedAsyncToken = 0;
                 this.#expectedAsyncRawPath = '';
-                this.applyLoadedArtwork(discPath, coverPath, trackDir);
+                this.applyLoadedArtwork(discPath, coverPath, trackDir, thisToken);
             } else {
                 try {
                     const asyncHandle = this.#getSafeHandle(handle);
@@ -1961,13 +2013,13 @@ class DiscSpinController {
                         this.#expectedAsyncRawPath = asyncHandle.RawPath || '';
                         utils.GetAlbumArtAsync(window.ID, asyncHandle, 0, false, false, false);
                     } else {
-                        this.loadDefaultArt();
+                        this.loadDefaultArt(thisToken);
                     }
                 } catch {
-                    this.loadDefaultArt();
+                    this.loadDefaultArt(thisToken);
                 }
             }
-        }, 10);
+        }, 15);
     }
 
     onAlbumArtDone(handle, art_id, image, image_path) {
@@ -1996,10 +2048,15 @@ class DiscSpinController {
             this.#discImgSource = image.Clone(0, 0, image.Width, image.Height);
             this.#isDedicated   = false;
             this.#isDefault     = false;
+            this.#currentDiscPath  = '';
             this.#currentCoverPath = image_path || '';
 
-            if (this.#currentArtKey && this.#scanner.isImageFilePath(this.#currentCoverPath)) {
-                this.#scanner.setMemoryCache(this.#currentArtKey, { disc: null, cover: this.#currentCoverPath });
+            if (this.#currentArtKey) {
+                if (this.#scanner.isImageFilePath(this.#currentCoverPath)) {
+                    this.#scanner.setMemoryCache(this.#currentArtKey, { disc: null, cover: this.#currentCoverPath });
+                } else {
+                    this.#scanner.setMemoryCache(this.#currentArtKey, { embedded: true });
+                }
             }
 
             this.updateDiscArtwork();
@@ -2007,17 +2064,47 @@ class DiscSpinController {
             if (fb.IsPlaying && !this.#isPaused) this.startSpinTimer();
             window.Repaint();
         } else {
-            this.loadDefaultArt();
+            if (this.#currentArtKey) {
+                this.#scanner.setMemoryCache(this.#currentArtKey, { isNone: true });
+            }
+            this.loadDefaultArt(this.#artSearchToken);
         }
     }
 
-    loadDefaultArt() {
+    onLoadImageDone(cookie, image) {
+        if (this.#lifecycle === DiscSpinController.LIFECYCLE.SHUTDOWN) {
+            if (image) { try { image.Dispose(); } catch {} }
+            return;
+        }
+        if (!this.#imgLoader.onLoadImageDone(cookie, image)) {
+            if (image) { try { image.Dispose(); } catch {} }
+        }
+    }
+
+    #applyProceduralDefaultDisc() {
+        const norm = Math.floor(this.config.maxImageSize / 2) * 2;
+        const proc = this.#discProc.buildProceduralDefaultDisc(norm);
+        if (proc) {
+            this.#discImgSource = proc;
+            try { this.#coverImg = proc.Clone(0, 0, proc.Width, proc.Height); } catch { this.#coverImg = null; }
+            this.#isDedicated = true;
+            this.#isDefault   = true;
+        }
+        this.updateDiscArtwork();
+        this.#needsFullRepaint = true;
+        this.startSpinTimer();
+        window.Repaint();
+    }
+
+    loadDefaultArt(expectedToken = null) {
         if (this.#isDefault && this.#discImgSource && this.#coverImg) {
             if (fb.IsPlaying && !this.#isPaused) this.startSpinTimer();
             this.#needsFullRepaint = true;
             window.Repaint();
             return;
         }
+
+        const token = expectedToken ?? ++this.#artSearchToken;
 
         this.#discProc.clearNormalizedCache();
         if (this.#discImg)       { try { this.#discImg.Dispose(); }       catch {} this.#discImg = null; }
@@ -2031,28 +2118,28 @@ class DiscSpinController {
 
         const defaultDiscPath = `${this.#profileBase}skins\\default_disc.png`;
         if (utils.IsFile(defaultDiscPath)) {
-            try {
-                this.#discImgSource = gdi.Image(defaultDiscPath);
-                this.#coverImg      = this.#discImgSource ? this.#discImgSource.Clone(0, 0, this.#discImgSource.Width, this.#discImgSource.Height) : null;
-                this.#isDedicated   = true;
-                this.#isDefault     = true;
-            } catch {}
+            this.#imgLoader.load(defaultDiscPath).then((img) => {
+                if (this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE || token !== this.#artSearchToken) {
+                    if (img) { try { img.Dispose(); } catch {} }
+                    return;
+                }
+                if (img) {
+                    this.#discImgSource = img;
+                    try { this.#coverImg = img.Clone(0, 0, img.Width, img.Height); } catch { this.#coverImg = null; }
+                    this.#isDedicated = true;
+                    this.#isDefault   = true;
+                    this.updateDiscArtwork();
+                    this.#needsFullRepaint = true;
+                    this.startSpinTimer();
+                    window.Repaint();
+                } else {
+                    this.#applyProceduralDefaultDisc();
+                }
+            });
+            return;
         }
 
-        if (!this.#discImgSource) {
-            const norm = Math.floor(this.config.maxImageSize / 2) * 2;
-            const proc = this.#discProc.buildProceduralDefaultDisc(norm);
-            if (proc) {
-                this.#discImgSource = proc;
-                try { this.#coverImg = proc.Clone(0, 0, proc.Width, proc.Height); } catch { this.#coverImg = null; }
-                this.#isDedicated = true;
-                this.#isDefault   = true;
-            }
-        }
-        this.updateDiscArtwork();
-        this.#needsFullRepaint = true;
-        this.startSpinTimer();
-        window.Repaint();
+        this.#applyProceduralDefaultDisc();
     }
 
     restoreLastAlbum() {
@@ -2094,10 +2181,10 @@ class DiscSpinController {
             window.ClearTimeout(this.#pendingSearchTimer);
             this.#pendingSearchTimer = null;
         }
-        this.loadDefaultArt();
+        this.loadDefaultArt(this.#artSearchToken);
     }
-
-    startSpinTimer() {
+	
+startSpinTimer() {
         this.stopSpinTimer();
         if (!this.config.spinningEnabled || this.config.useAlbumArtOnly || !fb.IsPlaying || this.#isPaused || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) {
             return;
@@ -2165,8 +2252,8 @@ class DiscSpinController {
             return;
         }
 
-        // Add 1-2px safety margin to avoid anti-aliasing edge fringe on fractional scaling displays
-        const pad = Math.max(1, this.scale(1));
+        // 2px+ safety margin prevents 1px bilinear anti-aliasing edge fringe on rotation
+        const pad = Math.max(2, this.scale(2));
         const rx = Math.max(0, this.#geom.dx - pad);
         const ry = Math.max(0, this.#geom.dy - pad);
         const rw = Math.min(window.Width - rx, this.#geom.discSize + pad * 2);
@@ -2176,7 +2263,7 @@ class DiscSpinController {
     }
 
     onPaint(gr) {
-        if (this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) return;
+        if (this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE || !window.IsVisible) return;
         const w = window.Width, h = window.Height;
         if (!gr || w <= 0 || h <= 0) return;
 
@@ -2458,7 +2545,7 @@ class DiscSpinController {
 
     #isHandleInFolder(handle, folder) {
         if (!handle || !folder || !this.#tf.dirPath) return false;
-        const trackDir = (this.#tf.dirPath.EvalWithMetadb(handle, true) || '').toLowerCase().replace(/[\\/]+$/, '');
+        const trackDir = (this.#tf.dirPath.EvalWithMetadb(handle) || '').toLowerCase().replace(/[\\/]+$/, '');
         const targetDir = folder.toLowerCase().replace(/[\\/]+$/, '');
         if (!trackDir || !targetDir) return false;
         return trackDir === targetDir || trackDir.startsWith(targetDir + '\\') || this.#getAlbumRootFolder(trackDir) === this.#getAlbumRootFolder(targetDir);
@@ -2495,13 +2582,14 @@ class DiscSpinController {
             if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
 
             this.#pendingSearchTimer = window.SetTimeout(() => {
+                this.#pendingSearchTimer = null;
                 if (thisToken !== this.#artSearchToken || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE || fb.IsPlaying) return;
 
                 const res = this.#scanner.searchDirectory(info, ArtScanner.FAST_DISC, ArtScanner.FAST_COVER, true, false, this.config.customFolderDepth);
                 if (thisToken !== this.#artSearchToken || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE || fb.IsPlaying) return;
 
                 if (res.disc || res.cover) {
-                    this.applyLoadedArtwork(res.disc, res.cover, info);
+                    this.applyLoadedArtwork(res.disc, res.cover, info, thisToken);
                 }
             }, 30);
         }
@@ -2525,430 +2613,383 @@ class DiscSpinController {
     }
 
     // ========================================================================================
-    // CONTEXT MENU
+    // CONTEXT MENU (DECLARATIVE MENU BUILDER)
     // ========================================================================================
     showContextMenu(x, y) {
-        const MID = DiscSpinController.MENU_ID;
+        if (this.#opacityTarget) {
+            this.#opacityTarget = null;
+            this.#needsFullRepaint = true;
+            window.Repaint();
+        }
 
-        const menus = [];
-        const createMenu = () => {
-            const m = window.CreatePopupMenu();
-            menus.push(m);
-            return m;
+        const cfg = this.config;
+        const m = new MenuBuilder();
+        const SIZES = [250, 500, 750, 1000];
+        const bezelNames = this.listBezelNames();
+
+        const reloadCurrentArtwork = () => {
+            this.#scanner.clearCaches();
+            this.#currentArtKey = '';
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else this.restoreLastAlbum();
         };
 
-        const m         = createMenu();
-        const discM     = createMenu();
-        const speedM    = createMenu();
-        const fpsM      = createMenu();
-        const maskM     = createMenu();
-        const interpM   = createMenu();
-        const sizeM     = createMenu();
-        const overlayM  = createMenu();
-        const phosphorM = createMenu();
-        const opacityM  = createMenu();
-        const borderM   = createMenu();
-        const bgM       = createMenu();
-        const blurM     = createMenu();
-        const darkenM   = createMenu();
-        const customFM  = createMenu();
-        const depthM    = createMenu();
-        const presetM   = createMenu();
-        const loadM     = createMenu();
-        const saveM     = createMenu();
-        const bzM       = createMenu();
-
-        m.AppendMenuItem(0, MID.ALBUM_ART_ONLY, "Album Art Only (Static)");
-        if (this.config.useAlbumArtOnly) m.CheckMenuRadioItem(MID.ALBUM_ART_ONLY, MID.ALBUM_ART_ONLY, MID.ALBUM_ART_ONLY);
-        m.AppendMenuItem(0, MID.SPINNING_ENABLE, "Spinning Enabled");
-        if (this.config.spinningEnabled) m.CheckMenuRadioItem(MID.SPINNING_ENABLE, MID.SPINNING_ENABLE, MID.SPINNING_ENABLE);
-        m.AppendMenuItem(0, MID.KEEP_ASPECT_RATIO, "Keep Aspect Ratio");
-        if (this.config.keepAspectRatio) m.CheckMenuRadioItem(MID.KEEP_ASPECT_RATIO, MID.KEEP_ASPECT_RATIO, MID.KEEP_ASPECT_RATIO);
-        m.AppendMenuSeparator();
-
-        [1.0, 2.0, 3.0, 4.0, 5.0].forEach((spd, i) => {
-            speedM.AppendMenuItem(0, MID.SPEED_BASE + i, `${spd.toFixed(1)}x Speed`);
-        });
-        const spdIdx = [1.0, 2.0, 3.0, 4.0, 5.0].indexOf(this.config.spinSpeed);
-        if (spdIdx !== -1) speedM.CheckMenuRadioItem(MID.SPEED_BASE, MID.SPEED_BASE + 4, MID.SPEED_BASE + spdIdx);
-        speedM.AppendTo(discM, 0, "Rotation Speed");
-
-        fpsM.AppendMenuItem(0, MID.FPS_30, "30 FPS (Power Saver)");
-        fpsM.AppendMenuItem(0, MID.FPS_60, "60 FPS (Ultra Smooth)");
-        fpsM.CheckMenuRadioItem(MID.FPS_30, MID.FPS_60, this.config.spinFPS === 30 ? MID.FPS_30 : MID.FPS_60);
-        fpsM.AppendTo(discM, 0, "Frame Rate");
-
-        DiscSpinController.MASK_TYPES.forEach((mt, i) => {
-            maskM.AppendMenuItem(0, MID.MASK_BASE + i, mt.name);
-        });
-        maskM.CheckMenuRadioItem(MID.MASK_BASE, MID.MASK_BASE + 2, MID.MASK_BASE + this.config.maskType);
-        maskM.AppendMenuSeparator();
-        maskM.AppendMenuItem(0, MID.MASK_LOCK, "Lock Selected Mask (Disable Auto-Detect)");
-        if (this.config.userOverrideMask) maskM.CheckMenuRadioItem(MID.MASK_LOCK, MID.MASK_LOCK, MID.MASK_LOCK);
-        maskM.AppendTo(discM, 0, "Mask Type");
-
-        ["Nearest Neighbor (Fastest)", "Low Quality", "Bilinear (High Quality)"].forEach((name, i) => {
-            interpM.AppendMenuItem(0, MID.INTERP_BASE + i, name);
-        });
-        interpM.CheckMenuRadioItem(MID.INTERP_BASE, MID.INTERP_BASE + 2, MID.INTERP_BASE + this.config.interpolationMode);
-        interpM.AppendTo(discM, 0, "Scaling Quality");
-
-        const SIZES = [250, 500, 750, 1000];
-        SIZES.forEach((sz, idx) => {
-            sizeM.AppendMenuItem(0, MID.SIZE_BASE + idx, `Base Size: ${sz}px`);
-        });
-        sizeM.AppendMenuSeparator();
-        sizeM.AppendMenuItem(0, MID.SIZE_CUSTOM, `Custom Base Size... (${this.config.maxImageSize}px)`);
-        const szIdx = SIZES.indexOf(this.config.maxImageSize);
-        if (szIdx !== -1) sizeM.CheckMenuRadioItem(MID.SIZE_BASE, MID.SIZE_BASE + SIZES.length - 1, MID.SIZE_BASE + szIdx);
-        else sizeM.CheckMenuRadioItem(MID.SIZE_CUSTOM, MID.SIZE_CUSTOM, MID.SIZE_CUSTOM);
-        sizeM.AppendTo(discM, 0, "Base Disc Size");
-
-        discM.AppendTo(m, 0, "Disc Settings");
-
-        bzM.AppendMenuItem(0, MID.BEZEL_ENABLE, "Enable Bezel Frame");
-        if (this.config.bezelEnabled) bzM.CheckMenuRadioItem(MID.BEZEL_ENABLE, MID.BEZEL_ENABLE, MID.BEZEL_ENABLE);
-        bzM.AppendMenuSeparator();
-        const bezelNames = this.listBezelNames();
-        const bzStart = MID.BEZEL_NONE;
-        const bzEnd = bezelNames.length > 0 ? (bzStart + bezelNames.length) : bzStart;
-        bzM.AppendMenuItem(0, bzStart, "None (No Bezel)");
-        if (bezelNames.length > 0) {
-            bzM.AppendMenuSeparator();
-            bezelNames.forEach((name, bi) => bzM.AppendMenuItem(0, bzStart + 1 + bi, name));
-        }
-        const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
-        const currentBzIdx = (this.config.bezelEnabled && curClean) 
-            ? bezelNames.findIndex(n => n.toLowerCase() === curClean)
-            : -1;
-        if (currentBzIdx !== -1) bzM.CheckMenuRadioItem(bzStart, bzEnd, bzStart + 1 + currentBzIdx);
-        else bzM.CheckMenuRadioItem(bzStart, bzEnd, bzStart);
-        bzM.AppendMenuSeparator();
-        bzM.AppendMenuItem(0, MID.BEZEL_FOLDER, "Set Bezel Folder...");
-        bzM.AppendMenuItem(0, MID.BEZEL_RELOAD, "Reload Bezel List");
-        bzM.AppendMenuSeparator();
-        bzM.AppendMenuItem(0, MID.PAD_LEFT, `Left Padding... (${this.config.padLeft}px)`);
-        bzM.AppendMenuItem(0, MID.PAD_RIGHT, `Right Padding... (${this.config.padRight}px)`);
-        bzM.AppendMenuItem(0, MID.PAD_TOP, `Top Padding... (${this.config.padTop}px)`);
-        bzM.AppendMenuItem(0, MID.PAD_BOTTOM, `Bottom Padding... (${this.config.padBottom}px)`);
-        bzM.AppendTo(overlayM, 0, "Bezel / Overlay");
-
-        DiscSpinController.PHOSPHOR_THEMES.forEach((pt, i) => {
-            phosphorM.AppendMenuItem(0, MID.PHOSPHOR_BASE + i, pt.name);
-        });
-        phosphorM.AppendMenuSeparator();
-        phosphorM.AppendMenuItem(0, MID.PHOSPHOR_BASE + DiscSpinController.PHOSPHOR_THEMES.length, "Custom Color...");
-        phosphorM.CheckMenuRadioItem(MID.PHOSPHOR_BASE, MID.PHOSPHOR_BASE + DiscSpinController.PHOSPHOR_THEMES.length, MID.PHOSPHOR_BASE + this.config.phosphorTheme);
-        phosphorM.AppendTo(overlayM, 0, "Phosphor Palette");
-
-        overlayM.AppendMenuSeparator();
-        overlayM.AppendMenuItem(0, MID.OVERLAY_ALL_OFF, "Disable All Overlays");
-        if (this.config.overlayAllOff) overlayM.CheckMenuRadioItem(MID.OVERLAY_ALL_OFF, MID.OVERLAY_ALL_OFF, MID.OVERLAY_ALL_OFF);
-        overlayM.AppendMenuSeparator();
-        overlayM.AppendMenuItem(0, MID.SHOW_REFLECTION, "Reflection Highlight");
-        if (this.config.showReflection) overlayM.CheckMenuRadioItem(MID.SHOW_REFLECTION, MID.SHOW_REFLECTION, MID.SHOW_REFLECTION);
-        overlayM.AppendMenuItem(0, MID.SHOW_GLOW, "CRT Outer Glow");
-        if (this.config.showGlow) overlayM.CheckMenuRadioItem(MID.SHOW_GLOW, MID.SHOW_GLOW, MID.SHOW_GLOW);
-        overlayM.AppendMenuItem(0, MID.SHOW_SCANLINES, "CRT Scanlines");
-        if (this.config.showScanlines) overlayM.CheckMenuRadioItem(MID.SHOW_SCANLINES, MID.SHOW_SCANLINES, MID.SHOW_SCANLINES);
-        overlayM.AppendMenuItem(0, MID.SHOW_PHOSPHOR, "Phosphor Mask");
-        if (this.config.showPhosphor) overlayM.CheckMenuRadioItem(MID.SHOW_PHOSPHOR, MID.SHOW_PHOSPHOR, MID.SHOW_PHOSPHOR);
-        overlayM.AppendMenuSeparator();
-        
-        opacityM.AppendMenuItem(0, MID.OPACITY_REFL, `Reflection Opacity... (${this.getOpacity('Reflection')})`);
-        opacityM.AppendMenuItem(0, MID.OPACITY_GLOW, `Glow Opacity... (${this.getOpacity('Glow')})`);
-        opacityM.AppendMenuItem(0, MID.OPACITY_SCAN, `Scanlines Opacity... (${this.getOpacity('Scanlines')})`);
-        opacityM.AppendMenuItem(0, MID.OPACITY_PHOS, `Phosphor Opacity... (${this.getOpacity('Phosphor')})`);
-        opacityM.AppendTo(overlayM, 0, "Adjust Opacities");
-        overlayM.AppendTo(m, 0, "Appearance");
-
-        borderM.AppendMenuItem(0, MID.BORDER_SIZE, `Set Border Size... (${this.config.borderSize}px)`);
-        borderM.AppendMenuItem(0, MID.BORDER_COLOR, "Change Border Color...");
-        borderM.AppendMenuSeparator();
-        borderM.AppendMenuItem(0, MID.DISC_PADDING, `Set Disc Padding... (${this.config.discPadding}px)`);
-        borderM.AppendMenuItem(0, MID.ALBUM_PADDING, `Set Album Art Padding... (${this.config.albumPadding}px)`);
-        borderM.AppendTo(m, 0, "Border and Padding");
-
-        bgM.AppendMenuItem(0, MID.BG_USE_UI_COLOR, "Use UI Color");
-        if (this.config.bgUseUIColor) bgM.CheckMenuRadioItem(MID.BG_USE_UI_COLOR, MID.BG_USE_UI_COLOR, MID.BG_USE_UI_COLOR);
-        bgM.AppendMenuItem(0, MID.BG_ENABLE, "Enable Background Art");
-        if (this.config.backgroundEnabled) bgM.CheckMenuRadioItem(MID.BG_ENABLE, MID.BG_ENABLE, MID.BG_ENABLE);
-        bgM.AppendMenuItem(0, MID.BG_BLUR_ENABLE, "Enable Blurred Backdrop");
-        if (this.config.blurEnabled) bgM.CheckMenuRadioItem(MID.BG_BLUR_ENABLE, MID.BG_BLUR_ENABLE, MID.BG_BLUR_ENABLE);
-        bgM.AppendMenuItem(0, MID.BG_CUSTOM_COLOR, "Custom Background Color...");
-        bgM.AppendMenuSeparator();
-        [20, 60, 100, 140, 180, 220, 240, 254].forEach((rad, i) => {
-            blurM.AppendMenuItem(0, MID.BLUR_RADIUS_BASE + i, `Blur Radius: ${rad}`);
-        });
-        const radIdx = [20, 60, 100, 140, 180, 220, 240, 254].indexOf(this.config.blurRadius);
-        if (radIdx !== -1) blurM.CheckMenuRadioItem(MID.BLUR_RADIUS_BASE, MID.BLUR_RADIUS_BASE + 7, MID.BLUR_RADIUS_BASE + radIdx);
-        blurM.AppendTo(bgM, 0, "Blur Radius");
-        [0, 10, 20, 30, 40, 50].forEach((pct, i) => {
-            darkenM.AppendMenuItem(0, MID.DARKEN_BASE + i, `Darken ${pct}%`);
-        });
-        const dkIdx = [0, 10, 20, 30, 40, 50].indexOf(this.config.darkenValue);
-        if (dkIdx !== -1) darkenM.CheckMenuRadioItem(MID.DARKEN_BASE, MID.DARKEN_BASE + 5, MID.DARKEN_BASE + dkIdx);
-        darkenM.AppendTo(bgM, 0, "Darken Backdrop");
-        bgM.AppendTo(m, 0, "Background");
-
-        customFM.AppendMenuItem(0, MID.CUSTOM_FOLDER_ADD, "Add Custom Folder Path...");
-        customFM.AppendMenuSeparator();
-        [1, 2, 3, 4].forEach(d => {
-            depthM.AppendMenuItem(0, MID.FOLDER_DEPTH_BASE + (d - 1), `${d} Sub-folder${d > 1 ? 's' : ''} Deep`);
-        });
-        depthM.CheckMenuRadioItem(MID.FOLDER_DEPTH_BASE, MID.FOLDER_DEPTH_BASE + 3, MID.FOLDER_DEPTH_BASE + (this.config.customFolderDepth - 1));
-        depthM.AppendTo(customFM, 0, "Folder Match Depth");
-        if (this.#customFolders.length > 0) {
-            customFM.AppendMenuSeparator();
-            this.#customFolders.forEach((f, i) => {
-                const shortName = f.length > 45 ? `...${f.substring(f.length - 42)}` : f;
-                customFM.AppendMenuItem(0, MID.REMOVE_FOLDER_BASE + i, `Remove: ${shortName}`);
-            });
-            customFM.AppendMenuSeparator();
-            customFM.AppendMenuItem(0, MID.CLEAR_CUSTOM_FOLDERS, "Clear All Custom Folders");
-        }
-        customFM.AppendTo(m, 0, "Custom Artwork Folders");
-
-        [1, 2, 3].forEach(i => {
-            const hasPreset = Boolean(window.GetProperty(`Disc.Preset${i}`, null));
-            loadM.AppendMenuItem(hasPreset ? 0 : 0x0001, MID.PRESET_LOAD_BASE + (i - 1), `Preset ${i}${hasPreset ? '' : ' (Empty)'}`);
-        });
-        loadM.AppendTo(presetM, 0, "Load Preset");
-        [1, 2, 3].forEach(i => saveM.AppendMenuItem(0, MID.PRESET_SAVE_BASE + (i - 1), `Preset ${i}`));
-        saveM.AppendTo(presetM, 0, "Save Preset");
-        presetM.AppendTo(m, 0, "Presets");
-
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(0, MID.RELOAD_ART, "Clear Image Cache & Reload");
-        m.AppendMenuItem(0, MID.RESET_DEFAULTS, "Reset Visual Settings to Defaults");
-        m.AppendMenuItem(0, MID.FACTORY_RESET, "Factory Reset (All Settings & Folders)...");
-
-        let id = 0;
-        try {
-            id = m.TrackPopupMenu(x, y);
-        } finally {
-            for (const menu of menus) {
-                try { menu.Dispose(); } catch {}
-            }
-        }
-
-        if (id === 0) return true;
-
-        if (id === MID.ALBUM_ART_ONLY) { 
-            this.config.useAlbumArtOnly = !this.config.useAlbumArtOnly; 
+        m.addItem('Album Art Only (Static)', () => {
+            cfg.useAlbumArtOnly = !cfg.useAlbumArtOnly;
             this.#geom.valid = false;
-            this.updateDiscArtwork(); 
-            this.startSpinTimer(); 
+            this.updateDiscArtwork();
+            this.startSpinTimer();
             this.#rebuildOverlay();
-            this.#needsFullRepaint = true;
-        } else if (id === MID.SPINNING_ENABLE) { 
-            this.config.spinningEnabled = !this.config.spinningEnabled; 
-            this.startSpinTimer(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.KEEP_ASPECT_RATIO) { 
-            this.config.keepAspectRatio = !this.config.keepAspectRatio; 
+        }, { checked: cfg.useAlbumArtOnly });
+
+        m.addItem('Spinning Enabled', () => {
+            cfg.spinningEnabled = !cfg.spinningEnabled;
+            this.startSpinTimer();
+        }, { checked: cfg.spinningEnabled });
+
+        m.addItem('Keep Aspect Ratio', () => {
+            cfg.keepAspectRatio = !cfg.keepAspectRatio;
             this.#geom.valid = false;
             this.#updateGeometry(window.Width, window.Height);
-            this.#needsFullRepaint = true;
-        } else if (id >= MID.SPEED_BASE && id <= MID.SPEED_BASE + 4) { 
-            this.config.spinSpeed = [1.0, 2.0, 3.0, 4.0, 5.0][id - MID.SPEED_BASE]; 
-            this.startSpinTimer(); 
-        } else if (id === MID.FPS_30 || id === MID.FPS_60) {
-            this.config.spinFPS = (id === MID.FPS_30) ? 30 : 60;
-            this.startSpinTimer();
-        } else if (id >= MID.MASK_BASE && id <= MID.MASK_BASE + 2) { 
-            this.config.maskType = id - MID.MASK_BASE; 
-            this.config.userOverrideMask = true;
-            this.updateDiscArtwork(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.MASK_LOCK) { 
-            this.config.userOverrideMask = !this.config.userOverrideMask; 
-            if (!this.config.userOverrideMask) {
-                this.autoDetectMask(this.#currentDiscPath);
-                this.updateDiscArtwork();
-                this.#needsFullRepaint = true;
-            }
-        } else if (id >= MID.INTERP_BASE && id <= MID.INTERP_BASE + 2) { 
-            this.config.interpolationMode = id - MID.INTERP_BASE; 
-            this.updateDiscArtwork(); 
-            this.#needsFullRepaint = true;
-        } else if (id >= MID.SIZE_BASE && id < MID.SIZE_BASE + SIZES.length) { 
-            this.config.maxImageSize = SIZES[id - MID.SIZE_BASE]; 
-            this.#discProc.clearNormalizedCache();
-            this.updateDiscArtwork(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.SIZE_CUSTOM) {
-            const val = GdiUtils.prompt("Enter base disc size in pixels (125-2000):", "Base Disc Size", this.config.maxImageSize);
-            if (val !== null && val !== '') {
-                this.config.maxImageSize = GdiUtils.clamp(parseInt(val, 10) || 500, 125, 2000);
-                this.#discProc.clearNormalizedCache();
-                this.updateDiscArtwork();
-                this.#needsFullRepaint = true;
-            }
-        } else if (id >= MID.PHOSPHOR_BASE && id < MID.PHOSPHOR_BASE + DiscSpinController.PHOSPHOR_THEMES.length) { 
-            this.config.phosphorTheme = id - MID.PHOSPHOR_BASE; 
-            this.#rebuildOverlay(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.PHOSPHOR_BASE + DiscSpinController.PHOSPHOR_THEMES.length) {
-            const prevCol = this.config.customPhosphorColor >>> 0;
-            const c = utils.ColourPicker(window.ID, prevCol);
-            const newCol = (c | 0xFF000000) >>> 0;
-            if (c !== -1 && newCol !== prevCol) {
-                this.config.customPhosphorColor = newCol;
-                this.config.phosphorTheme = DiscSpinController.PHOSPHOR_THEMES.length;
-                this.#rebuildOverlay();
-                this.#needsFullRepaint = true;
-            }
-        } else if (id === MID.OVERLAY_ALL_OFF) { 
-            this.config.overlayAllOff = !this.config.overlayAllOff; 
-            this.#refreshGlow();
-            this.#rebuildOverlay(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.SHOW_REFLECTION) { 
-            this.config.showReflection = !this.config.showReflection; 
-            this.#rebuildOverlay(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.SHOW_GLOW) {
-            this.config.showGlow = !this.config.showGlow;
-            this.#geom.valid = false;
-            this.#refreshGlow();
-            this.#needsFullRepaint = true;
-            window.Repaint(); 
-        } else if (id === MID.SHOW_SCANLINES) { 
-            this.config.showScanlines = !this.config.showScanlines; 
-            this.#rebuildOverlay(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.SHOW_PHOSPHOR) { 
-            this.config.showPhosphor = !this.config.showPhosphor; 
-            this.#rebuildOverlay(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.OPACITY_REFL) { this.setOpacityTarget('Reflection'); }
-        else if (id === MID.OPACITY_GLOW) { this.setOpacityTarget('Glow'); }
-        else if (id === MID.OPACITY_SCAN) { this.setOpacityTarget('Scanlines'); }
-        else if (id === MID.OPACITY_PHOS) { this.setOpacityTarget('Phosphor'); }
-        else if (id === MID.BEZEL_ENABLE) {
-            this.config.bezelEnabled = !this.config.bezelEnabled;
-            if (this.config.bezelEnabled && !this.config.bezelFile && bezelNames.length > 0) {
-                this.config.bezelFile = bezelNames[0];
-            }
-            this.loadBezel();
-            this.#rebuildOverlay();
-            this.#needsFullRepaint = true;
-        } else if (id === MID.BEZEL_NONE) {
-            this.config.bezelEnabled = false;
-            this.config.bezelFile = '';
-            this.loadBezel();
-            this.#rebuildOverlay();
-            this.#needsFullRepaint = true;
-        } else if (id >= MID.BEZEL_BASE && id < MID.BEZEL_BASE + bezelNames.length) {
-            this.config.bezelEnabled = true;
-            this.config.bezelFile = bezelNames[id - MID.BEZEL_BASE];
-            this.loadBezel();
-            this.#rebuildOverlay();
-            this.#needsFullRepaint = true;
-        } else if (id === MID.BEZEL_FOLDER) {
-            const f = GdiUtils.prompt("Enter folder path containing bezel/overlay images:", "Set Bezel Folder", this.config.bezelFolder);
-            if (f) {
-                const cleaned = GdiUtils.sanitizePath(f);
-                if (cleaned && utils.IsDirectory(cleaned)) {
-                    this.config.bezelFolder = cleaned;
+        }, { checked: cfg.keepAspectRatio });
+
+        m.addSeparator();
+
+        // Disc Settings
+        m.addSubMenu('Disc Settings', (discM) => {
+            discM.addSubMenu('Rotation Speed', (speedM) => {
+                [1.0, 2.0, 3.0, 4.0, 5.0].forEach((spd) => {
+                    speedM.addItem(`${spd.toFixed(1)}x Speed`, () => {
+                        cfg.spinSpeed = spd;
+                        this.startSpinTimer();
+                    }, { radio: cfg.spinSpeed === spd });
+                });
+            });
+
+            discM.addSubMenu('Frame Rate', (fpsM) => {
+                fpsM.addItem('30 FPS (Power Saver)', () => { cfg.spinFPS = 30; this.startSpinTimer(); }, { radio: cfg.spinFPS === 30 });
+                fpsM.addItem('60 FPS (Ultra Smooth)', () => { cfg.spinFPS = 60; this.startSpinTimer(); }, { radio: cfg.spinFPS === 60 });
+            });
+
+            discM.addSubMenu('Mask Type', (maskM) => {
+                DiscSpinController.MASK_TYPES.forEach((mt) => {
+                    maskM.addItem(mt.name, () => {
+                        cfg.maskType = mt.id;
+                        cfg.userOverrideMask = true;
+                        this.updateDiscArtwork();
+                    }, { radio: cfg.maskType === mt.id });
+                });
+                maskM.addSeparator();
+                maskM.addItem('Lock Selected Mask (Disable Auto-Detect)', () => {
+                    cfg.userOverrideMask = !cfg.userOverrideMask;
+                    if (!cfg.userOverrideMask) {
+                        this.autoDetectMask(this.#currentDiscPath);
+                        this.updateDiscArtwork();
+                    }
+                }, { checked: cfg.userOverrideMask });
+            });
+
+            discM.addSubMenu('Scaling Quality', (interpM) => {
+                ['Nearest Neighbor (Fastest)', 'Low Quality', 'Bilinear (High Quality)'].forEach((name, i) => {
+                    interpM.addItem(name, () => {
+                        cfg.interpolationMode = i;
+                        this.updateDiscArtwork();
+                    }, { radio: cfg.interpolationMode === i });
+                });
+            });
+
+            discM.addSubMenu('Base Disc Size', (sizeM) => {
+                SIZES.forEach((sz) => {
+                    sizeM.addItem(`Base Size: ${sz}px`, () => {
+                        cfg.maxImageSize = sz;
+                        this.#discProc.clearNormalizedCache();
+                        this.updateDiscArtwork();
+                    }, { radio: cfg.maxImageSize === sz });
+                });
+                sizeM.addSeparator();
+                sizeM.addItem(`Custom Base Size... (${cfg.maxImageSize}px)`, () => {
+                    const val = GdiUtils.prompt('Enter base disc size in pixels (125-2000):', 'Base Disc Size', cfg.maxImageSize);
+                    if (val !== null && val.trim() !== '') {
+                        const n = parseInt(val, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.maxImageSize = GdiUtils.clamp(n, 125, 2000);
+                            this.#discProc.clearNormalizedCache();
+                            this.updateDiscArtwork();
+                        }
+                    }
+                }, { radio: !SIZES.includes(cfg.maxImageSize) });
+            });
+        });
+
+        // Appearance
+        m.addSubMenu('Appearance', (overlayM) => {
+            overlayM.addSubMenu('Bezel / Overlay', (bzM) => {
+                bzM.addItem('Enable Bezel Frame', () => {
+                    cfg.bezelEnabled = !cfg.bezelEnabled;
+                    if (cfg.bezelEnabled && !cfg.bezelFile && bezelNames.length > 0) {
+                        cfg.bezelFile = bezelNames[0];
+                    }
+                    this.loadBezel();
+                    this.#rebuildOverlay();
+                }, { checked: cfg.bezelEnabled });
+
+                bzM.addSeparator();
+                const curClean = (cfg.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
+                const currentBzIdx = (cfg.bezelEnabled && curClean)
+                    ? bezelNames.findIndex(n => n.toLowerCase() === curClean)
+                    : -1;
+
+                bzM.addItem('None (No Bezel)', () => {
+                    cfg.bezelEnabled = false;
+                    cfg.bezelFile = '';
+                    this.loadBezel();
+                    this.#rebuildOverlay();
+                }, { radio: currentBzIdx === -1 });
+
+                if (bezelNames.length > 0) {
+                    bzM.addSeparator();
+                    bezelNames.forEach((name, bi) => {
+                        bzM.addItem(GdiUtils.escapeMenuLabel(name), () => {
+                            cfg.bezelEnabled = true;
+                            cfg.bezelFile = name;
+                            this.loadBezel();
+                            this.#rebuildOverlay();
+                        }, { radio: currentBzIdx === bi });
+                    });
+                }
+
+                bzM.addSeparator();
+                bzM.addItem('Set Bezel Folder...', () => {
+                    const f = GdiUtils.prompt('Enter folder path containing bezel/overlay images:', 'Set Bezel Folder', cfg.bezelFolder);
+                    if (f) {
+                        const cleaned = GdiUtils.sanitizePath(f);
+                        if (cleaned && utils.IsDirectory(cleaned)) {
+                            cfg.bezelFolder = cleaned;
+                            this.#cachedBezelImages = null;
+                            this.loadBezel();
+                            this.#rebuildOverlay();
+                            this.saveAll();
+                        }
+                    }
+                });
+                bzM.addItem('Reload Bezel List', () => {
                     this.#cachedBezelImages = null;
                     this.loadBezel();
                     this.#rebuildOverlay();
                     this.saveAll();
-                    this.#needsFullRepaint = true;
-                    window.Repaint();
+                });
+
+                bzM.addSeparator();
+                const promptPad = (label, key) => {
+                    const val = GdiUtils.prompt(`Enter ${label} padding in pixels (0-100):`, 'Per-Side Padding', cfg[key]);
+                    if (val !== null && val.trim() !== '') {
+                        const n = parseInt(val, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg[key] = GdiUtils.clamp(n, 0, 100);
+                            this.#geom.valid = false;
+                            this.#updateGeometry(window.Width, window.Height);
+                        }
+                    }
+                };
+                bzM.addItem(`Left Padding... (${cfg.padLeft}px)`, () => promptPad('left', 'padLeft'));
+                bzM.addItem(`Right Padding... (${cfg.padRight}px)`, () => promptPad('right', 'padRight'));
+                bzM.addItem(`Top Padding... (${cfg.padTop}px)`, () => promptPad('top', 'padTop'));
+                bzM.addItem(`Bottom Padding... (${cfg.padBottom}px)`, () => promptPad('bottom', 'padBottom'));
+            });
+
+            overlayM.addSubMenu('Phosphor Palette', (phosphorM) => {
+                DiscSpinController.PHOSPHOR_THEMES.forEach((pt, i) => {
+                    phosphorM.addItem(pt.name, () => {
+                        cfg.phosphorTheme = i;
+                        this.#rebuildOverlay();
+                    }, { radio: cfg.phosphorTheme === i });
+                });
+                phosphorM.addSeparator();
+                phosphorM.addItem('Custom Color...', () => {
+                    const prevCol = cfg.customPhosphorColor >>> 0;
+                    const c = utils.ColourPicker(window.ID, prevCol);
+                    const newCol = (c | 0xFF000000) >>> 0;
+                    if (c !== -1 && newCol !== prevCol) {
+                        cfg.customPhosphorColor = newCol;
+                        cfg.phosphorTheme = DiscSpinController.PHOSPHOR_THEMES.length;
+                        this.#rebuildOverlay();
+                    }
+                }, { radio: cfg.phosphorTheme === DiscSpinController.PHOSPHOR_THEMES.length });
+            });
+
+            overlayM.addSeparator();
+            overlayM.addItem('Disable All Overlays', () => {
+                cfg.overlayAllOff = !cfg.overlayAllOff;
+                this.#refreshGlow();
+                this.#rebuildOverlay();
+            }, { checked: cfg.overlayAllOff });
+
+            overlayM.addSeparator();
+            overlayM.addItem('Reflection Highlight', () => {
+                cfg.showReflection = !cfg.showReflection;
+                this.#rebuildOverlay();
+            }, { checked: cfg.showReflection });
+            overlayM.addItem('CRT Outer Glow', () => {
+                cfg.showGlow = !cfg.showGlow;
+                this.#geom.valid = false;
+                this.#refreshGlow();
+            }, { checked: cfg.showGlow });
+            overlayM.addItem('CRT Scanlines', () => {
+                cfg.showScanlines = !cfg.showScanlines;
+                this.#rebuildOverlay();
+            }, { checked: cfg.showScanlines });
+            overlayM.addItem('Phosphor Mask', () => {
+                cfg.showPhosphor = !cfg.showPhosphor;
+                this.#rebuildOverlay();
+            }, { checked: cfg.showPhosphor });
+
+            overlayM.addSeparator();
+            overlayM.addSubMenu('Adjust Opacities', (opacityM) => {
+                opacityM.addItem(`Reflection Opacity... (${this.getOpacity('Reflection')})`, () => this.setOpacityTarget('Reflection'));
+                opacityM.addItem(`Glow Opacity... (${this.getOpacity('Glow')})`, () => this.setOpacityTarget('Glow'));
+                opacityM.addItem(`Scanlines Opacity... (${this.getOpacity('Scanlines')})`, () => this.setOpacityTarget('Scanlines'));
+                opacityM.addItem(`Phosphor Opacity... (${this.getOpacity('Phosphor')})`, () => this.setOpacityTarget('Phosphor'));
+            });
+        });
+
+        // Border and Padding
+        m.addSubMenu('Border and Padding', (borderM) => {
+            borderM.addItem(`Set Border Size... (${cfg.borderSize}px)`, () => {
+                const val = GdiUtils.prompt('Enter border thickness (0-50 px):', 'Border Size', cfg.borderSize);
+                if (val !== null && val.trim() !== '') {
+                    const n = parseInt(val, 10);
+                    if (!Number.isNaN(n)) {
+                        cfg.borderSize = GdiUtils.clamp(n, 0, 50);
+                        this.#geom.valid = false;
+                        this.#updateGeometry(window.Width, window.Height);
+                        this.#rebuildOverlay();
+                    }
                 }
-            }
-        } else if (id === MID.BEZEL_RELOAD) {
-            this.#cachedBezelImages = null;
-            this.loadBezel();
-            this.#rebuildOverlay();
-            this.saveAll();
-            this.#needsFullRepaint = true;
-            window.Repaint();
-        } else if (id === MID.PAD_LEFT) {
-            const val = GdiUtils.prompt('Enter left padding in pixels (0-100):', 'Per-Side Padding', this.config.padLeft);
-            if (val !== null && val !== '') { this.config.padLeft = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.#needsFullRepaint = true; }
-        } else if (id === MID.PAD_RIGHT) {
-            const val = GdiUtils.prompt('Enter right padding in pixels (0-100):', 'Per-Side Padding', this.config.padRight);
-            if (val !== null && val !== '') { this.config.padRight = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.#needsFullRepaint = true; }
-        } else if (id === MID.PAD_TOP) {
-            const val = GdiUtils.prompt('Enter top padding in pixels (0-100):', 'Per-Side Padding', this.config.padTop);
-            if (val !== null && val !== '') { this.config.padTop = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.#needsFullRepaint = true; }
-        } else if (id === MID.PAD_BOTTOM) {
-            const val = GdiUtils.prompt('Enter bottom padding in pixels (0-100):', 'Per-Side Padding', this.config.padBottom);
-            if (val !== null && val !== '') { this.config.padBottom = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.#needsFullRepaint = true; }
-        } else if (id === MID.BORDER_SIZE) {
-            const val = GdiUtils.prompt('Enter border thickness (0-50 px):', 'Border Size', this.config.borderSize);
-            if (val !== null) { this.config.borderSize = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 50); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.#rebuildOverlay(); this.#needsFullRepaint = true; }
-        } else if (id === MID.BORDER_COLOR) {
-            const c = utils.ColourPicker(window.ID, this.config.borderColor);
-            if (c !== -1) { this.config.borderColor = (c | 0xFF000000) >>> 0; this.#rebuildOverlay(); this.#needsFullRepaint = true; }
-        } else if (id === MID.DISC_PADDING) {
-            const val = GdiUtils.prompt('Enter disc padding (0-100 px):', 'Disc Padding', this.config.discPadding);
-            if (val !== null) { this.config.discPadding = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.updateDiscArtwork(); this.#needsFullRepaint = true; }
-        } else if (id === MID.ALBUM_PADDING) {
-            const val = GdiUtils.prompt('Enter album art padding (0-100 px):', 'Album Art Padding', this.config.albumPadding);
-            if (val !== null) { this.config.albumPadding = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 100); this.#geom.valid = false; this.#updateGeometry(window.Width, window.Height); this.updateDiscArtwork(); this.#needsFullRepaint = true; }
-        } else if (id === MID.BG_USE_UI_COLOR) { 
-            this.config.bgUseUIColor = !this.config.bgUseUIColor; 
-            this.#rebuildBackground(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.BG_ENABLE) { 
-            this.config.backgroundEnabled = !this.config.backgroundEnabled; 
-            this.#rebuildBackground(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.BG_BLUR_ENABLE) { 
-            this.config.blurEnabled = !this.config.blurEnabled; 
-            this.#rebuildBackground(); 
-            this.#needsFullRepaint = true;
-        } else if (id === MID.BG_CUSTOM_COLOR) {
-            const c = utils.ColourPicker(window.ID, this.config.customBgColor);
-            if (c !== -1) { this.config.customBgColor = (c | 0xFF000000) >>> 0; this.#rebuildBackground(); this.#needsFullRepaint = true; }
-        } else if (id >= MID.BLUR_RADIUS_BASE && id <= MID.BLUR_RADIUS_BASE + 7) {
-            this.config.blurRadius = [20, 60, 100, 140, 180, 220, 240, 254][id - MID.BLUR_RADIUS_BASE];
-            this.#rebuildBackground();
-            this.#needsFullRepaint = true;
-        } else if (id >= MID.DARKEN_BASE && id <= MID.DARKEN_BASE + 5) {
-            this.config.darkenValue = (id - MID.DARKEN_BASE) * 10;
-            this.#rebuildBackground();
-            this.#needsFullRepaint = true;
-        } else if (id === MID.CUSTOM_FOLDER_ADD) {
-            const f = GdiUtils.prompt("Enter folder path for artwork search:", "Add Custom Artwork Folder", "");
-            if (f) {
-                const cleaned = GdiUtils.sanitizePath(f);
-                if (cleaned && utils.IsDirectory(cleaned)) {
-                    this.#customFolders.push(cleaned);
+            });
+            borderM.addItem('Change Border Color...', () => {
+                const c = utils.ColourPicker(window.ID, cfg.borderColor);
+                if (c !== -1) {
+                    cfg.borderColor = (c | 0xFF000000) >>> 0;
+                    this.#rebuildOverlay();
+                }
+            });
+            borderM.addSeparator();
+            borderM.addItem(`Set Disc Padding... (${cfg.discPadding}px)`, () => {
+                const val = GdiUtils.prompt('Enter disc padding (0-100 px):', 'Disc Padding', cfg.discPadding);
+                if (val !== null && val.trim() !== '') {
+                    const n = parseInt(val, 10);
+                    if (!Number.isNaN(n)) {
+                        cfg.discPadding = GdiUtils.clamp(n, 0, 100);
+                        this.#geom.valid = false;
+                        this.#updateGeometry(window.Width, window.Height);
+                        this.updateDiscArtwork();
+                    }
+                }
+            });
+            borderM.addItem(`Set Album Art Padding... (${cfg.albumPadding}px)`, () => {
+                const val = GdiUtils.prompt('Enter album art padding (0-100 px):', 'Album Art Padding', cfg.albumPadding);
+                if (val !== null && val.trim() !== '') {
+                    const n = parseInt(val, 10);
+                    if (!Number.isNaN(n)) {
+                        cfg.albumPadding = GdiUtils.clamp(n, 0, 100);
+                        this.#geom.valid = false;
+                        this.#updateGeometry(window.Width, window.Height);
+                        this.updateDiscArtwork();
+                    }
+                }
+            });
+        });
+
+        // Background
+        m.addSubMenu('Background', (bgM) => {
+            bgM.addItem('Use UI Color', () => { cfg.bgUseUIColor = !cfg.bgUseUIColor; this.#rebuildBackground(); }, { checked: cfg.bgUseUIColor });
+            bgM.addItem('Enable Background Art', () => { cfg.backgroundEnabled = !cfg.backgroundEnabled; this.#rebuildBackground(); }, { checked: cfg.backgroundEnabled });
+            bgM.addItem('Enable Blurred Backdrop', () => { cfg.blurEnabled = !cfg.blurEnabled; this.#rebuildBackground(); }, { checked: cfg.blurEnabled });
+            bgM.addItem('Custom Background Color...', () => {
+                const c = utils.ColourPicker(window.ID, cfg.customBgColor);
+                if (c !== -1) {
+                    cfg.customBgColor = (c | 0xFF000000) >>> 0;
+                    this.#rebuildBackground();
+                }
+            });
+            bgM.addSeparator();
+            bgM.addSubMenu('Blur Radius', (blurM) => {
+                [20, 60, 100, 140, 180, 220, 240, 254].forEach((rad) => {
+                    blurM.addItem(`Blur Radius: ${rad}`, () => {
+                        cfg.blurRadius = rad;
+                        this.#rebuildBackground();
+                    }, { radio: cfg.blurRadius === rad });
+                });
+            });
+            bgM.addSubMenu('Darken Backdrop', (darkenM) => {
+                [0, 10, 20, 30, 40, 50].forEach((pct) => {
+                    darkenM.addItem(`Darken ${pct}%`, () => {
+                        cfg.darkenValue = pct;
+                        this.#rebuildBackground();
+                    }, { radio: cfg.darkenValue === pct });
+                });
+            });
+        });
+
+        // Custom Artwork Folders
+        m.addSubMenu('Custom Artwork Folders', (customFM) => {
+            customFM.addItem('Add Custom Folder Path...', () => {
+                const f = GdiUtils.prompt('Enter folder path for artwork search:', 'Add Custom Artwork Folder', '');
+                if (f) {
+                    const cleaned = GdiUtils.sanitizePath(f);
+                    if (cleaned && utils.IsDirectory(cleaned)) {
+                        this.#customFolders.push(cleaned);
+                        this.saveAll();
+                        reloadCurrentArtwork();
+                    }
+                }
+            });
+            customFM.addSeparator();
+            customFM.addSubMenu('Folder Match Depth', (depthM) => {
+                [1, 2, 3, 4].forEach((d) => {
+                    depthM.addItem(`${d} Sub-folder${d > 1 ? 's' : ''} Deep`, () => {
+                        cfg.customFolderDepth = d;
+                        this.saveAll();
+                        reloadCurrentArtwork();
+                    }, { radio: cfg.customFolderDepth === d });
+                });
+            });
+            if (this.#customFolders.length > 0) {
+                customFM.addSeparator();
+                this.#customFolders.forEach((f, i) => {
+                    const shortName = f.length > 45 ? `...${f.substring(f.length - 42)}` : f;
+                    customFM.addItem(`Remove: ${GdiUtils.escapeMenuLabel(shortName)}`, () => {
+                        this.#customFolders.splice(i, 1);
+                        this.saveAll();
+                        reloadCurrentArtwork();
+                    });
+                });
+                customFM.addSeparator();
+                customFM.addItem('Clear All Custom Folders', () => {
+                    this.#customFolders = [];
                     this.saveAll();
-                    this.#scanner.clearCaches();
-                    if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
-                    else this.clearTrackDisplay();
-                }
+                    reloadCurrentArtwork();
+                });
             }
-        } else if (id >= MID.FOLDER_DEPTH_BASE && id <= MID.FOLDER_DEPTH_BASE + 3) {
-            this.config.customFolderDepth = (id - MID.FOLDER_DEPTH_BASE) + 1;
-            this.saveAll();
-            this.#scanner.clearCaches();
-            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
-            else this.clearTrackDisplay();
-        } else if (id >= MID.REMOVE_FOLDER_BASE && id < MID.REMOVE_FOLDER_BASE + this.#customFolders.length) {
-            this.#customFolders.splice(id - MID.REMOVE_FOLDER_BASE, 1);
-            this.saveAll();
-            this.#scanner.clearCaches();
-            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
-            else this.clearTrackDisplay();
-        } else if (id === MID.CLEAR_CUSTOM_FOLDERS) {
-            this.#customFolders = [];
-            this.saveAll();
-            this.#scanner.clearCaches();
-            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
-            else this.clearTrackDisplay();
-        } else if (id >= MID.PRESET_LOAD_BASE && id <= MID.PRESET_LOAD_BASE + 2) {
-            this.loadPreset((id - MID.PRESET_LOAD_BASE) + 1);
-        } else if (id >= MID.PRESET_SAVE_BASE && id <= MID.PRESET_SAVE_BASE + 2) {
-            this.savePreset((id - MID.PRESET_SAVE_BASE) + 1);
-        } else if (id === MID.RELOAD_ART) {
+        });
+
+        // Presets
+        m.addSubMenu('Presets', (presetM) => {
+            presetM.addSubMenu('Load Preset', (loadM) => {
+                [1, 2, 3].forEach((i) => {
+                    const hasPreset = Boolean(window.GetProperty(`Disc.Preset${i}`, null));
+                    loadM.addItem(`Preset ${i}${hasPreset ? '' : ' (Empty)'}`, () => this.loadPreset(i), { disabled: !hasPreset });
+                });
+            });
+            presetM.addSubMenu('Save Preset', (saveM) => {
+                [1, 2, 3].forEach((i) => {
+                    saveM.addItem(`Preset ${i}`, () => this.savePreset(i));
+                });
+            });
+        });
+
+        m.addSeparator();
+        m.addItem('Clear Image Cache & Reload', () => {
             this.#scanner.clearCaches();
             this.#discProc.clearNormalizedCache();
             this.#cachedBezelImages = null;
@@ -2956,9 +2997,11 @@ class DiscSpinController {
             this.#currentDiscPath = '';
             this.#currentArtKey = '';
             this.loadBezel();
-            this.loadArtworkForTrack(null, false);
-        } else if (id === MID.RESET_DEFAULTS) {
-            this.config = DiscSpinController.sanitizeConfig(DiscSpinController.DEFAULTS);
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
+            else this.restoreLastAlbum();
+        });
+        m.addItem('Reset Visual Settings to Defaults', () => {
+            this.config = SettingsSchema.reset(this.config, { includeResetAll: false, defaults: DiscSpinController.DEFAULTS });
             this.#scanner.clearCaches();
             this.#discProc.clearNormalizedCache();
             this.#geom.valid = false;
@@ -2968,13 +3011,13 @@ class DiscSpinController {
             this.loadBezel();
             this.#rebuildOverlay();
             this.startSpinTimer();
-            this.#needsFullRepaint = true;
-        } else if (id === MID.FACTORY_RESET) {
-            const confirm = GdiUtils.prompt("Type YES to reset all settings, custom folders and paths to factory defaults:", "Confirm Factory Reset", "");
+        });
+        m.addItem('Factory Reset (All Settings & Folders)...', () => {
+            const confirm = GdiUtils.prompt('Type YES to reset all settings, custom folders and paths to factory defaults:', 'Confirm Factory Reset', '');
             if (confirm?.toUpperCase() === 'YES') {
                 this.#customFolders = [];
-                for (let p = 1; p <= 3; p++) window.SetProperty(`Disc.Preset${p}`, '');
-                this.config = DiscSpinController.sanitizeConfig(DiscSpinController.DEFAULTS);
+                for (let p = 1; p <= 3; p++) window.SetProperty(`Disc.Preset${p}`, null);
+                this.config = SettingsSchema.reset(this.config, { includeResetAll: true, defaults: DiscSpinController.DEFAULTS });
                 this.config.bezelFolder = `${this.#profileBase}skins\\overlay`;
                 this.#scanner.clearCaches();
                 this.#discProc.clearNormalizedCache();
@@ -2984,10 +3027,12 @@ class DiscSpinController {
                 this.#geom.valid = false;
                 if (window.Width > 0 && window.Height > 0) this.#updateGeometry(window.Width, window.Height);
                 this.#rebuildOverlay();
-                this.#needsFullRepaint = true;
                 this.loadArtworkForTrack(this.#getSafeHandle(null), false);
             }
-        }
+        });
+
+        const selected = m.track(x, y);
+        if (selected === 0) return true;
 
         this.requestSave();
         this.#needsFullRepaint = true;
@@ -2998,6 +3043,9 @@ class DiscSpinController {
     dispose() {
         this.saveAll();
         this.#lifecycle = DiscSpinController.LIFECYCLE.SHUTDOWN;
+        this.#artSearchToken++;
+        this.#bezelLoadToken++;
+        this.#imgLoader.clear();
         this.stopSpinTimer();
 
         if (this.#saveTimeout)        window.ClearTimeout(this.#saveTimeout);
@@ -3096,6 +3144,10 @@ function on_metadb_changed(handle_list, fromhook) {
 
 function on_get_album_art_done(handle, art_id, image, image_path) {
     app.onAlbumArtDone(handle, art_id, image, image_path);
+}
+
+function on_load_image_done(cookie, image, image_path) {
+    app.onLoadImageDone(cookie, image, image_path);
 }
 
 function on_notify_data(name, info) {

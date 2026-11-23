@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.5    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v2.9    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -15,9 +15,9 @@
  * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
  */
 
-window.DefineScript('Playback Buttons Pro v2.5', { 
+window.DefineScript('Playback Buttons Pro', { 
     author: 'L.E.D.', 
-    version: '2.5', 
+    version: '2.9', 
     features: { grab_focus: true } 
 });
 
@@ -25,7 +25,7 @@ if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode = 0x0004; // DLGC_WANTALLKEYS
 
 // ============================================================================================
-// 1. HELPERS & MATH UTILITIES
+// 1. HELPERS, MENU BUILDER, ASYNC LOADER & SETTINGS SCHEMA
 // ============================================================================================
 class GdiUtils {
     static clamp(val, min, max) {
@@ -49,7 +49,6 @@ class GdiUtils {
     static sanitizePath(str) {
         if (!str || typeof str !== 'string') return '';
         const clean = str.replace(/^["']+|["']+$/g, '').trim();
-        // Preserve Windows drive root (e.g. "C:\") and UNC root (e.g. "\\server\share\")
         if (/^[a-zA-Z]:[\\\/]?$/.test(clean)) {
             return clean.substring(0, 2) + '\\';
         }
@@ -57,6 +56,10 @@ class GdiUtils {
             return clean.replace(/[\\\/]+$/, '') + '\\';
         }
         return clean.replace(/[\/\\]+$/, '');
+    }
+
+    static escapeMenuLabel(str) {
+        return String(str ?? '').replace(/&/g, '&&');
     }
 
     static prompt(promptText, titleText, defaultVal) {
@@ -128,6 +131,223 @@ class GdiUtils {
     }
 }
 
+class MenuBuilder {
+    #menu;
+    #state;
+
+    constructor(state = null, startId = 1) {
+        this.#menu = window.CreatePopupMenu();
+        this.#state = state || {
+            nextId: startId,
+            callbacks: new Map(),
+            menus: []
+        };
+        this.#state.menus.push(this.#menu);
+    }
+
+    get raw() {
+        return this.#menu;
+    }
+
+    addItem(label, callback, opts = {}) {
+        const id = this.#state.nextId++;
+        const flags = opts.disabled ? 0x0001 : 0;
+        this.#menu.AppendMenuItem(flags, id, label);
+        if (opts.checked || opts.radio) {
+            this.#menu.CheckMenuRadioItem(id, id, id);
+        }
+        if (typeof callback === 'function') {
+            this.#state.callbacks.set(id, callback);
+        }
+        return this;
+    }
+
+    addSeparator() {
+        this.#menu.AppendMenuSeparator();
+        return this;
+    }
+
+    addSubMenu(title, buildFn, disabled = false) {
+        const sub = new MenuBuilder(this.#state);
+        buildFn(sub);
+        sub.#menu.AppendTo(this.#menu, disabled ? 0x0001 : 0, title);
+        return this;
+    }
+
+    track(x, y) {
+        let selected = 0;
+        try {
+            selected = this.#menu.TrackPopupMenu(x, y);
+        } finally {
+            for (const m of this.#state.menus) {
+                try { if (m && typeof m.Dispose === 'function') m.Dispose(); } catch {}
+            }
+            this.#state.menus.length = 0;
+        }
+        if (selected > 0) {
+            const cb = this.#state.callbacks.get(selected);
+            if (cb) cb();
+        }
+        return selected;
+    }
+}
+
+class AsyncImageLoader {
+    #pending = new Map();
+
+    load(path) {
+        if (!path || !utils.IsFile(path)) return Promise.resolve(null);
+
+        if (typeof gdi.LoadImageAsyncV2 === 'function') {
+            try {
+                return gdi.LoadImageAsyncV2(window.ID, path).catch(() => null);
+            } catch {}
+        }
+
+        if (typeof gdi.LoadImageAsync === 'function') {
+            return new Promise((resolve) => {
+                try {
+                    const cookie = gdi.LoadImageAsync(window.ID, path);
+                    this.#pending.set(cookie, resolve);
+                } catch {
+                    resolve(null);
+                }
+            });
+        }
+
+        try {
+            return Promise.resolve(gdi.Image(path) || null);
+        } catch {
+            return Promise.resolve(null);
+        }
+    }
+
+    onLoadImageDone(cookie, image) {
+        const resolve = this.#pending.get(cookie);
+        if (resolve) {
+            this.#pending.delete(cookie);
+            resolve(image || null);
+            return true;
+        }
+        return false;
+    }
+
+    clear() {
+        for (const resolve of this.#pending.values()) {
+            try { resolve(null); } catch {}
+        }
+        this.#pending.clear();
+    }
+}
+
+class SettingsSchema {
+    static FIELDS = [
+        { key: 'btnSize',       prop: 'Buttons: Size',                                          type: 'int',   def: 128, min: 16, max: 512, group: 'style' },
+        { key: 'paddingGap',    prop: 'Buttons: Padding Gap',                                   type: 'int',   def: 0,   min: 0,  max: 300, group: 'style' },
+        { key: 'paddingBorder', prop: 'Buttons: Padding Border',                                type: 'int',   def: 0,   min: 0,  max: 300, group: 'style' },
+        { key: 'alignV',        prop: 'Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)',type: 'int',   def: 1,   min: 0,  max: 2,   group: 'style' },
+        { key: 'alignH',        prop: 'Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)',type: 'int',  def: 1,   min: 0,  max: 2,   group: 'style' },
+        { key: 'sizeMode',      prop: 'Buttons: Size Mode',                                     type: 'int',   def: 1,   min: 0,  max: 2,   group: 'style' },
+        { key: 'stretchFill',   prop: 'Buttons: Stretch Fill',                                  type: 'bool',  def: false, group: 'style' },
+        { key: 'useTint',       prop: 'Colors: Use Tint',                                       type: 'bool',  def: false, group: 'style' },
+        { key: 'colorNormal',   prop: 'Colors: Normal',                                         type: 'color', def: GdiUtils.RGB(255, 255, 255), group: 'style' },
+        { key: 'colorHover',    prop: 'Colors: Hover',                                          type: 'color', def: GdiUtils.RGB(150, 150, 150), group: 'style' },
+        { key: 'colorDown',     prop: 'Colors: Down',                                           type: 'color', def: GdiUtils.RGB(100, 100, 100), group: 'style' },
+        { key: 'useBgColor',    prop: 'Colors: Use Background',                                 type: 'bool',  def: true,  group: 'style' },
+        { key: 'bgColor',       prop: 'Colors: Background',                                     type: 'color', def: GdiUtils.RGB(32, 32, 32), group: 'style' },
+
+        { key: 'buttonStyle',   prop: 'Buttons: Style',                                         type: 'str',   def: '',    group: 'meta',  resetAll: true },
+
+        { key: 'padLeft',       prop: 'Buttons: Pad Left',                                      type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'padRight',      prop: 'Buttons: Pad Right',                                     type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'padTop',        prop: 'Buttons: Pad Top',                                       type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'padBottom',     prop: 'Buttons: Pad Bottom',                                    type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'bezelFolder',   prop: 'Buttons: Bezel Folder',                                  type: 'path',  def: '',    group: 'bezel', resetAll: true, fallbackToDef: true },
+        { key: 'bezelEnabled',  prop: 'Buttons: Bezel Enabled',                                 type: 'bool',  def: false, group: 'bezel' },
+        { key: 'bezelFile',     prop: 'Buttons: Bezel File',                                    type: 'str',   def: '',    group: 'bezel' }
+    ];
+
+    static #byKey = new Map(SettingsSchema.FIELDS.map(f => [f.key, f]));
+
+    static defaults(overrides = null) {
+        const o = {};
+        for (const f of this.FIELDS) o[f.key] = f.def;
+        if (overrides) Object.assign(o, overrides);
+        return o;
+    }
+
+    static coerce(f, raw, defVal) {
+        const fallback = defVal !== undefined ? defVal : f.def;
+        if (raw === null || raw === undefined) return fallback;
+        switch (f.type) {
+            case 'bool':
+                if (typeof raw === 'boolean') return raw;
+                if (typeof raw === 'string') return raw !== 'false' && raw !== '0' && raw !== '';
+                return Boolean(raw);
+            case 'int': {
+                const n = parseInt(raw, 10);
+                return Number.isNaN(n) ? fallback : GdiUtils.clamp(n, f.min, f.max);
+            }
+            case 'color': {
+                const n = Number(raw);
+                return Number.isFinite(n) ? (n >>> 0) : fallback;
+            }
+            case 'path': {
+                const s = GdiUtils.sanitizePath(String(raw || ''));
+                return f.fallbackToDef ? (s || fallback) : s;
+            }
+            default:
+                return String(raw ?? fallback);
+        }
+    }
+
+    static loadProperties(fallbackDefaults) {
+        const out = {};
+        for (const f of this.FIELDS) {
+            const def = (fallbackDefaults && f.key in fallbackDefaults) ? fallbackDefaults[f.key] : f.def;
+            out[f.key] = this.coerce(f, window.GetProperty(f.prop, def), def);
+        }
+        return out;
+    }
+
+    static setField(config, key, value) {
+        const f = this.#byKey.get(key);
+        if (!f) {
+            config[key] = value;
+            return value;
+        }
+        const coerced = this.coerce(f, value, config[key]);
+        config[key] = coerced;
+        window.SetProperty(f.prop, coerced);
+        return coerced;
+    }
+
+    static saveGroup(config, groupName) {
+        for (const f of this.FIELDS) {
+            if (f.group === groupName && Object.prototype.hasOwnProperty.call(config, f.key)) {
+                window.SetProperty(f.prop, config[f.key]);
+            }
+        }
+    }
+
+    static captureGroup(config, groupName) {
+        const out = {};
+        for (const f of this.FIELDS) {
+            if (f.group === groupName) out[f.key] = config[f.key];
+        }
+        return out;
+    }
+
+    static applyGroup(config, raw, groupName) {
+        if (!raw || typeof raw !== 'object') return;
+        for (const f of this.FIELDS) {
+            if (f.group === groupName && Object.prototype.hasOwnProperty.call(raw, f.key)) {
+                config[f.key] = this.coerce(f, raw[f.key], config[f.key]);
+            }
+        }
+    }
+}
+
 class FontRegistry {
     #cache = new Map();
 
@@ -155,7 +375,7 @@ class FontRegistry {
 }
 
 // ============================================================================================
-// 2. PRE-SCALED BUTTON ENTITY (THE DOT MATRIX 1:1 CACHE ARCHITECTURE)
+// 2. PRE-SCALED BUTTON ENTITY (1:1 CACHE ARCHITECTURE)
 // ============================================================================================
 class PlayButton {
     id;
@@ -168,7 +388,7 @@ class PlayButton {
     w = 0;
     h = 0;
 
-    // Master source textures (including dedicated hover and click states if provided by icon pack)
+    // Master source textures
     #sourceSlots = {
         primary:   { src: null, hoverSrc: null, downSrc: null, normal: null, hover: null, down: null },
         alternate: { src: null, hoverSrc: null, downSrc: null, normal: null, hover: null, down: null }
@@ -290,7 +510,8 @@ class PlayButton {
         this.w = w;
         this.h = h;
 
-        if (boundsChanged || !this.#scaledSlots.primary.normal) {
+        // Re-bake only if bounds changed OR neither primary nor fallback sprites exist yet
+        if (boundsChanged || (!this.#scaledSlots.primary.normal && !this.#scaledSlots.fallback.normal)) {
             this.#bakeSprites(controller);
         }
     }
@@ -313,34 +534,37 @@ class PlayButton {
                 try {
                     bmp = gdi.CreateImage(this.w, this.h);
                     const g = bmp.GetGraphics();
-                    g.SetInterpolationMode(7);
+                    try {
+                        g.SetInterpolationMode(7);
 
-                    let opacity = 255;
-                    let offX = 0, offY = 0;
+                        let opacity = 255;
+                        let offX = 0, offY = 0;
 
-                    if (!controller.config.useTint) {
-                        if (key === 'normal' && !hasDedicatedHover) {
-                            opacity = 215;
-                        } else if (key === 'hover') {
-                            opacity = 255;
-                        } else if (key === 'down' && !hasDedicatedDown) {
-                            opacity = 255;
-                            offX = Math.max(1, controller.scale(1));
-                            offY = Math.max(1, controller.scale(1));
+                        if (!controller.config.useTint) {
+                            if (key === 'normal' && !hasDedicatedHover) {
+                                opacity = 215;
+                            } else if (key === 'hover') {
+                                opacity = 255;
+                            } else if (key === 'down' && !hasDedicatedDown) {
+                                opacity = 255;
+                                offX = Math.max(1, controller.scale(1));
+                                offY = Math.max(1, controller.scale(1));
+                            }
                         }
-                    }
 
-                    if (controller.config.stretchFill) {
-                        g.DrawImage(srcBmp, offX, offY, this.w, this.h, 0, 0, srcBmp.Width, srcBmp.Height, 0, opacity);
-                    } else {
-                        const s = Math.min(this.w / srcBmp.Width, this.h / srcBmp.Height);
-                        const dw = Math.max(1, Math.floor(srcBmp.Width * s));
-                        const dh = Math.max(1, Math.floor(srcBmp.Height * s));
-                        const dx = Math.round((this.w - dw) / 2) + offX;
-                        const dy = Math.round((this.h - dh) / 2) + offY;
-                        g.DrawImage(srcBmp, dx, dy, dw, dh, 0, 0, srcBmp.Width, srcBmp.Height, 0, opacity);
+                        if (controller.config.stretchFill) {
+                            g.DrawImage(srcBmp, offX, offY, this.w, this.h, 0, 0, srcBmp.Width, srcBmp.Height, 0, opacity);
+                        } else {
+                            const s = Math.min(this.w / srcBmp.Width, this.h / srcBmp.Height);
+                            const dw = Math.max(1, Math.floor(srcBmp.Width * s));
+                            const dh = Math.max(1, Math.floor(srcBmp.Height * s));
+                            const dx = Math.round((this.w - dw) / 2) + offX;
+                            const dy = Math.round((this.h - dh) / 2) + offY;
+                            g.DrawImage(srcBmp, dx, dy, dw, dh, 0, 0, srcBmp.Width, srcBmp.Height, 0, opacity);
+                        }
+                    } finally {
+                        bmp.ReleaseGraphics(g);
                     }
-                    bmp.ReleaseGraphics(g);
                     destSlot[key] = bmp;
                 } catch {
                     if (bmp) { try { bmp.Dispose(); } catch {} }
@@ -373,10 +597,22 @@ class PlayButton {
         const font = controller.fonts.get('Segoe UI Symbol', fontSize, 0) || controller.fonts.get('Segoe UI', fontSize, 0);
         if (!font) return;
 
+        let isLightBg = false;
+        if (controller.config.useBgColor) {
+            const [r, g, b] = GdiUtils.toRGB(controller.config.bgColor);
+            isLightBg = (0.299 * r + 0.587 * g + 0.114 * b) >= 128;
+        } else {
+            isLightBg = (typeof window.IsDark === 'boolean' && !window.IsDark);
+        }
+
+        const defaultNormal = isLightBg ? GdiUtils.RGB(30, 30, 30)   : GdiUtils.RGB(255, 255, 255);
+        const defaultHover  = isLightBg ? GdiUtils.RGB(100, 100, 100) : GdiUtils.RGB(150, 150, 150);
+        const defaultDown   = isLightBg ? GdiUtils.RGB(160, 160, 160) : GdiUtils.RGB(100, 100, 100);
+
         const colors = {
-            normal: controller.config.colorNormal,
-            hover:  controller.config.colorHover,
-            down:   controller.config.colorDown
+            normal: controller.config.useTint ? controller.config.colorNormal : defaultNormal,
+            hover:  controller.config.useTint ? controller.config.colorHover  : defaultHover,
+            down:   controller.config.useTint ? controller.config.colorDown   : defaultDown
         };
 
         const renderGlyphs = (glyphChar, destSlot) => {
@@ -386,10 +622,13 @@ class PlayButton {
                 try {
                     bmp = gdi.CreateImage(this.w, this.h);
                     const g = bmp.GetGraphics();
-                    g.SetTextRenderingHint(4);
-                    const off = (key === 'down') ? Math.max(1, controller.scale(1)) : 0;
-                    g.DrawString(glyphChar, font, colors[key], off, off, this.w, this.h, 0x11000000);
-                    bmp.ReleaseGraphics(g);
+                    try {
+                        g.SetTextRenderingHint(4);
+                        const off = (key === 'down') ? Math.max(1, controller.scale(1)) : 0;
+                        g.DrawString(glyphChar, font, colors[key], off, off, this.w, this.h, 0x11000000);
+                    } finally {
+                        bmp.ReleaseGraphics(g);
+                    }
                     destSlot[key] = bmp;
                 } catch {
                     if (bmp) { try { bmp.Dispose(); } catch {} }
@@ -438,72 +677,12 @@ class PlayButton {
 class PlayButtonsController {
     static LIFECYCLE = { BOOT: 0, LIVE: 1, SHUTDOWN: 2 };
 
-    static MENU_ID = {
-        ALIGN_V_TOP:       10,
-        ALIGN_V_MIDDLE:    11,
-        ALIGN_V_BOTTOM:    12,
-        SIZE_SMALL:        20,
-        SIZE_MEDIUM:       21,
-        SIZE_LARGE:        22,
-        SIZE_XL:           23,
-        SIZE_CUSTOM:       24,
-        PAD_GAP_CUSTOM:    30,
-        PAD_BORDER_CUSTOM: 31,
-        MODE_FIXED:        40,
-        MODE_FILL:         41,
-        MODE_FIT_HEIGHT:   42,
-        ASPECT_MAINTAIN:   45,
-        ASPECT_STRETCH:    46,
-        COLOR_TOGGLE:      50,
-        COLOR_NORMAL:      51,
-        COLOR_HOVER:       52,
-        COLOR_DOWN:        53,
-        BG_TOGGLE:         54,
-        BG_COLOR:          55,
-        ALIGN_H_LEFT:      60,
-        ALIGN_H_CENTER:    61,
-        ALIGN_H_RIGHT:     62,
-        BEZEL_ENABLE:      70,
-        BEZEL_FOLDER:      72,
-        BEZEL_RELOAD:      73,
-        BEZEL_NONE:        20000, 
-        BEZEL_NAMES_BASE:  20001,
-        PAD_LEFT:          4110,
-        PAD_RIGHT:         4111,
-        PAD_TOP:           4112,
-        PAD_BOTTOM:        4113,
-        RESET_STYLE:       98,
-        RESET_FACTORY:     99,
-        STYLE_BASE:        10000
-    };
-
     static SIZE_PRESETS = { SMALL: 32, MEDIUM: 64, LARGE: 128, XL: 256 };
     static SIZE_MODE    = { FIXED: 0, FILL_WIDTH: 1, FIT_HEIGHT: 2 };
     static ALIGN        = { TOP: 0, MIDDLE: 1, BOTTOM: 2, LEFT: 0, CENTER: 1, RIGHT: 2 };
     static EXTENSIONS   = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
 
-    static DEFAULTS = {
-        btnSize:       128,
-        paddingGap:    0,
-        paddingBorder: 0,
-        alignV:        1, // ALIGN.MIDDLE
-        alignH:        1, // ALIGN.CENTER
-        sizeMode:      1, // SIZE_MODE.FILL_WIDTH
-        stretchFill:   false,
-        useTint:       false,
-        colorNormal:   GdiUtils.RGB(255, 255, 255),
-        colorHover:    GdiUtils.RGB(150, 150, 150),
-        colorDown:     GdiUtils.RGB(100, 100, 100),
-        useBgColor:    true,                     // Background enabled by default
-        bgColor:       GdiUtils.RGB(32, 32, 32), // Default 32, 32, 32
-        buttonStyle:   '',
-        padLeft:       4,
-        padRight:      4,
-        padTop:        4,
-        padBottom:     4,
-        bezelEnabled:  false,
-        bezelFile:     ''
-    };
+    static DEFAULTS = SettingsSchema.defaults();
 
     #lifecycle   = PlayButtonsController.LIFECYCLE.BOOT;
     #dpiScale    = 1;
@@ -514,7 +693,9 @@ class PlayButtonsController {
     #hovered  = null;
     #pressed  = null;
     #tooltip  = null;
+    #lastPlayingState = null;
 
+    #bezelLoadToken    = 0;
     #bezelBmp          = null;
     #bezelLayerBmp     = null;
     #cachedBezelImages = null;
@@ -525,7 +706,8 @@ class PlayButtonsController {
     #notifyTimeout = null;
     #notifyFont    = null;
 
-    fonts = new FontRegistry();
+    #imgLoader = new AsyncImageLoader();
+    fonts  = new FontRegistry();
     config = { ...PlayButtonsController.DEFAULTS };
 
     constructor() {
@@ -535,11 +717,12 @@ class PlayButtonsController {
         let p = fb.ProfilePath || '';
         if (p && !p.endsWith('\\') && !p.endsWith('/')) p += '\\';
         this.#profileBase = p;
+        PlayButtonsController.DEFAULTS.bezelFolder = `${this.#profileBase}skins\\overlay`;
 
         this.buttonsBaseDir = this.#resolveButtonsBaseDir();
         this.#loadProperties();
         const savedStyleCfg = this.#loadStyleConfig(this.config.buttonStyle);
-        if (savedStyleCfg) this.#applyConfig(savedStyleCfg);
+        if (savedStyleCfg) SettingsSchema.applyGroup(this.config, savedStyleCfg, 'style');
     }
 
     scale(size) {
@@ -563,7 +746,6 @@ class PlayButtonsController {
 
     #getSafeUIColour() {
         try {
-            // DUI: 1 = Background, 0 = Text. CUI: 3 = Background, 0 = Text.
             return window.InstanceType === 1 ? window.GetColourDUI(1) : window.GetColourCUI(3);
         } catch {
             return GdiUtils.RGB(32, 32, 32);
@@ -571,99 +753,25 @@ class PlayButtonsController {
     }
 
     #loadProperties() {
-        const cfg = this.config;
-        cfg.btnSize       = GdiUtils.clamp(window.GetProperty('Buttons: Size', PlayButtonsController.DEFAULTS.btnSize), 16, 512);
-        cfg.paddingGap    = GdiUtils.clamp(window.GetProperty('Buttons: Padding Gap', PlayButtonsController.DEFAULTS.paddingGap), 0, 300);
-        cfg.paddingBorder = GdiUtils.clamp(window.GetProperty('Buttons: Padding Border', PlayButtonsController.DEFAULTS.paddingBorder), 0, 300);
-        cfg.alignV        = GdiUtils.clamp(window.GetProperty('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', PlayButtonsController.DEFAULTS.alignV), 0, 2);
-        cfg.alignH        = GdiUtils.clamp(window.GetProperty('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', PlayButtonsController.DEFAULTS.alignH), 0, 2);
-        cfg.sizeMode      = GdiUtils.clamp(window.GetProperty('Buttons: Size Mode', PlayButtonsController.DEFAULTS.sizeMode), 0, 2);
-        cfg.stretchFill   = Boolean(window.GetProperty('Buttons: Stretch Fill', PlayButtonsController.DEFAULTS.stretchFill));
-        cfg.useTint       = Boolean(window.GetProperty('Colors: Use Tint', PlayButtonsController.DEFAULTS.useTint));
-        cfg.colorNormal   = Number(window.GetProperty('Colors: Normal', PlayButtonsController.DEFAULTS.colorNormal)) >>> 0;
-        cfg.colorHover    = Number(window.GetProperty('Colors: Hover', PlayButtonsController.DEFAULTS.colorHover)) >>> 0;
-        cfg.colorDown     = Number(window.GetProperty('Colors: Down', PlayButtonsController.DEFAULTS.colorDown)) >>> 0;
-        cfg.useBgColor    = Boolean(window.GetProperty('Colors: Use Background', PlayButtonsController.DEFAULTS.useBgColor));
-        cfg.bgColor       = Number(window.GetProperty('Colors: Background', PlayButtonsController.DEFAULTS.bgColor)) >>> 0;
-        cfg.buttonStyle   = this.validateStyle(window.GetProperty('Buttons: Style', PlayButtonsController.DEFAULTS.buttonStyle));
-        cfg.padLeft       = GdiUtils.clamp(window.GetProperty('Buttons: Pad Left', PlayButtonsController.DEFAULTS.padLeft), 0, 100);
-        cfg.padRight      = GdiUtils.clamp(window.GetProperty('Buttons: Pad Right', PlayButtonsController.DEFAULTS.padRight), 0, 100);
-        cfg.padTop        = GdiUtils.clamp(window.GetProperty('Buttons: Pad Top', PlayButtonsController.DEFAULTS.padTop), 0, 100);
-        cfg.padBottom     = GdiUtils.clamp(window.GetProperty('Buttons: Pad Bottom', PlayButtonsController.DEFAULTS.padBottom), 0, 100);
-        cfg.bezelFolder   = GdiUtils.sanitizePath(String(window.GetProperty('Buttons: Bezel Folder', `${this.#profileBase}skins\\overlay`))) || `${this.#profileBase}skins\\overlay`;
-        cfg.bezelEnabled  = Boolean(window.GetProperty('Buttons: Bezel Enabled', PlayButtonsController.DEFAULTS.bezelEnabled));
-        cfg.bezelFile     = String(window.GetProperty('Buttons: Bezel File', PlayButtonsController.DEFAULTS.bezelFile));
+        this.config = SettingsSchema.loadProperties(PlayButtonsController.DEFAULTS);
+        this.config.buttonStyle = this.validateStyle(this.config.buttonStyle);
     }
 
     #saveCoreProperties() {
-        const cfg = this.config;
-        window.SetProperty('Buttons: Size', cfg.btnSize);
-        window.SetProperty('Buttons: Padding Gap', cfg.paddingGap);
-        window.SetProperty('Buttons: Padding Border', cfg.paddingBorder);
-        window.SetProperty('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', cfg.alignV);
-        window.SetProperty('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', cfg.alignH);
-        window.SetProperty('Buttons: Size Mode', cfg.sizeMode);
-        window.SetProperty('Buttons: Stretch Fill', cfg.stretchFill);
-        window.SetProperty('Colors: Use Tint', cfg.useTint);
-        window.SetProperty('Colors: Normal', cfg.colorNormal);
-        window.SetProperty('Colors: Hover', cfg.colorHover);
-        window.SetProperty('Colors: Down', cfg.colorDown);
-        window.SetProperty('Colors: Use Background', cfg.useBgColor);
-        window.SetProperty('Colors: Background', cfg.bgColor);
+        SettingsSchema.saveGroup(this.config, 'style');
     }
 
     saveBezelConfig() {
-        window.SetProperty('Buttons: Pad Left', this.config.padLeft);
-        window.SetProperty('Buttons: Pad Right', this.config.padRight);
-        window.SetProperty('Buttons: Pad Top', this.config.padTop);
-        window.SetProperty('Buttons: Pad Bottom', this.config.padBottom);
-        window.SetProperty('Buttons: Bezel Folder', this.config.bezelFolder);
-        window.SetProperty('Buttons: Bezel Enabled', this.config.bezelEnabled);
-        window.SetProperty('Buttons: Bezel File', this.config.bezelFile);
+        SettingsSchema.saveGroup(this.config, 'bezel');
     }
 
     #styleConfigKey(name) {
         return `Buttons: StyleCfg.${name === '' ? '__default__' : name}`;
     }
 
-    #captureConfig() {
-        return {
-            btnSize:       this.config.btnSize,
-            paddingGap:    this.config.paddingGap,
-            paddingBorder: this.config.paddingBorder,
-            alignV:        this.config.alignV,
-            alignH:        this.config.alignH,
-            sizeMode:      this.config.sizeMode,
-            stretchFill:   this.config.stretchFill,
-            useTint:       this.config.useTint,
-            colorNormal:   this.config.colorNormal,
-            colorHover:    this.config.colorHover,
-            colorDown:     this.config.colorDown,
-            useBgColor:    this.config.useBgColor,
-            bgColor:       this.config.bgColor
-        };
-    }
-
-    #applyConfig(cfg) {
-        if (!cfg) return;
-        this.config.btnSize       = GdiUtils.clamp(cfg.btnSize ?? this.config.btnSize, 16, 512);
-        this.config.paddingGap    = GdiUtils.clamp(cfg.paddingGap ?? this.config.paddingGap, 0, 300);
-        this.config.paddingBorder = GdiUtils.clamp(cfg.paddingBorder ?? this.config.paddingBorder, 0, 300);
-        this.config.alignV        = GdiUtils.clamp(cfg.alignV ?? this.config.alignV, 0, 2);
-        this.config.alignH        = GdiUtils.clamp(cfg.alignH ?? this.config.alignH, 0, 2);
-        this.config.sizeMode      = GdiUtils.clamp(cfg.sizeMode ?? this.config.sizeMode, 0, 2);
-        this.config.stretchFill   = Boolean(cfg.stretchFill ?? this.config.stretchFill);
-        this.config.useTint       = Boolean(cfg.useTint ?? this.config.useTint);
-        this.config.colorNormal   = cfg.colorNormal !== undefined ? (Number(cfg.colorNormal) >>> 0) : this.config.colorNormal;
-        this.config.colorHover    = cfg.colorHover  !== undefined ? (Number(cfg.colorHover)  >>> 0) : this.config.colorHover;
-        this.config.colorDown     = cfg.colorDown   !== undefined ? (Number(cfg.colorDown)   >>> 0) : this.config.colorDown;
-        this.config.useBgColor    = Boolean(cfg.useBgColor ?? this.config.useBgColor);
-        this.config.bgColor       = cfg.bgColor     !== undefined ? (Number(cfg.bgColor)     >>> 0) : this.config.bgColor;
-    }
-
     saveStyleConfig(styleName) {
         try {
-            window.SetProperty(this.#styleConfigKey(styleName), JSON.stringify(this.#captureConfig()));
+            window.SetProperty(this.#styleConfigKey(styleName), JSON.stringify(SettingsSchema.captureGroup(this.config, 'style')));
         } catch {}
     }
 
@@ -674,6 +782,17 @@ class PlayButtonsController {
         } catch {
             return null;
         }
+    }
+
+    #switchStylePack(styleName) {
+        if (styleName === this.config.buttonStyle) return false;
+        this.saveStyleConfig(this.config.buttonStyle);
+        SettingsSchema.setField(this.config, 'buttonStyle', styleName);
+        SettingsSchema.applyGroup(this.config, this.#loadStyleConfig(this.config.buttonStyle) || PlayButtonsController.DEFAULTS, 'style');
+        this.#saveCoreProperties();
+        this.reloadAssets();
+        this.buildLayout(window.Width, window.Height);
+        return true;
     }
 
     #resolveButtonsBaseDir() {
@@ -895,9 +1014,13 @@ class PlayButtonsController {
     }
 
     updatePlayState() {
+        const isPlaying = fb.IsPlaying && !fb.IsPaused;
+        if (this.#lastPlayingState === isPlaying) return;
+        this.#lastPlayingState = isPlaying;
+
         const playBtn = this.#items.find(b => b.id === 'play');
         if (playBtn) {
-            playBtn.tipText = (fb.IsPlaying && !fb.IsPaused) ? 'Pause' : 'Play';
+            playBtn.tipText = isPlaying ? 'Pause' : 'Play';
             if (this.#hovered === playBtn) {
                 this.setTooltipText(playBtn.tipText);
             }
@@ -969,27 +1092,47 @@ class PlayButtonsController {
     }
 
     loadBezel() {
-        if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+        const bezelToken = ++this.#bezelLoadToken;
         if (!this.config.bezelEnabled || !this.config.bezelFile) {
+            if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
             this.#rebuildBezelLayer(window.Width, window.Height);
             return;
         }
 
         const target = this.resolveBezelPath(this.config.bezelFile);
-        if (target) {
-            try {
-                this.#bezelBmp = gdi.Image(target);
-                if (!this.#bezelBmp) { this.config.bezelEnabled = false; this.config.bezelFile = ''; }
-            } catch {
-                this.#bezelBmp = null;
+        if (!target) {
+            if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+            this.config.bezelEnabled = false;
+            this.config.bezelFile = '';
+            this.#rebuildBezelLayer(window.Width, window.Height);
+            return;
+        }
+
+        this.#imgLoader.load(target).then((img) => {
+            if (this.#lifecycle === PlayButtonsController.LIFECYCLE.SHUTDOWN || bezelToken !== this.#bezelLoadToken || !this.config.bezelEnabled) {
+                if (img) { try { img.Dispose(); } catch {} }
+                return;
+            }
+            if (this.#bezelBmp) { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
+            if (img) {
+                this.#bezelBmp = img;
+            } else {
                 this.config.bezelEnabled = false;
                 this.config.bezelFile = '';
             }
-        } else {
-            this.config.bezelEnabled = false;
-            this.config.bezelFile = '';
+            this.#rebuildBezelLayer(window.Width, window.Height);
+            window.Repaint();
+        });
+    }
+
+    onLoadImageDone(cookie, image) {
+        if (this.#lifecycle === PlayButtonsController.LIFECYCLE.SHUTDOWN) {
+            if (image) { try { image.Dispose(); } catch {} }
+            return;
         }
-        this.#rebuildBezelLayer(window.Width, window.Height);
+        if (!this.#imgLoader.onLoadImageDone(cookie, image)) {
+            if (image) { try { image.Dispose(); } catch {} }
+        }
     }
 
     #rebuildBezelLayer(w, h) {
@@ -999,15 +1142,19 @@ class PlayButtonsController {
         }
         if (!this.config.bezelEnabled || !this.#bezelBmp || w <= 0 || h <= 0) return;
 
+        let bmp = null;
         try {
-            const bmp = gdi.CreateImage(w, h);
+            bmp = gdi.CreateImage(w, h);
             const g = bmp.GetGraphics();
-            g.SetInterpolationMode(2);
-            g.DrawImage(this.#bezelBmp, 0, 0, w, h, 0, 0, this.#bezelBmp.Width, this.#bezelBmp.Height);
-            bmp.ReleaseGraphics(g);
+            try {
+                g.SetInterpolationMode(2);
+                g.DrawImage(this.#bezelBmp, 0, 0, w, h, 0, 0, this.#bezelBmp.Width, this.#bezelBmp.Height);
+            } finally {
+                bmp.ReleaseGraphics(g);
+            }
             this.#bezelLayerBmp = bmp;
         } catch {
-            if (this.#bezelLayerBmp) { try { this.#bezelLayerBmp.Dispose(); } catch {} }
+            if (bmp) { try { bmp.Dispose(); } catch {} }
             this.#bezelLayerBmp = null;
         }
     }
@@ -1058,16 +1205,7 @@ class PlayButtonsController {
 
         const nextIdx = (currentIdx + direction + stylesList.length) % stylesList.length;
         const selected = stylesList[nextIdx];
-
-        if (selected !== this.config.buttonStyle) {
-            this.saveStyleConfig(this.config.buttonStyle);
-            this.config.buttonStyle = selected;
-            window.SetProperty('Buttons: Style', this.config.buttonStyle);
-            this.#applyConfig(this.#loadStyleConfig(this.config.buttonStyle) || PlayButtonsController.DEFAULTS);
-            this.#saveCoreProperties();
-            this.reloadAssets();
-            this.buildLayout(window.Width, window.Height);
-        }
+        this.#switchStylePack(selected);
 
         const label = selected === '' ? 'Default' : selected;
         this.#showNotification(`Style: ${label}`);
@@ -1200,6 +1338,12 @@ class PlayButtonsController {
         return false;
     }
 
+    onColoursChanged() {
+        for (const item of this.#items) item.invalidateScaledCache();
+        this.buildLayout(window.Width, window.Height);
+        window.Repaint();
+    }
+
     onFontChanged() {
         if (this.#notifyFont?.Dispose) {
             try { this.#notifyFont.Dispose(); } catch {}
@@ -1212,460 +1356,287 @@ class PlayButtonsController {
         window.Repaint();
     }
 
+    // ========================================================================================
+    // CONTEXT MENU (DECLARATIVE MENU BUILDER)
+    // ========================================================================================
     showContextMenu(x, y) {
-        const m   = window.CreatePopupMenu();
-        const v   = window.CreatePopupMenu();
-        const h   = window.CreatePopupMenu();
-        const s   = window.CreatePopupMenu();
-        const p   = window.CreatePopupMenu();
-        const col = window.CreatePopupMenu();
-        const sty = window.CreatePopupMenu();
-        const bez = window.CreatePopupMenu();
+        const cfg = this.config;
+        const m = new MenuBuilder();
+        let dirty = false;
 
-        const allMenus = [m, v, h, s, p, col, sty, bez];
-        const M_ID = PlayButtonsController.MENU_ID;
+        const commitStyle = (reload = false) => {
+            if (reload) this.reloadAssets();
+            for (const item of this.#items) item.invalidateScaledCache();
+            this.saveStyleConfig(cfg.buttonStyle);
+            dirty = true;
+        };
 
-        m.AppendMenuItem(0, M_ID.MODE_FIXED,      'Fixed (Size Box)');
-        m.AppendMenuItem(0, M_ID.MODE_FILL,       'Fill Width (Tile Horizontally)');
-        m.AppendMenuItem(0, M_ID.MODE_FIT_HEIGHT, 'Fit Height (Fill Height)');
-        m.CheckMenuRadioItem(M_ID.MODE_FIXED, M_ID.MODE_FIT_HEIGHT, M_ID.MODE_FIXED + this.config.sizeMode);
-        m.AppendMenuSeparator();
+        // 1. Size modes & aspect ratio
+        m.addItem('Fixed (Size Box)', () => {
+            SettingsSchema.setField(cfg, 'sizeMode', PlayButtonsController.SIZE_MODE.FIXED);
+            commitStyle();
+        }, { radio: cfg.sizeMode === PlayButtonsController.SIZE_MODE.FIXED });
+        m.addItem('Fill Width (Tile Horizontally)', () => {
+            SettingsSchema.setField(cfg, 'sizeMode', PlayButtonsController.SIZE_MODE.FILL_WIDTH);
+            commitStyle();
+        }, { radio: cfg.sizeMode === PlayButtonsController.SIZE_MODE.FILL_WIDTH });
+        m.addItem('Fit Height (Fill Height)', () => {
+            SettingsSchema.setField(cfg, 'sizeMode', PlayButtonsController.SIZE_MODE.FIT_HEIGHT);
+            commitStyle();
+        }, { radio: cfg.sizeMode === PlayButtonsController.SIZE_MODE.FIT_HEIGHT });
 
-        m.AppendMenuItem(0, M_ID.ASPECT_MAINTAIN, 'Maintain Aspect Ratio');
-        m.AppendMenuItem(0, M_ID.ASPECT_STRETCH,  'Stretch to Fill Panel (Full Area)');
-        m.CheckMenuRadioItem(M_ID.ASPECT_MAINTAIN, M_ID.ASPECT_STRETCH, this.config.stretchFill ? M_ID.ASPECT_STRETCH : M_ID.ASPECT_MAINTAIN);
-        m.AppendMenuSeparator();
+        m.addSeparator();
 
-        h.AppendMenuItem(0, M_ID.ALIGN_H_LEFT,   'Left');
-        h.AppendMenuItem(0, M_ID.ALIGN_H_CENTER, 'Centre');
-        h.AppendMenuItem(0, M_ID.ALIGN_H_RIGHT,  'Right');
-        h.CheckMenuRadioItem(M_ID.ALIGN_H_LEFT, M_ID.ALIGN_H_RIGHT, M_ID.ALIGN_H_LEFT + this.config.alignH);
-        h.AppendTo(m, this.config.sizeMode === PlayButtonsController.SIZE_MODE.FILL_WIDTH ? 0x0001 : 0, 'Horizontal Alignment');
+        m.addItem('Maintain Aspect Ratio', () => {
+            if (cfg.stretchFill) {
+                SettingsSchema.setField(cfg, 'stretchFill', false);
+                commitStyle();
+            }
+        }, { radio: !cfg.stretchFill });
+        m.addItem('Stretch to Fill Panel (Full Area)', () => {
+            if (!cfg.stretchFill) {
+                SettingsSchema.setField(cfg, 'stretchFill', true);
+                commitStyle();
+            }
+        }, { radio: cfg.stretchFill });
 
-        v.AppendMenuItem(0, M_ID.ALIGN_V_TOP,    'Top');
-        v.AppendMenuItem(0, M_ID.ALIGN_V_MIDDLE, 'Middle');
-        v.AppendMenuItem(0, M_ID.ALIGN_V_BOTTOM, 'Bottom');
-        v.CheckMenuRadioItem(M_ID.ALIGN_V_TOP, M_ID.ALIGN_V_BOTTOM, M_ID.ALIGN_V_TOP + this.config.alignV);
-        v.AppendTo(m, this.config.sizeMode === PlayButtonsController.SIZE_MODE.FIT_HEIGHT ? 0x0001 : 0, 'Vertical Alignment');
-        m.AppendMenuSeparator();
+        m.addSeparator();
 
-        const stylesList = this.scanButtonStyles(false);
+        // 2. Alignments
+        m.addSubMenu('Horizontal Alignment', (h) => {
+            ['Left', 'Centre', 'Right'].forEach((lbl, i) => {
+                h.addItem(lbl, () => {
+                    SettingsSchema.setField(cfg, 'alignH', i);
+                    commitStyle();
+                }, { radio: cfg.alignH === i });
+            });
+        }, cfg.sizeMode === PlayButtonsController.SIZE_MODE.FILL_WIDTH);
+
+        m.addSubMenu('Vertical Alignment', (v) => {
+            ['Top', 'Middle', 'Bottom'].forEach((lbl, i) => {
+                v.addItem(lbl, () => {
+                    SettingsSchema.setField(cfg, 'alignV', i);
+                    commitStyle();
+                }, { radio: cfg.alignV === i });
+            });
+        }, cfg.sizeMode === PlayButtonsController.SIZE_MODE.FIT_HEIGHT);
+
+        m.addSeparator();
+
+        // 3. Button Style (live rescan so newly added packs appear immediately)
+        const stylesList = this.scanButtonStyles(true);
         const hasRootIcons = this.findIconExt(this.buttonsBaseDir, 'play') !== null;
-        let activeStyleIdx = 0;
 
-        stylesList.forEach((styleName, i) => {
-            const label = styleName === '' ? (hasRootIcons ? 'Default (Root Folder)' : 'Default') : styleName;
-            sty.AppendMenuItem(0, M_ID.STYLE_BASE + i, label);
-            if (styleName === this.config.buttonStyle) activeStyleIdx = i;
+        m.addSubMenu('Button Style', (sty) => {
+            stylesList.forEach((styleName) => {
+                const rawLabel = styleName === '' ? (hasRootIcons ? 'Default (Root Folder)' : 'Default') : styleName;
+                const label = GdiUtils.escapeMenuLabel(rawLabel);
+                sty.addItem(label, () => {
+                    if (this.#switchStylePack(styleName)) window.Repaint();
+                }, { radio: styleName === cfg.buttonStyle });
+            });
+            if (stylesList.length <= 1) {
+                sty.addSeparator();
+                sty.addItem('No subfolder icon packs found', null, { disabled: true });
+            }
         });
 
-        if (stylesList.length > 0) {
-            sty.CheckMenuRadioItem(M_ID.STYLE_BASE, M_ID.STYLE_BASE + stylesList.length - 1, M_ID.STYLE_BASE + activeStyleIdx);
-        }
-        if (stylesList.length <= 1) {
-            sty.AppendMenuSeparator();
-            sty.AppendMenuItem(0x0001, M_ID.STYLE_BASE + stylesList.length, 'No subfolder icon packs found');
-        }
-        sty.AppendTo(m, 0, 'Button Style');
-
-        let activeSizeId = M_ID.SIZE_CUSTOM;
-        if (this.config.btnSize === PlayButtonsController.SIZE_PRESETS.SMALL) activeSizeId = M_ID.SIZE_SMALL;
-        else if (this.config.btnSize === PlayButtonsController.SIZE_PRESETS.MEDIUM) activeSizeId = M_ID.SIZE_MEDIUM;
-        else if (this.config.btnSize === PlayButtonsController.SIZE_PRESETS.LARGE) activeSizeId = M_ID.SIZE_LARGE;
-        else if (this.config.btnSize === PlayButtonsController.SIZE_PRESETS.XL) activeSizeId = M_ID.SIZE_XL;
-
-        s.AppendMenuItem(0, M_ID.SIZE_SMALL,  `Small (${PlayButtonsController.SIZE_PRESETS.SMALL}px)`);
-        s.AppendMenuItem(0, M_ID.SIZE_MEDIUM, `Medium (${PlayButtonsController.SIZE_PRESETS.MEDIUM}px)`);
-        s.AppendMenuItem(0, M_ID.SIZE_LARGE,  `Large (${PlayButtonsController.SIZE_PRESETS.LARGE}px)`);
-        s.AppendMenuItem(0, M_ID.SIZE_XL,     `Extra Large (${PlayButtonsController.SIZE_PRESETS.XL}px)`);
-        s.AppendMenuSeparator();
-        s.AppendMenuItem(0, M_ID.SIZE_CUSTOM, `Custom (${this.config.btnSize}px)...`);
-        s.CheckMenuRadioItem(M_ID.SIZE_SMALL, M_ID.SIZE_CUSTOM, activeSizeId);
-        s.AppendTo(m, 0, 'Button Size');
-
-        p.AppendMenuItem(0, M_ID.PAD_GAP_CUSTOM,    `Padding Gap: ${this.config.paddingGap}px...`);
-        p.AppendMenuItem(0, M_ID.PAD_BORDER_CUSTOM, `Padding Border: ${this.config.paddingBorder}px...`);
-        p.AppendTo(m, 0, 'Padding');
-
-        col.AppendMenuItem(0, M_ID.COLOR_TOGGLE, 'Enable Custom Tint');
-        if (this.config.useTint) col.CheckMenuRadioItem(M_ID.COLOR_TOGGLE, M_ID.COLOR_TOGGLE, M_ID.COLOR_TOGGLE);
-        col.AppendMenuSeparator();
-        col.AppendMenuItem(this.config.useTint ? 0 : 0x0001, M_ID.COLOR_NORMAL, 'Set Normal Color...');
-        col.AppendMenuItem(this.config.useTint ? 0 : 0x0001, M_ID.COLOR_HOVER,  'Set Hover Color...');
-        col.AppendMenuItem(this.config.useTint ? 0 : 0x0001, M_ID.COLOR_DOWN,   'Set Click Color...');
-        col.AppendMenuSeparator();
-        col.AppendMenuItem(0, M_ID.BG_TOGGLE, 'Enable Background Colour');
-        if (this.config.useBgColor) col.CheckMenuRadioItem(M_ID.BG_TOGGLE, M_ID.BG_TOGGLE, M_ID.BG_TOGGLE);
-        col.AppendMenuItem(this.config.useBgColor ? 0 : 0x0001, M_ID.BG_COLOR, 'Set Background Color...');
-        col.AppendTo(m, 0, 'Colors & Tint');
-
-        bez.AppendMenuItem(0, M_ID.BEZEL_ENABLE, 'Enable Bezel Frame');
-        if (this.config.bezelEnabled && this.config.bezelFile) bez.CheckMenuRadioItem(M_ID.BEZEL_ENABLE, M_ID.BEZEL_ENABLE, M_ID.BEZEL_ENABLE);
-        bez.AppendMenuSeparator();
-
-        const bezelNamesList = this.listBezelNames();
-        bez.AppendMenuItem(0, M_ID.BEZEL_NONE, 'None (No Bezel)');
-        const bezLastId = bezelNamesList.length > 0 ? (M_ID.BEZEL_NAMES_BASE + bezelNamesList.length - 1) : M_ID.BEZEL_NONE;
-        if (bezelNamesList.length > 0) {
-            bezelNamesList.forEach((name, bi) => bez.AppendMenuItem(0, M_ID.BEZEL_NAMES_BASE + bi, name));
-        }
-
-        if (!this.config.bezelEnabled || !this.config.bezelFile) {
-            bez.CheckMenuRadioItem(M_ID.BEZEL_NONE, bezLastId, M_ID.BEZEL_NONE);
-        } else {
-            const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
-            const selIdx = bezelNamesList.findIndex(n => n.toLowerCase() === curClean);
-            bez.CheckMenuRadioItem(M_ID.BEZEL_NONE, bezLastId, selIdx !== -1 ? (M_ID.BEZEL_NAMES_BASE + selIdx) : M_ID.BEZEL_NONE);
-        }
-
-        bez.AppendMenuSeparator();
-        bez.AppendMenuItem(0, M_ID.BEZEL_FOLDER, 'Set Bezel Folder...');
-        bez.AppendMenuItem(0, M_ID.BEZEL_RELOAD, 'Reload Bezel List');
-        bez.AppendMenuSeparator();
-        bez.AppendMenuItem(0, M_ID.PAD_LEFT,   `Left padding... (${this.config.padLeft}px)`);
-        bez.AppendMenuItem(0, M_ID.PAD_RIGHT,  `Right padding... (${this.config.padRight}px)`);
-        bez.AppendMenuItem(0, M_ID.PAD_TOP,    `Top padding... (${this.config.padTop}px)`);
-        bez.AppendMenuItem(0, M_ID.PAD_BOTTOM, `Bottom padding... (${this.config.padBottom}px)`);
-        bez.AppendTo(m, 0, 'Bezel / Overlay');
-
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(0, M_ID.RESET_STYLE,   'Reset Current Style to Defaults');
-        m.AppendMenuItem(0, M_ID.RESET_FACTORY, 'Factory Reset (All Styles & Overlays)...');
-
-        let idx = 0;
-        try {
-            idx = m.TrackPopupMenu(x, y);
-        } finally {
-            allMenus.forEach(menu => { try { menu.Dispose(); } catch {} });
-        }
-
-        if (idx === 0) return true;
-
-        if (idx >= M_ID.STYLE_BASE && idx < M_ID.STYLE_BASE + stylesList.length) {
-            const selected = stylesList[idx - M_ID.STYLE_BASE];
-            if (selected !== this.config.buttonStyle) {
-                this.saveStyleConfig(this.config.buttonStyle);
-                this.config.buttonStyle = selected;
-                window.SetProperty('Buttons: Style', this.config.buttonStyle);
-                this.#applyConfig(this.#loadStyleConfig(this.config.buttonStyle) || PlayButtonsController.DEFAULTS);
-                this.#saveCoreProperties();
-                this.reloadAssets();
-                this.buildLayout(window.Width, window.Height);
-                window.Repaint();
+        // 4. Button Size
+        m.addSubMenu('Button Size', (s) => {
+            const presets = [
+                [PlayButtonsController.SIZE_PRESETS.SMALL,  `Small (${PlayButtonsController.SIZE_PRESETS.SMALL}px)`],
+                [PlayButtonsController.SIZE_PRESETS.MEDIUM, `Medium (${PlayButtonsController.SIZE_PRESETS.MEDIUM}px)`],
+                [PlayButtonsController.SIZE_PRESETS.LARGE,  `Large (${PlayButtonsController.SIZE_PRESETS.LARGE}px)`],
+                [PlayButtonsController.SIZE_PRESETS.XL,     `Extra Large (${PlayButtonsController.SIZE_PRESETS.XL}px)`]
+            ];
+            const presetVals = presets.map(p => p[0]);
+            for (const [val, lbl] of presets) {
+                s.addItem(lbl, () => {
+                    SettingsSchema.setField(cfg, 'btnSize', val);
+                    commitStyle();
+                }, { radio: cfg.btnSize === val });
             }
-            return true;
-        }
-
-        if (idx >= M_ID.BEZEL_NAMES_BASE && idx < M_ID.BEZEL_NAMES_BASE + bezelNamesList.length) {
-            this.config.bezelEnabled = true;
-            this.config.bezelFile = bezelNamesList[idx - M_ID.BEZEL_NAMES_BASE];
-            this.loadBezel();
-            this.saveBezelConfig();
-            this.buildLayout(window.Width, window.Height);
-            window.Repaint();
-            return true;
-        }
-
-        let changed = false;
-
-        switch (idx) {
-            case M_ID.ASPECT_MAINTAIN:
-                if (this.config.stretchFill) {
-                    this.config.stretchFill = false;
-                    window.SetProperty('Buttons: Stretch Fill', this.config.stretchFill);
-                    changed = true;
-                }
-                break;
-
-            case M_ID.ASPECT_STRETCH:
-                if (!this.config.stretchFill) {
-                    this.config.stretchFill = true;
-                    window.SetProperty('Buttons: Stretch Fill', this.config.stretchFill);
-                    changed = true;
-                }
-                break;
-
-            case M_ID.ALIGN_V_TOP:
-            case M_ID.ALIGN_V_MIDDLE:
-            case M_ID.ALIGN_V_BOTTOM:
-                this.config.alignV = idx - M_ID.ALIGN_V_TOP;
-                window.SetProperty('Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', this.config.alignV);
-                changed = true;
-                break;
-
-            case M_ID.ALIGN_H_LEFT:
-            case M_ID.ALIGN_H_CENTER:
-            case M_ID.ALIGN_H_RIGHT:
-                if (this.config.sizeMode !== PlayButtonsController.SIZE_MODE.FILL_WIDTH) {
-                    this.config.alignH = idx - M_ID.ALIGN_H_LEFT;
-                    window.SetProperty('Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)', this.config.alignH);
-                    changed = true;
-                }
-                break;
-
-            case M_ID.SIZE_SMALL:
-                this.config.btnSize = PlayButtonsController.SIZE_PRESETS.SMALL;
-                window.SetProperty('Buttons: Size', this.config.btnSize);
-                changed = true;
-                break;
-
-            case M_ID.SIZE_MEDIUM:
-                this.config.btnSize = PlayButtonsController.SIZE_PRESETS.MEDIUM;
-                window.SetProperty('Buttons: Size', this.config.btnSize);
-                changed = true;
-                break;
-
-            case M_ID.SIZE_LARGE:
-                this.config.btnSize = PlayButtonsController.SIZE_PRESETS.LARGE;
-                window.SetProperty('Buttons: Size', this.config.btnSize);
-                changed = true;
-                break;
-
-            case M_ID.SIZE_XL:
-                this.config.btnSize = PlayButtonsController.SIZE_PRESETS.XL;
-                window.SetProperty('Buttons: Size', this.config.btnSize);
-                changed = true;
-                break;
-
-            case M_ID.SIZE_CUSTOM: {
-                const val = GdiUtils.prompt('Enter button size (16-512 pixels):', 'Custom Size', this.config.btnSize);
-                if (val !== null && val !== '') {
-                    const newSize = GdiUtils.clamp(parseInt(val, 10) || 128, 16, 512);
-                    if (newSize !== this.config.btnSize) {
-                        this.config.btnSize = newSize;
-                        window.SetProperty('Buttons: Size', this.config.btnSize);
-                        changed = true;
+            s.addSeparator();
+            s.addItem(`Custom (${cfg.btnSize}px)...`, () => {
+                const val = GdiUtils.prompt('Enter button size (16-512 pixels):', 'Custom Size', cfg.btnSize);
+                if (val !== null && val.trim() !== '') {
+                    const parsed = parseInt(val, 10);
+                    if (!Number.isNaN(parsed)) {
+                        const newSize = GdiUtils.clamp(parsed, 16, 512);
+                        if (newSize !== cfg.btnSize) {
+                            SettingsSchema.setField(cfg, 'btnSize', newSize);
+                            commitStyle();
+                        }
                     }
                 }
-                break;
-            }
+            }, { radio: !presetVals.includes(cfg.btnSize) });
+        });
 
-            case M_ID.PAD_GAP_CUSTOM: {
-                const val = GdiUtils.prompt('Enter gap between buttons (0-300 pixels):', 'Padding Gap', this.config.paddingGap);
-                if (val !== null && val !== '') {
-                    const newGap = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 300);
-                    if (newGap !== this.config.paddingGap) {
-                        this.config.paddingGap = newGap;
-                        window.SetProperty('Buttons: Padding Gap', this.config.paddingGap);
-                        changed = true;
+        // 5. Padding
+        m.addSubMenu('Padding', (p) => {
+            p.addItem(`Padding Gap: ${cfg.paddingGap}px...`, () => {
+                const val = GdiUtils.prompt('Enter gap between buttons (0-300 pixels):', 'Padding Gap', cfg.paddingGap);
+                if (val !== null && val.trim() !== '') {
+                    const parsed = parseInt(val, 10);
+                    if (!Number.isNaN(parsed)) {
+                        const newGap = GdiUtils.clamp(parsed, 0, 300);
+                        if (newGap !== cfg.paddingGap) {
+                            SettingsSchema.setField(cfg, 'paddingGap', newGap);
+                            commitStyle();
+                        }
                     }
                 }
-                break;
-            }
-
-            case M_ID.PAD_BORDER_CUSTOM: {
-                const val = GdiUtils.prompt('Enter outer border padding to panel edge (0-300 pixels):', 'Padding Border', this.config.paddingBorder);
-                if (val !== null && val !== '') {
-                    const newBorder = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 300);
-                    if (newBorder !== this.config.paddingBorder) {
-                        this.config.paddingBorder = newBorder;
-                        window.SetProperty('Buttons: Padding Border', this.config.paddingBorder);
-                        changed = true;
+            });
+            p.addItem(`Padding Border: ${cfg.paddingBorder}px...`, () => {
+                const val = GdiUtils.prompt('Enter outer border padding to panel edge (0-300 pixels):', 'Padding Border', cfg.paddingBorder);
+                if (val !== null && val.trim() !== '') {
+                    const parsed = parseInt(val, 10);
+                    if (!Number.isNaN(parsed)) {
+                        const newBorder = GdiUtils.clamp(parsed, 0, 300);
+                        if (newBorder !== cfg.paddingBorder) {
+                            SettingsSchema.setField(cfg, 'paddingBorder', newBorder);
+                            commitStyle();
+                        }
                     }
                 }
-                break;
-            }
+            });
+        });
 
-            case M_ID.MODE_FIXED:
-                this.config.sizeMode = PlayButtonsController.SIZE_MODE.FIXED;
-                window.SetProperty('Buttons: Size Mode', this.config.sizeMode);
-                changed = true;
-                break;
-
-            case M_ID.MODE_FILL:
-                this.config.sizeMode = PlayButtonsController.SIZE_MODE.FILL_WIDTH;
-                window.SetProperty('Buttons: Size Mode', this.config.sizeMode);
-                changed = true;
-                break;
-
-            case M_ID.MODE_FIT_HEIGHT:
-                this.config.sizeMode = PlayButtonsController.SIZE_MODE.FIT_HEIGHT;
-                window.SetProperty('Buttons: Size Mode', this.config.sizeMode);
-                changed = true;
-                break;
-
-            case M_ID.COLOR_TOGGLE:
-                this.config.useTint = !this.config.useTint;
-                window.SetProperty('Colors: Use Tint', this.config.useTint);
-                this.reloadAssets();
-                changed = true;
-                break;
-
-            case M_ID.COLOR_NORMAL: {
-                if (this.config.useTint) {
-                    const picked = utils.ColourPicker(window.ID, this.config.colorNormal);
-                    if (picked !== -1 && picked !== this.config.colorNormal) {
-                        this.config.colorNormal = (picked | 0xFF000000) >>> 0;
-                        window.SetProperty('Colors: Normal', this.config.colorNormal);
-                        this.reloadAssets();
-                        changed = true;
+        // 6. Colors & Tint
+        m.addSubMenu('Colors & Tint', (col) => {
+            const pickColor = (key) => {
+                const picked = utils.ColourPicker(window.ID, cfg[key]);
+                if (picked !== -1) {
+                    const next = (picked | 0xFF000000) >>> 0;
+                    if (next !== cfg[key]) {
+                        SettingsSchema.setField(cfg, key, next);
+                        commitStyle(key !== 'bgColor');
                     }
                 }
-                break;
-            }
+            };
+            col.addItem('Enable Custom Tint', () => {
+                SettingsSchema.setField(cfg, 'useTint', !cfg.useTint);
+                commitStyle(true);
+            }, { checked: cfg.useTint });
+            col.addSeparator();
+            col.addItem('Set Normal Color...', () => pickColor('colorNormal'), { disabled: !cfg.useTint });
+            col.addItem('Set Hover Color...',  () => pickColor('colorHover'),  { disabled: !cfg.useTint });
+            col.addItem('Set Click Color...',  () => pickColor('colorDown'),   { disabled: !cfg.useTint });
+            col.addSeparator();
+            col.addItem('Enable Background Colour', () => {
+                SettingsSchema.setField(cfg, 'useBgColor', !cfg.useBgColor);
+                commitStyle();
+            }, { checked: cfg.useBgColor });
+            col.addItem('Set Background Color...', () => pickColor('bgColor'), { disabled: !cfg.useBgColor });
+        });
 
-            case M_ID.COLOR_HOVER: {
-                if (this.config.useTint) {
-                    const picked = utils.ColourPicker(window.ID, this.config.colorHover);
-                    if (picked !== -1 && picked !== this.config.colorHover) {
-                        this.config.colorHover = (picked | 0xFF000000) >>> 0;
-                        window.SetProperty('Colors: Hover', this.config.colorHover);
-                        this.reloadAssets();
-                        changed = true;
-                    }
-                }
-                break;
-            }
+        // 7. Bezel / Overlay
+        m.addSubMenu('Bezel / Overlay', (bez) => {
+            const bezelNamesList = this.listBezelNames();
+            const curClean = (cfg.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
+            const selIdx = (cfg.bezelEnabled && curClean)
+                ? bezelNamesList.findIndex(n => n.toLowerCase() === curClean)
+                : -1;
 
-            case M_ID.COLOR_DOWN: {
-                if (this.config.useTint) {
-                    const picked = utils.ColourPicker(window.ID, this.config.colorDown);
-                    if (picked !== -1 && picked !== this.config.colorDown) {
-                        this.config.colorDown = (picked | 0xFF000000) >>> 0;
-                        window.SetProperty('Colors: Down', this.config.colorDown);
-                        this.reloadAssets();
-                        changed = true;
-                    }
-                }
-                break;
-            }
-
-            case M_ID.BG_TOGGLE:
-                this.config.useBgColor = !this.config.useBgColor;
-                window.SetProperty('Colors: Use Background', this.config.useBgColor);
-                changed = true;
-                break;
-
-            case M_ID.BG_COLOR: {
-                if (this.config.useBgColor) {
-                    const picked = utils.ColourPicker(window.ID, this.config.bgColor);
-                    if (picked !== -1 && picked !== this.config.bgColor) {
-                        this.config.bgColor = (picked | 0xFF000000) >>> 0;
-                        window.SetProperty('Colors: Background', this.config.bgColor);
-                        changed = true;
-                    }
-                }
-                break;
-            }
-
-            case M_ID.BEZEL_ENABLE:
-                this.config.bezelEnabled = !this.config.bezelEnabled;
-                if (this.config.bezelEnabled && !this.config.bezelFile && bezelNamesList.length > 0) {
-                    this.config.bezelFile = bezelNamesList[0];
+            bez.addItem('Enable Bezel Frame', () => {
+                cfg.bezelEnabled = !cfg.bezelEnabled;
+                if (cfg.bezelEnabled && !cfg.bezelFile && bezelNamesList.length > 0) {
+                    cfg.bezelFile = bezelNamesList[0];
                 }
                 this.loadBezel();
                 this.saveBezelConfig();
-                changed = true;
-                break;
+                dirty = true;
+            }, { checked: Boolean(cfg.bezelEnabled && cfg.bezelFile) });
+            bez.addSeparator();
 
-            case M_ID.BEZEL_NONE:
-                this.config.bezelEnabled = false;
-                this.config.bezelFile = '';
+            bez.addItem('None (No Bezel)', () => {
+                cfg.bezelEnabled = false;
+                cfg.bezelFile = '';
                 this.loadBezel();
                 this.saveBezelConfig();
-                changed = true;
-                break;
+                dirty = true;
+            }, { radio: selIdx === -1 });
 
-            case M_ID.BEZEL_RELOAD:
-                this.#cachedBezelImages = null;
-                this.loadBezel();
-                changed = true;
-                break;
+            bezelNamesList.forEach((name, bi) => {
+                bez.addItem(GdiUtils.escapeMenuLabel(name), () => {
+                    cfg.bezelEnabled = true;
+                    cfg.bezelFile = name;
+                    this.loadBezel();
+                    this.saveBezelConfig();
+                    dirty = true;
+                }, { radio: selIdx === bi });
+            });
 
-            case M_ID.BEZEL_FOLDER: {
-                const f = GdiUtils.prompt('Enter folder path containing bezel/overlay images:', 'Set Bezel Folder', this.config.bezelFolder);
+            bez.addSeparator();
+            bez.addItem('Set Bezel Folder...', () => {
+                const f = GdiUtils.prompt('Enter folder path containing bezel/overlay images:', 'Set Bezel Folder', cfg.bezelFolder);
                 if (f) {
                     const cleaned = GdiUtils.sanitizePath(f);
                     if (cleaned && utils.IsDirectory(cleaned)) {
-                        this.config.bezelFolder = cleaned;
+                        cfg.bezelFolder = cleaned;
                         this.#cachedBezelImages = null;
+                        this.#cachedBezelFolder = null;
                         this.loadBezel();
                         this.saveBezelConfig();
-                        changed = true;
+                        dirty = true;
                     }
                 }
-                break;
-            }
+            });
+            bez.addItem('Reload Bezel List', () => {
+                this.#cachedBezelImages = null;
+                this.#cachedBezelFolder = null;
+                this.loadBezel();
+                dirty = true;
+            });
 
-            case M_ID.PAD_LEFT: {
-                const v = GdiUtils.prompt('Enter left padding in pixels (0-100):', 'Per-Side Padding', this.config.padLeft);
-                if (v !== null && v !== '') {
-                    this.config.padLeft = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100);
-                    this.saveBezelConfig();
-                    changed = true;
+            bez.addSeparator();
+            const promptPad = (label, key) => {
+                const v = GdiUtils.prompt(`Enter ${label} padding in pixels (0-100):`, 'Per-Side Padding', cfg[key]);
+                if (v !== null && v.trim() !== '') {
+                    const parsed = parseInt(v, 10);
+                    if (!Number.isNaN(parsed)) {
+                        SettingsSchema.setField(cfg, key, GdiUtils.clamp(parsed, 0, 100));
+                        this.saveBezelConfig();
+                        dirty = true;
+                    }
                 }
-                break;
-            }
+            };
+            bez.addItem(`Left padding... (${cfg.padLeft}px)`,     () => promptPad('left',   'padLeft'));
+            bez.addItem(`Right padding... (${cfg.padRight}px)`,   () => promptPad('right',  'padRight'));
+            bez.addItem(`Top padding... (${cfg.padTop}px)`,       () => promptPad('top',    'padTop'));
+            bez.addItem(`Bottom padding... (${cfg.padBottom}px)`, () => promptPad('bottom', 'padBottom'));
+        });
 
-            case M_ID.PAD_RIGHT: {
-                const v = GdiUtils.prompt('Enter right padding in pixels (0-100):', 'Per-Side Padding', this.config.padRight);
-                if (v !== null && v !== '') {
-                    this.config.padRight = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100);
-                    this.saveBezelConfig();
-                    changed = true;
-                }
-                break;
-            }
+        m.addSeparator();
+        m.addItem('Reset Current Style to Defaults', () => {
+            SettingsSchema.applyGroup(cfg, PlayButtonsController.DEFAULTS, 'style');
+            this.#saveCoreProperties();
+            commitStyle(true);
+        });
+        m.addItem('Factory Reset (All Styles & Overlays)...', () => {
+            const confirm = GdiUtils.prompt('Type YES to perform a factory reset (resets all styles, button sets, and overlays):', 'Confirm Factory Reset', '');
+            if (confirm?.toUpperCase() === 'YES') {
+                const allStyles = this.scanButtonStyles(true);
+                for (const st of allStyles) window.SetProperty(this.#styleConfigKey(st), null);
+                window.SetProperty(this.#styleConfigKey(''), null);
 
-            case M_ID.PAD_TOP: {
-                const v = GdiUtils.prompt('Enter top padding in pixels (0-100):', 'Per-Side Padding', this.config.padTop);
-                if (v !== null && v !== '') {
-                    this.config.padTop = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100);
-                    this.saveBezelConfig();
-                    changed = true;
-                }
-                break;
-            }
-
-            case M_ID.PAD_BOTTOM: {
-                const v = GdiUtils.prompt('Enter bottom padding in pixels (0-100):', 'Per-Side Padding', this.config.padBottom);
-                if (v !== null && v !== '') {
-                    this.config.padBottom = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100);
-                    this.saveBezelConfig();
-                    changed = true;
-                }
-                break;
-            }
-
-            case M_ID.RESET_STYLE:
-                this.#applyConfig(PlayButtonsController.DEFAULTS);
+                SettingsSchema.setField(cfg, 'buttonStyle', PlayButtonsController.DEFAULTS.buttonStyle);
+                SettingsSchema.applyGroup(cfg, PlayButtonsController.DEFAULTS, 'style');
+                SettingsSchema.applyGroup(cfg, PlayButtonsController.DEFAULTS, 'bezel');
+                cfg.bezelFolder = `${this.#profileBase}skins\\overlay`;
                 this.#saveCoreProperties();
-                this.saveStyleConfig(this.config.buttonStyle);
-                this.reloadAssets();
-                changed = true;
-                break;
-
-            case M_ID.RESET_FACTORY: {
-                const confirm = GdiUtils.prompt('Type YES to perform a factory reset (resets all styles, button sets, and overlays):', 'Confirm Factory Reset', '');
-                if (confirm?.toUpperCase() === 'YES') {
-                    const allStyles = this.scanButtonStyles(false);
-                    for (const st of allStyles) window.SetProperty(this.#styleConfigKey(st), '');
-                    window.SetProperty(this.#styleConfigKey(''), '');
-
-                    this.config.buttonStyle = PlayButtonsController.DEFAULTS.buttonStyle;
-                    window.SetProperty('Buttons: Style', this.config.buttonStyle);
-                    this.#applyConfig(PlayButtonsController.DEFAULTS);
-                    this.#saveCoreProperties();
-                    this.config.padLeft = PlayButtonsController.DEFAULTS.padLeft;
-                    this.config.padRight = PlayButtonsController.DEFAULTS.padRight;
-                    this.config.padTop = PlayButtonsController.DEFAULTS.padTop;
-                    this.config.padBottom = PlayButtonsController.DEFAULTS.padBottom;
-                    this.config.bezelFolder = `${this.#profileBase}skins\\overlay`;
-                    this.config.bezelEnabled = false;
-                    this.config.bezelFile = '';
-                    this.#cachedBezelImages = null;
-                    this.#cachedStyles = null;
-                    this.saveBezelConfig();
-                    this.loadBezel();
-                    this.reloadAssets();
-                    changed = true;
-                }
-                break;
+                this.#cachedBezelImages = null;
+                this.#cachedBezelFolder = null;
+                this.#cachedStyles = null;
+                this.saveBezelConfig();
+                this.loadBezel();
+                commitStyle(true);
             }
-        }
+        });
 
-        if (changed) {
-            this.saveStyleConfig(this.config.buttonStyle);
+        m.track(x, y);
+
+        if (dirty) {
             this.buildLayout(window.Width, window.Height);
             window.Repaint();
         }
@@ -1674,6 +1645,8 @@ class PlayButtonsController {
 
     dispose() {
         this.#lifecycle = PlayButtonsController.LIFECYCLE.SHUTDOWN;
+        this.#bezelLoadToken++;
+        this.#imgLoader.clear();
         if (this.#notifyTimeout) window.ClearTimeout(this.#notifyTimeout);
         this.clearButtons();
         if (this.#bezelBmp)      { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
@@ -1706,8 +1679,8 @@ function on_playback_new_track() {
     app.updatePlayState();
 }
 
-function on_playback_stop() {
-    app.updatePlayState();
+function on_playback_stop(reason) {
+    if (reason !== 2) app.updatePlayState();
 }
 
 function on_playback_pause() {
@@ -1743,11 +1716,15 @@ function on_key_down(vkey) {
 }
 
 function on_colours_changed() {
-    window.Repaint();
+    app.onColoursChanged();
 }
 
 function on_font_changed() {
     app.onFontChanged();
+}
+
+function on_load_image_done(cookie, image, image_path) {
+    app.onLoadImageDone(cookie, image);
 }
 
 function on_mouse_rbtn_up(x, y, mask) {

@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.5 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.6 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -17,7 +17,7 @@
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.5', 
+    version: '2.6', 
     features: { grab_focus: true } 
 });
 
@@ -27,11 +27,11 @@ window.DlgCode  = 0x0004; // DLGC_WANTALLKEYS
 const HAS_AUDIO_CHUNK = typeof fb.GetAudioChunk === 'function';
 
 // ============================================================================================
-// 1. CONSTANTS & SYSTEM SCALING
+// 1. CONSTANTS, MENU BUILDER & SYSTEM SCALING
 // ============================================================================================
 class MeterConstants {
     static SCRIPT_NAME = 'LCD Peak Meter VFX';
-    static VERSION     = '2.0';
+    static VERSION     = '2.6';
 
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
 
@@ -142,55 +142,67 @@ class MeterConstants {
     static TEXT_CENTER_TOP    = 0x00000001 | 0x00000020 | 0x00000100;
 
     static BEZEL_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
+}
 
-    static MENU_ID = {
-        THEME_SYNC:          99,
-        THEME_BASE:          100,
-        LAYOUT_BASE:         600,
-        SEGMENT_BASE:        700,
-        PEAK_HOLD:           800,
-        RESET:               850,
-        FACTORY_RESET:       851,
-        MODE_BASE:           900,
-        ATTACK_BASE:         1000,
-        RELEASE_BASE:        1100,
-        PROFILER:            1150,
-        TOGGLE_BASE:         1200,
-        ADJUST_BASE:         1205,
-        DISPLAY_MODE_BASE:   1400,
-        SPECTRUM_BARS_BASE:  1420,
-        QUALITY_BASE:        1450,
-        STATUS:              1480,
-        RANGE_BASE:          1550,
-        PEAK_HOLD_TIME:      1560,
-        FLAT_ENABLE:         2000,
-        FLAT_SOLID:          2001,
-        FLAT_STRIP:          2002,
-        FLAT_CROSS:          2003,
-        FLAT_CROSS_VARIANT:  2004,
-        FLAT_CROSS_BLEND:    2005,
-        FLAT_FULL:           2006,
-        THEME_LOAD_FILE:     2100,
-        THEME_SAVE_CUSTOM:   2101,
-        THEME_SAVE_ALL:      2102,
-        THEME_EXPORT_TEMPLATE: 2103,
-        THEME_RELOAD:        2104,
-        SET_SAVE_PATH:       2105,
-        THEME_CREATOR_BASE:  3000,
-        SHOW_MARKERS:        3100,
-        MARKER_BORDER_SIZE:  3101,
-        PANEL_PAD:           3102,
-        PAD_LEFT:            3110,
-        PAD_RIGHT:           3111,
-        PAD_TOP:             3112,
-        PAD_BOTTOM:          3113,
-        EXTRA_SEG_BASE:      3200,
-        THEME_REMOVE_CUSTOM_BASE: 3400,
-        BEZEL_ENABLE:        3500,
-        BEZEL_FOLDER:        3501,
-        BEZEL_RELOAD:        3502,
-        BEZEL_START:         3600
-    };
+class MenuBuilder {
+    #menu;
+    #state;
+
+    constructor(state = null, startId = 1) {
+        this.#menu = window.CreatePopupMenu();
+        this.#state = state || {
+            nextId: startId,
+            callbacks: new Map(),
+            menus: []
+        };
+        this.#state.menus.push(this.#menu);
+    }
+
+    get raw() {
+        return this.#menu;
+    }
+
+    addItem(label, callback, opts = {}) {
+        const id = this.#state.nextId++;
+        const flags = opts.disabled ? 0x0001 : 0;
+        this.#menu.AppendMenuItem(flags, id, label);
+        if (opts.checked || opts.radio) {
+            this.#menu.CheckMenuRadioItem(id, id, id);
+        }
+        if (typeof callback === 'function') {
+            this.#state.callbacks.set(id, callback);
+        }
+        return this;
+    }
+
+    addSeparator() {
+        this.#menu.AppendMenuSeparator();
+        return this;
+    }
+
+    addSubMenu(title, buildFn, disabled = false) {
+        const sub = new MenuBuilder(this.#state);
+        buildFn(sub);
+        sub.#menu.AppendTo(this.#menu, disabled ? 0x0001 : 0, title);
+        return this;
+    }
+
+    track(x, y) {
+        let selected = 0;
+        try {
+            selected = this.#menu.TrackPopupMenu(x, y);
+        } finally {
+            for (const m of this.#state.menus) {
+                try { if (m && typeof m.Dispose === 'function') m.Dispose(); } catch {}
+            }
+            this.#state.menus.length = 0;
+        }
+        if (selected > 0) {
+            const cb = this.#state.callbacks.get(selected);
+            if (cb) cb();
+        }
+        return selected;
+    }
 }
 
 let panelState = MeterConstants.LIFECYCLE.BOOT;
@@ -219,7 +231,16 @@ const PROFILE_BASE = getProfilePath();
 window.MinWidth  = scaleDpi(80);
 window.MinHeight = scaleDpi(40);
 
-// Scaled Layout Dimensions
+// Logical (96-DPI) setting bounds + scaled layout constants
+const MARKER_AREA_LOGICAL_MIN      = 1;
+const MARKER_AREA_LOGICAL_MAX      = 60;
+const DEFAULT_MARKER_LOGICAL       = 14;
+const PANEL_PAD_LOGICAL_MIN        = 0;
+const PANEL_PAD_LOGICAL_MAX        = 30;
+const DEFAULT_PANEL_PAD_LOGICAL    = 4;
+const SIDE_PAD_LOGICAL_MAX         = 100;
+const DEFAULT_SIDE_PAD_LOGICAL     = 4;
+
 const SPECTRUM_MIN_BAR_WIDTH       = Math.max(1, scaleDpi(2));
 const SPECTRUM_MIN_BAR_HEIGHT      = Math.max(1, scaleDpi(2));
 const SPECTRUM_THROTTLE_FULL_PX    = scaleDpi(150);
@@ -228,12 +249,6 @@ const MIN_VERTICAL_SEGMENT_HEIGHT  = Math.max(3, scaleDpi(5));
 const MIN_HORIZONTAL_SEGMENT_WIDTH = Math.max(3, scaleDpi(5));
 const MIN_SEGMENT_GAP              = Math.max(1, scaleDpi(1));
 const LABEL_GAP                    = Math.max(1, scaleDpi(1));
-const MARKER_AREA_MIN              = scaleDpi(1);
-const MARKER_AREA_MAX              = scaleDpi(60);
-const DEFAULT_MARKER_BORDER        = scaleDpi(14);
-const PANEL_PAD_MIN                = 0;
-const PANEL_PAD_MAX                = scaleDpi(30);
-const DEFAULT_PANEL_PAD            = scaleDpi(4);
 const FLAT_PEAK_THICKNESS          = Math.max(2, scaleDpi(3));
 const GLOW_STEP_PADDING            = Math.max(2, scaleDpi(5));
 const SCANLINE_SPACING             = Math.max(2, scaleDpi(3));
@@ -292,6 +307,10 @@ class GdiUtils {
             return clean.replace(/[\\\/]+$/, '') + '\\';
         }
         return clean.replace(/[\/\\]+$/, '');
+    }
+
+    static escapeMenuLabel(str) {
+        return String(str ?? '').replace(/&/g, '&&');
     }
 
     static prompt(promptText, titleText, defaultVal) {
@@ -601,7 +620,7 @@ class MeterForegroundCache {
     }
 }
 
-// 2D Pre-Rendered Spectrum Bar Texture (DotMatrix Inspired 1-Blit Slicing for Spectrum)
+// 2D Pre-Rendered Spectrum Bar Texture (1-Blit Slicing for Spectrum)
 class SpectrumForegroundCache {
     #key = '';
     #bmp = null;
@@ -764,6 +783,10 @@ function fftInPlace(re, im) {
 
 function createHannWindow(size) {
     const w = new Float32Array(size);
+    if (size <= 1) {
+        if (size === 1) w[0] = 1;
+        return w;
+    }
     for (let i = 0; i < size; i++) {
         w[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (size - 1));
     }
@@ -1039,6 +1062,13 @@ class SpectrumAnalyzer {
 
     get fftN() { return this.#fftN; }
 
+    hasEnergy() {
+        for (let b = 0; b < this.barCount; b++) {
+            if (this.levels[b] > 0 || this.peaks[b] > 0) return true;
+        }
+        return false;
+    }
+
     setFftSize(n) {
         const target = n > 0 ? n : MeterConstants.SPECTRUM_FFT_SIZE;
         if (target === this.#fftN) return;
@@ -1086,7 +1116,7 @@ class SpectrumAnalyzer {
         let chunk = null;
         if (HAS_AUDIO_CHUNK && fb.IsPlaying && !fb.IsPaused) {
             const sampleRateRef = this.#lastSampleRate || 44100;
-            const requestSec = this.#fftN / sampleRateRef + 0.01;
+            const requestSec = Math.max(0.06, (this.#fftN * 1.25) / sampleRateRef);
             if (Number.isFinite(requestSec)) { 
                 try { chunk = fb.GetAudioChunk(requestSec); } catch { chunk = null; } 
             }
@@ -1101,8 +1131,10 @@ class SpectrumAnalyzer {
             for (let b = 0; b < this.barCount; b++) {
                 if (this.levels[b] > 0 || this.peaks[b] > 0) {
                     this.levels[b] = Math.max(0, this.levels[b] - release * elapsedSeconds * 2);
-                    if (this.peakTimes[b] > 0 && now - this.peakTimes[b] > MeterConstants.SPECTRUM_PEAK_HOLD_MS) {
+                    if (this.levels[b] < 0.0005) this.levels[b] = 0;
+                    if (this.peakTimes[b] === 0 || now - this.peakTimes[b] > MeterConstants.SPECTRUM_PEAK_HOLD_MS) {
                         this.peaks[b] = Math.max(this.levels[b], this.peaks[b] - MeterConstants.SPECTRUM_PEAK_FALL_PER_SECOND * elapsedSeconds);
+                        if (this.peaks[b] < 0.0005) this.peaks[b] = 0;
                     }
                     this.#quantLevel[b] = Math.round(this.levels[b] * MeterConstants.SPECTRUM_DIRTY_QUANTISE);
                     this.#quantPeak[b]  = Math.round(this.peaks[b] * MeterConstants.SPECTRUM_DIRTY_QUANTISE);
@@ -1124,25 +1156,30 @@ class SpectrumAnalyzer {
         const frames = Math.floor(length / channels);
         const usable = Math.min(n, frames);
         const frameOffset = Math.max(0, frames - usable);
+        const useFullWin = (usable === n);
+        const invUsable = usable > 1 ? (2 * Math.PI) / (usable - 1) : 0;
 
         if (channels === 1) {
             for (let i = 0; i < usable; i++) {
-                re[i] = (Number(data[frameOffset + i]) || 0) * this.#window[i];
+                const win = useFullWin ? this.#window[i] : (usable > 1 ? 0.5 - 0.5 * Math.cos(invUsable * i) : 1);
+                re[i] = (Number(data[frameOffset + i]) || 0) * win;
                 im[i] = 0;
             }
         } else if (channels === 2) {
             for (let i = 0; i < usable; i++) {
+                const win = useFullWin ? this.#window[i] : (usable > 1 ? 0.5 - 0.5 * Math.cos(invUsable * i) : 1);
                 const base = (frameOffset + i) * 2;
-                re[i] = ((Number(data[base]) || 0) + (Number(data[base + 1]) || 0)) * 0.5 * this.#window[i];
+                re[i] = ((Number(data[base]) || 0) + (Number(data[base + 1]) || 0)) * 0.5 * win;
                 im[i] = 0;
             }
         } else {
             const invCh = 1 / channels;
             for (let i = 0; i < usable; i++) {
+                const win = useFullWin ? this.#window[i] : (usable > 1 ? 0.5 - 0.5 * Math.cos(invUsable * i) : 1);
                 let sum = 0;
                 const base = (frameOffset + i) * channels;
                 for (let c = 0; c < channels; c++) sum += Number(data[base + c]) || 0;
-                re[i] = sum * invCh * this.#window[i];
+                re[i] = sum * invCh * win;
                 im[i] = 0;
             }
         }
@@ -1150,7 +1187,7 @@ class SpectrumAnalyzer {
         fftInPlace(re, im);
 
         const mag = this.#mag, halfN = n / 2;
-        const invN = 4 / n;
+        const invN = 4 / Math.max(1, usable);
         for (let i = 0; i < halfN; i++) {
             const r = re[i] * invN, ii = im[i] * invN;
             mag[i] = r * r + ii * ii;
@@ -1189,8 +1226,10 @@ class SpectrumAnalyzer {
 
         let dirty = false;
         for (let b = 0; b < this.barCount; b++) {
-            if (Math.abs(this.#quantLevel[b] - this.#prevQuantLevel[b]) > MeterConstants.SPECTRUM_DIRTY_THRESHOLD || 
-                Math.abs(this.#quantPeak[b] - this.#prevQuantPeak[b]) > MeterConstants.SPECTRUM_DIRTY_THRESHOLD) {
+            if (((this.#quantLevel[b] === 0) !== (this.#prevQuantLevel[b] === 0)) ||
+                ((this.#quantPeak[b]  === 0) !== (this.#prevQuantPeak[b]  === 0)) ||
+                Math.abs(this.#quantLevel[b] - this.#prevQuantLevel[b]) > MeterConstants.SPECTRUM_DIRTY_THRESHOLD || 
+                Math.abs(this.#quantPeak[b]  - this.#prevQuantPeak[b])  > MeterConstants.SPECTRUM_DIRTY_THRESHOLD) {
                 dirty = true; 
                 break;
             }
@@ -1214,14 +1253,14 @@ class GeometryCache {
     geometry = null;
 
     get(width, height, layout, segments, theme, markerBorderSize, extraSegs, showMarkers, panelPad, padL, padT, padR, padB, minDb) {
-        const border  = GdiUtils.clamp(markerBorderSize ?? DEFAULT_MARKER_BORDER, MARKER_AREA_MIN, MARKER_AREA_MAX);
+        const border  = scaleDpi(GdiUtils.clamp(markerBorderSize ?? DEFAULT_MARKER_LOGICAL, MARKER_AREA_LOGICAL_MIN, MARKER_AREA_LOGICAL_MAX));
         const extras  = GdiUtils.clamp(extraSegs ?? 0, 0, MeterConstants.EXTRA_SEGMENT_MAX);
-        const pad     = GdiUtils.clamp(panelPad ?? DEFAULT_PANEL_PAD, PANEL_PAD_MIN, PANEL_PAD_MAX);
+        const pad     = scaleDpi(GdiUtils.clamp(panelPad ?? DEFAULT_PANEL_PAD_LOGICAL, PANEL_PAD_LOGICAL_MIN, PANEL_PAD_LOGICAL_MAX));
         const markers = showMarkers !== false;
-        const pL = (padL || 0) + pad;
-        const pR = (padR || 0) + pad;
-        const pT = (padT || 0) + pad;
-        const pB = (padB || 0) + pad;
+        const pL = scaleDpi(padL || 0) + pad;
+        const pR = scaleDpi(padR || 0) + pad;
+        const pT = scaleDpi(padT || 0) + pad;
+        const pB = scaleDpi(padB || 0) + pad;
 
         if (width === this.#width && height === this.#height && layout === this.#layout && 
             segments === this.#segments && theme.name === this.#themeName && 
@@ -1315,11 +1354,11 @@ class SpectrumGeometryCache {
     geometry = null;
 
     get(width, height, layout, barCount, panelPad, padL, padT, padR, padB) {
-        const pad = GdiUtils.clamp(panelPad ?? DEFAULT_PANEL_PAD, PANEL_PAD_MIN, PANEL_PAD_MAX);
-        const pL = (padL || 0) + pad;
-        const pR = (padR || 0) + pad;
-        const pT = (padT || 0) + pad;
-        const pB = (padB || 0) + pad;
+        const pad = scaleDpi(GdiUtils.clamp(panelPad ?? DEFAULT_PANEL_PAD_LOGICAL, PANEL_PAD_LOGICAL_MIN, PANEL_PAD_LOGICAL_MAX));
+        const pL = scaleDpi(padL || 0) + pad;
+        const pR = scaleDpi(padR || 0) + pad;
+        const pT = scaleDpi(padT || 0) + pad;
+        const pB = scaleDpi(padB || 0) + pad;
 
         if (width === this.#width && height === this.#height && layout === this.#layout && 
             barCount === this.#barCount && pL === this.#padL && pR === this.#padR && 
@@ -1912,7 +1951,7 @@ class MeterBackgroundCache {
     dispose() { this.#dispose(); this.#key = ''; this.lastHit = false; }
 }
 
-// Pre-Rendered Spectrum Background Plate (DotMatrix Inactive Plate)
+// Pre-Rendered Spectrum Background Plate
 class SpectrumBackgroundCache {
     #key = '';
     #bitmap = null;
@@ -2069,156 +2108,110 @@ class PerformanceMonitor {
 }
 
 // ============================================================================================
-// 11. PROPERTY MANAGER
+// 11. SETTINGS SCHEMA & PROPERTY MANAGER
 // ============================================================================================
+class SettingsSchema {
+    static FIELDS = [
+        { key: 'theme',             prop: MeterConstants.SCRIPT_NAME + '.Theme',             type: 'str',  def: 'Pioneer Amber' },
+        { key: 'syncTheme',         prop: MeterConstants.SCRIPT_NAME + '.SyncTheme',         type: 'bool', def: true },
+        { key: 'layout',            prop: MeterConstants.SCRIPT_NAME + '.Layout',            type: 'enum', def: 'Horizontal', values: MeterConstants.LAYOUT_OPTIONS },
+        { key: 'segments',          prop: MeterConstants.SCRIPT_NAME + '.Segments',          type: 'enum', def: MeterConstants.DEFAULT_SEGMENTS, values: MeterConstants.SEGMENT_COUNTS, num: true },
+        { key: 'peakHold',          prop: MeterConstants.SCRIPT_NAME + '.PeakHold',          type: 'bool', def: true },
+        { key: 'meterMode',         prop: MeterConstants.SCRIPT_NAME + '.MeterMode',         type: 'enum', def: 'RMS', values: MeterConstants.METER_MODE_OPTIONS },
+        { key: 'attack',            prop: MeterConstants.SCRIPT_NAME + '.Attack',            type: 'enum', def: 'Medium', values: MeterConstants.SPEED_OPTIONS },
+        { key: 'release',           prop: MeterConstants.SCRIPT_NAME + '.Release',           type: 'enum', def: 'Medium', values: MeterConstants.SPEED_OPTIONS },
+        { key: 'showGlow',          prop: MeterConstants.SCRIPT_NAME + '.ShowGlow',          type: 'bool', def: true },
+        { key: 'glowOpacity',       prop: MeterConstants.SCRIPT_NAME + '.GlowOpacity',       type: 'int',  def: 30,  min: 0, max: 255 },
+        { key: 'showPhosphor',      prop: MeterConstants.SCRIPT_NAME + '.ShowPhosphor',      type: 'bool', def: true },
+        { key: 'phosphorOpacity',   prop: MeterConstants.SCRIPT_NAME + '.PhosphorOpacity',   type: 'int',  def: 15,  min: 0, max: 255 },
+        { key: 'showScanlines',     prop: MeterConstants.SCRIPT_NAME + '.ShowScanlines',     type: 'bool', def: false },
+        { key: 'scanlineOpacity',   prop: MeterConstants.SCRIPT_NAME + '.ScanlineOpacity',   type: 'int',  def: 28,  min: 0, max: 255 },
+        { key: 'showReflection',    prop: MeterConstants.SCRIPT_NAME + '.ShowReflection',    type: 'bool', def: true },
+        { key: 'reflectionOpacity', prop: MeterConstants.SCRIPT_NAME + '.ReflectionOpacity', type: 'int',  def: 25,  min: 0, max: 255 },
+        { key: 'onSegmentOpacity',  prop: MeterConstants.SCRIPT_NAME + '.OnSegmentOpacity',  type: 'int',  def: 220, min: 0, max: 255 },
+        { key: 'offSegmentOpacity', prop: MeterConstants.SCRIPT_NAME + '.OffSegmentOpacity', type: 'int',  def: 15,  min: 0, max: 255 },
+        { key: 'flatMode',          prop: MeterConstants.SCRIPT_NAME + '.FlatMode',          type: 'bool', def: false },
+        { key: 'flatGradient',      prop: MeterConstants.SCRIPT_NAME + '.FlatGradient',      type: 'int',  def: MeterConstants.GRADIENT_STYLE_STRIP, min: MeterConstants.GRADIENT_STYLE_MIN, max: MeterConstants.GRADIENT_STYLE_MAX,
+          coerce: (raw, def) => {
+              const n = Number(raw);
+              if (Number.isInteger(n) && n >= MeterConstants.GRADIENT_STYLE_MIN && n <= MeterConstants.GRADIENT_STYLE_MAX) return n;
+              return (raw === 'true' || raw === '1' || raw === true) ? MeterConstants.GRADIENT_STYLE_STRIP : def;
+          }
+        },
+        { key: 'displayMode',       prop: MeterConstants.SCRIPT_NAME + '.DisplayMode',       type: 'enum', def: 'Peak Meter', values: MeterConstants.DISPLAY_MODE_OPTIONS },
+        { key: 'spectrumBars',      prop: MeterConstants.SCRIPT_NAME + '.SpectrumBars',      type: 'enum', def: MeterConstants.DEFAULT_SPECTRUM_BARS, values: MeterConstants.SPECTRUM_BAR_COUNTS, num: true },
+        { key: 'profiler',          prop: MeterConstants.SCRIPT_NAME + '.Profiler',          type: 'bool', def: false },
+        { key: 'customThemeFile',   prop: MeterConstants.SCRIPT_NAME + '.CustomThemeFile',   type: 'path', def: `${PROFILE_BASE}lcd_custom_themes.json`, resetAll: true },
+        { key: 'showMarkers',       prop: MeterConstants.SCRIPT_NAME + '.ShowMarkers',       type: 'bool', def: true },
+        { key: 'markerBorderSize',  prop: MeterConstants.SCRIPT_NAME + '.MarkerBorderSize',  type: 'int',  def: DEFAULT_MARKER_LOGICAL, min: MARKER_AREA_LOGICAL_MIN, max: MARKER_AREA_LOGICAL_MAX },
+        { key: 'extraSegments',     prop: MeterConstants.SCRIPT_NAME + '.ExtraSegments',     type: 'int',  def: 0, min: 0, max: MeterConstants.EXTRA_SEGMENT_MAX },
+        { key: 'panelPad',          prop: MeterConstants.SCRIPT_NAME + '.PanelPad',          type: 'int',  def: DEFAULT_PANEL_PAD_LOGICAL, min: PANEL_PAD_LOGICAL_MIN, max: PANEL_PAD_LOGICAL_MAX },
+        { key: 'padLeft',           prop: MeterConstants.SCRIPT_NAME + '.PadLeft',           type: 'int',  def: DEFAULT_SIDE_PAD_LOGICAL, min: 0, max: SIDE_PAD_LOGICAL_MAX },
+        { key: 'padRight',          prop: MeterConstants.SCRIPT_NAME + '.PadRight',          type: 'int',  def: DEFAULT_SIDE_PAD_LOGICAL, min: 0, max: SIDE_PAD_LOGICAL_MAX },
+        { key: 'padTop',            prop: MeterConstants.SCRIPT_NAME + '.PadTop',            type: 'int',  def: DEFAULT_SIDE_PAD_LOGICAL, min: 0, max: SIDE_PAD_LOGICAL_MAX },
+        { key: 'padBottom',         prop: MeterConstants.SCRIPT_NAME + '.PadBottom',         type: 'int',  def: DEFAULT_SIDE_PAD_LOGICAL, min: 0, max: SIDE_PAD_LOGICAL_MAX },
+        { key: 'bezelFolder',       prop: MeterConstants.SCRIPT_NAME + '.BezelFolder',       type: 'path', def: `${PROFILE_BASE}skins\\overlay`, resetAll: true, fallbackToDef: true },
+        { key: 'bezelEnabled',      prop: MeterConstants.SCRIPT_NAME + '.BezelEnabled',      type: 'bool', def: false },
+        { key: 'bezelFile',         prop: MeterConstants.SCRIPT_NAME + '.BezelFile',         type: 'str',  def: '' },
+        { key: 'qualityPreset',     prop: MeterConstants.SCRIPT_NAME + '.QualityPreset',     type: 'enum', def: 'Balanced', values: MeterConstants.QUALITY_PRESET_OPTIONS },
+        { key: 'meterRange',        prop: MeterConstants.SCRIPT_NAME + '.MeterRange',        type: 'enum', def: -60, values: MeterConstants.METER_RANGE_OPTIONS, num: true },
+        { key: 'peakHoldMs',        prop: MeterConstants.SCRIPT_NAME + '.PeakHoldMs',        type: 'int',  def: MeterConstants.PEAK_HOLD_MS, min: MeterConstants.PEAK_HOLD_MIN_MS, max: MeterConstants.PEAK_HOLD_MAX_MS }
+    ];
+
+    static keys() {
+        const o = {
+            styleRevision:       MeterConstants.SCRIPT_NAME + '.StyleRevision',
+            calibrationRevision: MeterConstants.SCRIPT_NAME + '.CalibrationRevision'
+        };
+        for (const f of this.FIELDS) o[f.key] = f.prop;
+        return o;
+    }
+
+    static defaults() {
+        const o = {};
+        for (const f of this.FIELDS) o[f.key] = f.def;
+        return o;
+    }
+
+    static coerce(f, raw) {
+        if (typeof f.coerce === 'function') return f.coerce(raw, f.def);
+        switch (f.type) {
+            case 'bool':
+                if (typeof raw === 'boolean') return raw;
+                if (typeof raw === 'string') return raw !== 'false' && raw !== '0' && raw !== '';
+                return Boolean(raw);
+            case 'int': {
+                const n = Math.round(Number(raw));
+                return Number.isNaN(n) ? f.def : GdiUtils.clamp(n, f.min, f.max);
+            }
+            case 'enum': {
+                const v = f.num ? Number(raw) : String(raw);
+                return f.values.includes(v) ? v : f.def;
+            }
+            case 'path': {
+                const s = GdiUtils.sanitizePath(String(raw ?? f.def));
+                return f.fallbackToDef ? (s || f.def) : s;
+            }
+            default:
+                return String(raw ?? f.def);
+        }
+    }
+}
+
 class PropertyManager {
     #pendingSaves = Object.create(null);
     #saveTimer = null;
     extraSegmentsPreFlat = 0;
     lastFinalizedTheme = '';
 
-    keys = {
-        theme:               MeterConstants.SCRIPT_NAME + '.Theme',
-        syncTheme:           MeterConstants.SCRIPT_NAME + '.SyncTheme',
-        layout:              MeterConstants.SCRIPT_NAME + '.Layout',
-        segments:            MeterConstants.SCRIPT_NAME + '.Segments',
-        peakHold:            MeterConstants.SCRIPT_NAME + '.PeakHold',
-        meterMode:           MeterConstants.SCRIPT_NAME + '.MeterMode',
-        attack:              MeterConstants.SCRIPT_NAME + '.Attack',
-        release:             MeterConstants.SCRIPT_NAME + '.Release',
-        styleRevision:       MeterConstants.SCRIPT_NAME + '.StyleRevision',
-        showGlow:            MeterConstants.SCRIPT_NAME + '.ShowGlow',
-        glowOpacity:         MeterConstants.SCRIPT_NAME + '.GlowOpacity',
-        showPhosphor:        MeterConstants.SCRIPT_NAME + '.ShowPhosphor',
-        phosphorOpacity:     MeterConstants.SCRIPT_NAME + '.PhosphorOpacity',
-        showScanlines:       MeterConstants.SCRIPT_NAME + '.ShowScanlines',
-        scanlineOpacity:     MeterConstants.SCRIPT_NAME + '.ScanlineOpacity',
-        showReflection:      MeterConstants.SCRIPT_NAME + '.ShowReflection',
-        reflectionOpacity:   MeterConstants.SCRIPT_NAME + '.ReflectionOpacity',
-        onSegmentOpacity:    MeterConstants.SCRIPT_NAME + '.OnSegmentOpacity',
-        offSegmentOpacity:   MeterConstants.SCRIPT_NAME + '.OffSegmentOpacity',
-        flatMode:            MeterConstants.SCRIPT_NAME + '.FlatMode',
-        flatGradient:        MeterConstants.SCRIPT_NAME + '.FlatGradient',
-        displayMode:         MeterConstants.SCRIPT_NAME + '.DisplayMode',
-        spectrumBars:        MeterConstants.SCRIPT_NAME + '.SpectrumBars',
-        profiler:            MeterConstants.SCRIPT_NAME + '.Profiler',
-        customThemeFile:     MeterConstants.SCRIPT_NAME + '.CustomThemeFile',
-        showMarkers:         MeterConstants.SCRIPT_NAME + '.ShowMarkers',
-        markerBorderSize:    MeterConstants.SCRIPT_NAME + '.MarkerBorderSize',
-        extraSegments:       MeterConstants.SCRIPT_NAME + '.ExtraSegments',
-        panelPad:            MeterConstants.SCRIPT_NAME + '.PanelPad',
-        padLeft:             MeterConstants.SCRIPT_NAME + '.PadLeft',
-        padRight:            MeterConstants.SCRIPT_NAME + '.PadRight',
-        padTop:              MeterConstants.SCRIPT_NAME + '.PadTop',
-        padBottom:           MeterConstants.SCRIPT_NAME + '.PadBottom',
-        bezelFolder:         MeterConstants.SCRIPT_NAME + '.BezelFolder',
-        bezelEnabled:        MeterConstants.SCRIPT_NAME + '.BezelEnabled',
-        bezelFile:           MeterConstants.SCRIPT_NAME + '.BezelFile',
-        qualityPreset:       MeterConstants.SCRIPT_NAME + '.QualityPreset',
-        meterRange:          MeterConstants.SCRIPT_NAME + '.MeterRange',
-        peakHoldMs:          MeterConstants.SCRIPT_NAME + '.PeakHoldMs',
-        calibrationRevision: MeterConstants.SCRIPT_NAME + '.CalibrationRevision'
-    };
-
-    defaults = {
-        theme:             'Pioneer Amber',
-        syncTheme:         true,
-        layout:            'Horizontal',
-        segments:          MeterConstants.DEFAULT_SEGMENTS,
-        peakHold:          true,
-        meterMode:         'RMS',
-        attack:            'Medium',
-        release:           'Medium',
-        showGlow:          true,
-        glowOpacity:       30,
-        showPhosphor:      true,
-        phosphorOpacity:   15,
-        showScanlines:     false,
-        scanlineOpacity:   28,
-        showReflection:    true,
-        reflectionOpacity: 25,
-        onSegmentOpacity:  220,
-        offSegmentOpacity: 15,
-        flatMode:          false,
-        flatGradient:      MeterConstants.GRADIENT_STYLE_STRIP,
-        displayMode:       'Peak Meter',
-        spectrumBars:      MeterConstants.DEFAULT_SPECTRUM_BARS,
-        profiler:          false,
-        customThemeFile:   `${PROFILE_BASE}lcd_custom_themes.json`,
-        showMarkers:       true,
-        markerBorderSize:  DEFAULT_MARKER_BORDER,
-        extraSegments:     0,
-        panelPad:          DEFAULT_PANEL_PAD,
-        padLeft:           scaleDpi(4),
-        padRight:          scaleDpi(4),
-        padTop:            scaleDpi(4),
-        padBottom:         scaleDpi(4),
-        bezelFolder:       `${PROFILE_BASE}skins\\overlay`,
-        bezelEnabled:      false,
-        bezelFile:         '',
-        qualityPreset:     'Balanced',
-        meterRange:        -60,
-        peakHoldMs:        MeterConstants.PEAK_HOLD_MS
-    };
-
-    values = {};
+    keys     = SettingsSchema.keys();
+    defaults = SettingsSchema.defaults();
+    values   = {};
 
     constructor() {
-        this.values = {
-            theme:             String(window.GetProperty(this.keys.theme, this.defaults.theme)),
-            syncTheme:         this.parseBool(window.GetProperty(this.keys.syncTheme, this.defaults.syncTheme)),
-            layout:            String(window.GetProperty(this.keys.layout, this.defaults.layout)),
-            segments:          Number(window.GetProperty(this.keys.segments, this.defaults.segments)),
-            peakHold:          this.parseBool(window.GetProperty(this.keys.peakHold, this.defaults.peakHold)),
-            meterMode:         String(window.GetProperty(this.keys.meterMode, this.defaults.meterMode)),
-            attack:            String(window.GetProperty(this.keys.attack, this.defaults.attack)),
-            release:           String(window.GetProperty(this.keys.release, this.defaults.release)),
-            showGlow:          this.parseBool(window.GetProperty(this.keys.showGlow, this.defaults.showGlow)),
-            glowOpacity:       this.clampOpacity(window.GetProperty(this.keys.glowOpacity, this.defaults.glowOpacity)),
-            showPhosphor:      this.parseBool(window.GetProperty(this.keys.showPhosphor, this.defaults.showPhosphor)),
-            phosphorOpacity:   this.clampOpacity(window.GetProperty(this.keys.phosphorOpacity, this.defaults.phosphorOpacity)),
-            showScanlines:     this.parseBool(window.GetProperty(this.keys.showScanlines, this.defaults.showScanlines)),
-            scanlineOpacity:   this.clampOpacity(window.GetProperty(this.keys.scanlineOpacity, this.defaults.scanlineOpacity)),
-            showReflection:    this.parseBool(window.GetProperty(this.keys.showReflection, this.defaults.showReflection)),
-            reflectionOpacity: this.clampOpacity(window.GetProperty(this.keys.reflectionOpacity, this.defaults.reflectionOpacity)),
-            onSegmentOpacity:  this.clampOpacity(window.GetProperty(this.keys.onSegmentOpacity, this.defaults.onSegmentOpacity)),
-            offSegmentOpacity: this.clampOpacity(window.GetProperty(this.keys.offSegmentOpacity, this.defaults.offSegmentOpacity)),
-            flatMode:          this.parseBool(window.GetProperty(this.keys.flatMode, this.defaults.flatMode)),
-            flatGradient:      (() => {
-                const raw = window.GetProperty(this.keys.flatGradient, this.defaults.flatGradient);
-                const n = Number(raw);
-                if (Number.isInteger(n) && n >= MeterConstants.GRADIENT_STYLE_MIN && n <= MeterConstants.GRADIENT_STYLE_MAX) return n;
-                return (raw === 'true' || raw === '1') ? MeterConstants.GRADIENT_STYLE_STRIP : this.defaults.flatGradient;
-            })(),
-            displayMode:       String(window.GetProperty(this.keys.displayMode, this.defaults.displayMode)),
-            spectrumBars:      Number(window.GetProperty(this.keys.spectrumBars, this.defaults.spectrumBars)),
-            profiler:          this.parseBool(window.GetProperty(this.keys.profiler, this.defaults.profiler)),
-            customThemeFile:   GdiUtils.sanitizePath(String(window.GetProperty(this.keys.customThemeFile, this.defaults.customThemeFile))),
-            showMarkers:       this.parseBool(window.GetProperty(this.keys.showMarkers, this.defaults.showMarkers)),
-            markerBorderSize:  this.parseIntClamped(window.GetProperty(this.keys.markerBorderSize, this.defaults.markerBorderSize), MARKER_AREA_MIN, MARKER_AREA_MAX),
-            extraSegments:     this.parseIntClamped(window.GetProperty(this.keys.extraSegments, this.defaults.extraSegments), 0, MeterConstants.EXTRA_SEGMENT_MAX),
-            panelPad:          this.parseIntClamped(window.GetProperty(this.keys.panelPad, this.defaults.panelPad), PANEL_PAD_MIN, PANEL_PAD_MAX),
-            padLeft:           this.parseIntClamped(window.GetProperty(this.keys.padLeft, this.defaults.padLeft), 0, scaleDpi(100)),
-            padRight:          this.parseIntClamped(window.GetProperty(this.keys.padRight, this.defaults.padRight), 0, scaleDpi(100)),
-            padTop:            this.parseIntClamped(window.GetProperty(this.keys.padTop, this.defaults.padTop), 0, scaleDpi(100)),
-            padBottom:         this.parseIntClamped(window.GetProperty(this.keys.padBottom, this.defaults.padBottom), 0, scaleDpi(100)),
-            bezelFolder:       GdiUtils.sanitizePath(String(window.GetProperty(this.keys.bezelFolder, this.defaults.bezelFolder))) || this.defaults.bezelFolder,
-            bezelEnabled:      this.parseBool(window.GetProperty(this.keys.bezelEnabled, this.defaults.bezelEnabled)),
-            bezelFile:         String(window.GetProperty(this.keys.bezelFile, this.defaults.bezelFile)),
-            qualityPreset:     String(window.GetProperty(this.keys.qualityPreset, this.defaults.qualityPreset)),
-            meterRange:        Number(window.GetProperty(this.keys.meterRange, this.defaults.meterRange)),
-            peakHoldMs:        this.parseIntClamped(window.GetProperty(this.keys.peakHoldMs, this.defaults.peakHoldMs), MeterConstants.PEAK_HOLD_MIN_MS, MeterConstants.PEAK_HOLD_MAX_MS)
-        };
-
-        this.values.segments      = this.normaliseChoice(this.values.segments, MeterConstants.SEGMENT_COUNTS, this.defaults.segments);
-        this.values.displayMode   = this.normaliseChoice(this.values.displayMode, MeterConstants.DISPLAY_MODE_OPTIONS, this.defaults.displayMode);
-        this.values.spectrumBars  = this.normaliseChoice(this.values.spectrumBars, MeterConstants.SPECTRUM_BAR_COUNTS, MeterConstants.DEFAULT_SPECTRUM_BARS);
-        this.values.layout        = this.normaliseChoice(this.values.layout, MeterConstants.LAYOUT_OPTIONS, this.defaults.layout);
-        this.values.meterMode     = this.normaliseChoice(this.values.meterMode, MeterConstants.METER_MODE_OPTIONS, this.defaults.meterMode);
-        this.values.attack        = this.normaliseChoice(this.values.attack, MeterConstants.SPEED_OPTIONS, this.defaults.attack);
-        this.values.release       = this.normaliseChoice(this.values.release, MeterConstants.SPEED_OPTIONS, this.defaults.release);
-        this.values.qualityPreset = this.normaliseChoice(this.values.qualityPreset, MeterConstants.QUALITY_PRESET_OPTIONS, this.defaults.qualityPreset);
-        this.values.meterRange    = this.normaliseChoice(this.values.meterRange, MeterConstants.METER_RANGE_OPTIONS, this.defaults.meterRange);
+        for (const f of SettingsSchema.FIELDS) {
+            this.values[f.key] = SettingsSchema.coerce(f, window.GetProperty(f.prop, f.def));
+        }
 
         if (Number(window.GetProperty(this.keys.calibrationRevision, 0)) < 1) {
             this.values.extraSegments = 0;
@@ -2234,26 +2227,6 @@ class PropertyManager {
             window.SetProperty(this.keys.meterMode, this.values.meterMode);
             window.SetProperty(this.keys.styleRevision, 2);
         }
-    }
-
-    normaliseChoice(value, allowed, fallback) {
-        return allowed.includes(value) ? value : fallback;
-    }
-
-    clampOpacity(value) {
-        const n = Number(value);
-        return GdiUtils.clamp(Number.isNaN(n) ? 0 : Math.round(n), 0, 255);
-    }
-
-    parseBool(value) {
-        if (typeof value === 'boolean') return value;
-        if (typeof value === 'string')  return value !== 'false' && value !== '0' && value !== '';
-        return Boolean(value);
-    }
-
-    parseIntClamped(value, min, max) {
-        const n = Math.round(Number(value));
-        return GdiUtils.clamp(Number.isNaN(n) ? min : n, min, max);
     }
 
     set(name, value, sync = false) {
@@ -2288,13 +2261,19 @@ class PropertyManager {
         this.#pendingSaves = Object.create(null);
     }
 
-    setTheme(name) {
-        if (name !== '~Preview') this.lastFinalizedTheme = name;
+    setTheme(name, themeManager = null) {
+        if (name !== '~Preview') {
+            this.lastFinalizedTheme = name;
+            if (themeManager) {
+                themeManager.draftBaseTheme = name;
+                themeManager.seedDraftFromTheme(themeManager.get(name));
+            }
+        }
         this.set('theme', name, true);
     }
 
     applyQualityPreset(name) {
-        const preset = this.normaliseChoice(name, MeterConstants.QUALITY_PRESET_OPTIONS, this.defaults.qualityPreset);
+        const preset = MeterConstants.QUALITY_PRESET_OPTIONS.includes(name) ? name : this.defaults.qualityPreset;
         const settings = {
             Low:      { showGlow: false, showPhosphor: false, showScanlines: false, showReflection: false, spectrumBars: 20 },
             Balanced: { showGlow: true,  showPhosphor: true,  showScanlines: false, showReflection: true,  spectrumBars: MeterConstants.DEFAULT_SPECTRUM_BARS },
@@ -2305,25 +2284,17 @@ class PropertyManager {
     }
 
     resetVisuals() {
-        const preserved = {
-            bezelFolder: this.values.bezelFolder,
-            customThemeFile: this.values.customThemeFile
-        };
-        for (const key of Object.keys(this.defaults)) {
-            if (key === 'customThemeFile' || key === 'bezelFolder') continue;
-            if (!this.keys[key]) continue;
-            if (key === 'theme') { this.setTheme(this.defaults[key]); } 
-            else { this.set(key, this.defaults[key], true); }
+        for (const f of SettingsSchema.FIELDS) {
+            if (f.resetAll) continue;
+            if (f.key === 'theme') this.setTheme(f.def);
+            else this.set(f.key, f.def, true);
         }
-        this.values.bezelFolder = preserved.bezelFolder;
-        this.values.customThemeFile = preserved.customThemeFile;
     }
 
     resetAll() {
-        for (const key of Object.keys(this.defaults)) {
-            if (!this.keys[key]) continue;
-            if (key === 'theme') { this.setTheme(this.defaults[key]); } 
-            else { this.set(key, this.defaults[key], true); }
+        for (const f of SettingsSchema.FIELDS) {
+            if (f.key === 'theme') this.setTheme(f.def);
+            else this.set(f.key, f.def, true);
         }
     }
 }
@@ -2606,7 +2577,7 @@ class ThemeManager {
 }
 
 // ============================================================================================
-// 13. MENU MANAGER
+// 13. MENU MANAGER (DECLARATIVE MENU BUILDER)
 // ============================================================================================
 class MenuManager {
     main;
@@ -2615,15 +2586,19 @@ class MenuManager {
         this.main = main;
     }
 
-    #doColorPicker(label, key) {
-        const d = this.main.themes.draftTheme;
+    #ensureDraftSeeded() {
         const applied = this.main.properties.values.theme;
         const baseName = applied === '~Preview' ? this.main.properties.lastFinalizedTheme : applied;
         if (this.main.themes.draftBaseTheme !== baseName) {
             this.main.themes.draftBaseTheme = baseName;
             this.main.themes.seedDraftFromTheme(this.main.themes.get(baseName));
         }
-        const startColor = d[key];
+    }
+
+    #doColorPicker(label, key) {
+        this.#ensureDraftSeeded();
+        const d = this.main.themes.draftTheme;
+        const startColor = d[key] >>> 0;
         let newColor;
         try {
             newColor = utils.ColourPicker(window.ID, startColor);
@@ -2631,9 +2606,11 @@ class MenuManager {
             fb.ShowPopupMessage(`Color picker unavailable:\n${e.message || e}`, MeterConstants.SCRIPT_NAME);
             return;
         }
-        if (newColor === -1 || newColor === startColor) return;
+        if (newColor === -1) return;
+        const packed = (newColor | 0xFF000000) >>> 0;
+        if (packed === startColor) return;
 
-        this.main.themes.updateDraft(key, newColor);
+        this.main.themes.updateDraft(key, packed);
 
         const t = this.main.themes.makeTheme(
             '~Preview',
@@ -2652,6 +2629,7 @@ class MenuManager {
     }
 
     #doFinalizeTheme() {
+        this.#ensureDraftSeeded();
         const draft = this.main.themes.draftTheme;
         let name;
         try {
@@ -2689,7 +2667,7 @@ class MenuManager {
         this.main.themes.clearPreview();
 
         this.main.themes.draftTheme.name = name;
-        this.main.properties.setTheme(name);
+        this.main.properties.setTheme(name, this.main.themes);
         this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
         this.main.invalidate();
 
@@ -2725,7 +2703,7 @@ class MenuManager {
                 : (this.main.themes.themes[0]?.name ?? 'Pioneer Amber');
             this.main.properties.lastFinalizedTheme = fallback;
             this.main.themes.clearPreview();
-            this.main.properties.setTheme(fallback);
+            this.main.properties.setTheme(fallback, this.main.themes);
         }
 
         const savePath = this.main.properties.values.customThemeFile;
@@ -2753,595 +2731,6 @@ class MenuManager {
             return path?.trim() ? GdiUtils.sanitizePath(path) : null;
         } catch {}
         return null;
-    }
-
-    show(x, y, mask) {
-        if (panelState !== MeterConstants.LIFECYCLE.LIVE) return false;
-        if (mask & 4) return false;
-
-        const MID = MeterConstants.MENU_ID;
-
-        const menu            = window.CreatePopupMenu();
-        const themeMenu       = window.CreatePopupMenu();
-        const themeCustomMenu = window.CreatePopupMenu();
-        const displayModeMenu = window.CreatePopupMenu();
-        const qualityMenu     = window.CreatePopupMenu();
-        const rangeMenu       = window.CreatePopupMenu();
-        const spectrumBarsMenu = window.CreatePopupMenu();
-        const layoutMenu      = window.CreatePopupMenu();
-        const segmentMenu     = window.CreatePopupMenu();
-        const extraSegMenu    = window.CreatePopupMenu();
-        const modeMenu        = window.CreatePopupMenu();
-        const attackMenu      = window.CreatePopupMenu();
-        const releaseMenu     = window.CreatePopupMenu();
-        const appearanceMenu  = window.CreatePopupMenu();
-        const overlaySettingsMenu = window.CreatePopupMenu();
-        const flatModeMenu    = window.CreatePopupMenu();
-        const creatorMenu     = window.CreatePopupMenu();
-        const removeThemeMenu = window.CreatePopupMenu();
-        const bezelMenu       = window.CreatePopupMenu();
-
-        const allMenus = [
-            menu, themeMenu, themeCustomMenu, displayModeMenu, qualityMenu, rangeMenu, 
-            spectrumBarsMenu, layoutMenu, segmentMenu, extraSegMenu, modeMenu, attackMenu, 
-            releaseMenu, appearanceMenu, overlaySettingsMenu, flatModeMenu, creatorMenu, 
-            removeThemeMenu, bezelMenu
-        ];
-
-        const names    = this.main.themes.names();
-        const props    = this.main.properties.values;
-        const isSpectrum = props.displayMode === 'Spectrum Analyzer';
-
-        const TARGET_STRIDE        = 10;
-        const THEME_MENU_MAX       = Math.min(names.length, MID.LAYOUT_BASE - MID.THEME_BASE);
-        const APPEARANCE_RANGE_END = MID.TOGGLE_BASE + MeterConstants.OPACITY_SLIDER_TARGETS.length * TARGET_STRIDE;
-
-        // Top toggle: Sync Theme Across Panels
-        themeMenu.AppendMenuItem(0, MID.THEME_SYNC, 'Sync Theme');
-        if (props.syncTheme) themeMenu.CheckMenuRadioItem(MID.THEME_SYNC, MID.THEME_SYNC, MID.THEME_SYNC);
-        themeMenu.AppendMenuSeparator();
-
-        // Theme list with separator at index 8 and 20 to match LCD TimerPro
-        let id = MID.THEME_BASE;
-        for (let i = 0; i < THEME_MENU_MAX; i++, id++) {
-            if (i === 8 || i === 20) themeMenu.AppendMenuSeparator();
-            const isCustom = this.main.themes.themeMap.get(names[i])?.custom;
-            themeMenu.AppendMenuItem(0, id, `${names[i]}${isCustom ? '  [custom]' : ''}`);
-        }
-        const activeThemeIdx = names.indexOf(props.theme);
-        if (activeThemeIdx !== -1 && activeThemeIdx < THEME_MENU_MAX) {
-            themeMenu.CheckMenuRadioItem(MID.THEME_BASE, MID.THEME_BASE + THEME_MENU_MAX - 1, MID.THEME_BASE + activeThemeIdx);
-        }
-
-        themeMenu.AppendMenuSeparator();
-        themeCustomMenu.AppendMenuItem(0, MID.THEME_LOAD_FILE, 'Load themes from JSON file…');
-        const hasFile = props.customThemeFile && props.customThemeFile.trim() !== '';
-        themeCustomMenu.AppendMenuItem(hasFile ? 0 : 0x0001, MID.THEME_RELOAD, `Reload from last file${hasFile ? `  (${this.#shortPath(props.customThemeFile)})` : ''}`);
-        themeCustomMenu.AppendMenuSeparator();
-        const hasCustom = this.main.themes.customThemes.length > 0;
-        themeCustomMenu.AppendMenuItem(hasCustom ? 0 : 0x0001, MID.THEME_SAVE_CUSTOM, 'Save custom themes to JSON…');
-        themeCustomMenu.AppendMenuItem(0, MID.THEME_SAVE_ALL, 'Export all themes to JSON…');
-        themeCustomMenu.AppendMenuItem(0, MID.THEME_EXPORT_TEMPLATE, 'Export template (all built-ins)…');
-        themeCustomMenu.AppendMenuSeparator();
-        themeCustomMenu.AppendMenuItem(0, MID.SET_SAVE_PATH, `Set Default Save Path…${hasFile ? `  (${this.#shortPath(props.customThemeFile)})` : ''}`);
-        themeCustomMenu.AppendTo(themeMenu, 0, 'Custom Theme JSON');
-
-        const draftName = this.main.themes.draftTheme.name;
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 1, '1. Set Background Color…');
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 2, '2. Set Inactive Segment Color…');
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 3, '3. Set Active Segment Color…');
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 4, '4. Set Text / Scale Color…');
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 5, '5. Set Warning / Overload Color…');
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 6, '6. Set Peak Marker Color…');
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 7, '7. Set Sub-Peak Zone Color…');
-        creatorMenu.AppendMenuSeparator();
-        creatorMenu.AppendMenuItem(0, MID.THEME_CREATOR_BASE + 8, `Save as Custom Theme…  (draft: "${draftName}")`);
-
-        const customs = this.main.themes.customThemes;
-        if (customs.length) {
-            for (let ci = 0; ci < customs.length; ci++) {
-                removeThemeMenu.AppendMenuItem(0, MID.THEME_REMOVE_CUSTOM_BASE + ci, customs[ci].name);
-            }
-            const activeCustomIdx = customs.findIndex(c => c.name === props.theme);
-            if (activeCustomIdx !== -1) {
-                removeThemeMenu.CheckMenuRadioItem(MID.THEME_REMOVE_CUSTOM_BASE, MID.THEME_REMOVE_CUSTOM_BASE + customs.length - 1, MID.THEME_REMOVE_CUSTOM_BASE + activeCustomIdx);
-            }
-        } else {
-            removeThemeMenu.AppendMenuItem(0x0001, MID.THEME_REMOVE_CUSTOM_BASE, 'No custom themes');
-        }
-        creatorMenu.AppendMenuSeparator();
-        removeThemeMenu.AppendTo(creatorMenu, 0, 'Remove Custom Theme…');
-        creatorMenu.AppendTo(themeMenu, 0, 'Theme Creator');
-
-        for (let i = 0; i < MeterConstants.DISPLAY_MODE_OPTIONS.length; i++) {
-            displayModeMenu.AppendMenuItem(0, MID.DISPLAY_MODE_BASE + i, MeterConstants.DISPLAY_MODE_OPTIONS[i]);
-        }
-        const dmIdx = MeterConstants.DISPLAY_MODE_OPTIONS.indexOf(props.displayMode);
-        if (dmIdx !== -1) {
-            displayModeMenu.CheckMenuRadioItem(MID.DISPLAY_MODE_BASE, MID.DISPLAY_MODE_BASE + MeterConstants.DISPLAY_MODE_OPTIONS.length - 1, MID.DISPLAY_MODE_BASE + dmIdx);
-        }
-
-        for (let i = 0; i < MeterConstants.SPECTRUM_BAR_COUNTS.length; i++) {
-            spectrumBarsMenu.AppendMenuItem(isSpectrum ? 0 : 0x0001, MID.SPECTRUM_BARS_BASE + i, `${MeterConstants.SPECTRUM_BAR_COUNTS[i]} bars`);
-        }
-        const sbIdx = MeterConstants.SPECTRUM_BAR_COUNTS.indexOf(props.spectrumBars);
-        if (sbIdx !== -1) {
-            spectrumBarsMenu.CheckMenuRadioItem(MID.SPECTRUM_BARS_BASE, MID.SPECTRUM_BARS_BASE + MeterConstants.SPECTRUM_BAR_COUNTS.length - 1, MID.SPECTRUM_BARS_BASE + sbIdx);
-        }
-
-        layoutMenu.AppendMenuItem(0, MID.LAYOUT_BASE,     MeterConstants.LAYOUT_OPTIONS[0]);
-        layoutMenu.AppendMenuItem(0, MID.LAYOUT_BASE + 1, MeterConstants.LAYOUT_OPTIONS[1]);
-        const layIdx = MeterConstants.LAYOUT_OPTIONS.indexOf(props.layout);
-        if (layIdx !== -1) {
-            layoutMenu.CheckMenuRadioItem(MID.LAYOUT_BASE, MID.LAYOUT_BASE + 1, MID.LAYOUT_BASE + layIdx);
-        }
-
-        for (let j = 0; j < MeterConstants.SEGMENT_COUNTS.length; j++) {
-            segmentMenu.AppendMenuItem(0, MID.SEGMENT_BASE + j, String(MeterConstants.SEGMENT_COUNTS[j]));
-        }
-        const segIdx = MeterConstants.SEGMENT_COUNTS.indexOf(props.segments);
-        if (segIdx !== -1) {
-            segmentMenu.CheckMenuRadioItem(MID.SEGMENT_BASE, MID.SEGMENT_BASE + MeterConstants.SEGMENT_COUNTS.length - 1, MID.SEGMENT_BASE + segIdx);
-        }
-
-        extraSegMenu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.EXTRA_SEG_BASE,     'None');
-        extraSegMenu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.EXTRA_SEG_BASE + 1, '+1 dB');
-        extraSegMenu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.EXTRA_SEG_BASE + 2, '+1 dB  –  +2 dB');
-        extraSegMenu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.EXTRA_SEG_BASE + 3, '+1 dB  –  +2 dB  –  +3 dB');
-        extraSegMenu.CheckMenuRadioItem(MID.EXTRA_SEG_BASE, MID.EXTRA_SEG_BASE + 3, MID.EXTRA_SEG_BASE + GdiUtils.clamp(props.extraSegments || 0, 0, 3));
-
-        for (let k = 0; k < MeterConstants.METER_MODE_OPTIONS.length; k++) {
-            modeMenu.AppendMenuItem(0, MID.MODE_BASE + k, MeterConstants.METER_MODE_OPTIONS[k]);
-        }
-        const mmIdx = MeterConstants.METER_MODE_OPTIONS.indexOf(props.meterMode);
-        if (mmIdx !== -1) {
-            modeMenu.CheckMenuRadioItem(MID.MODE_BASE, MID.MODE_BASE + MeterConstants.METER_MODE_OPTIONS.length - 1, MID.MODE_BASE + mmIdx);
-        }
-
-        for (let m = 0; m < MeterConstants.SPEED_OPTIONS.length; m++) {
-            attackMenu.AppendMenuItem(0, MID.ATTACK_BASE + m, MeterConstants.SPEED_OPTIONS[m]);
-        }
-        const attIdx = MeterConstants.SPEED_OPTIONS.indexOf(props.attack);
-        if (attIdx !== -1) {
-            attackMenu.CheckMenuRadioItem(MID.ATTACK_BASE, MID.ATTACK_BASE + MeterConstants.SPEED_OPTIONS.length - 1, MID.ATTACK_BASE + attIdx);
-        }
-
-        for (let n = 0; n < MeterConstants.SPEED_OPTIONS.length; n++) {
-            releaseMenu.AppendMenuItem(0, MID.RELEASE_BASE + n, MeterConstants.SPEED_OPTIONS[n]);
-        }
-        const relIdx = MeterConstants.SPEED_OPTIONS.indexOf(props.release);
-        if (relIdx !== -1) {
-            releaseMenu.CheckMenuRadioItem(MID.RELEASE_BASE, MID.RELEASE_BASE + MeterConstants.SPEED_OPTIONS.length - 1, MID.RELEASE_BASE + relIdx);
-        }
-
-        const pct = (v) => `${Math.round((v / 255) * 100)}%`;
-        const labels = { 
-            Glow: 'LCD Glow', 
-            Phosphor: 'Phosphor Mask', 
-            Scanlines: 'Scanlines', 
-            Reflection: 'LCD Reflection', 
-            OnSegments: 'On Segments', 
-            OffSegments: 'Off Segments' 
-        };
-
-        const bezelFolder = String(props.bezelFolder || '');
-        const bezelNames = this.main.listBezelNames();
-        const hasBezelFolder = bezelFolder && bezelFolder.trim() !== '';
-        const bezelStart = MID.BEZEL_START;
-        const bezelEnd = bezelNames.length > 0 ? (bezelStart + bezelNames.length) : bezelStart;
-        
-        bezelMenu.AppendMenuItem(0, MID.BEZEL_ENABLE, 'Enable Bezel / Overlay');
-        if (props.bezelEnabled) bezelMenu.CheckMenuRadioItem(MID.BEZEL_ENABLE, MID.BEZEL_ENABLE, MID.BEZEL_ENABLE);
-        bezelMenu.AppendMenuSeparator();
-        
-        bezelMenu.AppendMenuItem(0, bezelStart, 'None (No Bezel)');
-        if (bezelNames.length > 0) {
-            for (let i = 0; i < bezelNames.length; i++) {
-                bezelMenu.AppendMenuItem(0, bezelStart + 1 + i, bezelNames[i]);
-            }
-        }
-        
-        const curFileClean = (props.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
-        const currentIdx = (props.bezelEnabled && curFileClean) 
-            ? bezelNames.findIndex(n => n.toLowerCase().replace(/\.[^/.]+$/, '') === curFileClean) 
-            : -1;
-        const checkedIdx = currentIdx >= 0 ? (bezelStart + 1 + currentIdx) : bezelStart;
-        bezelMenu.CheckMenuRadioItem(bezelStart, bezelEnd, checkedIdx);
-
-        bezelMenu.AppendMenuSeparator();
-        bezelMenu.AppendMenuItem(0, MID.BEZEL_FOLDER, `Set Bezel Folder…${hasBezelFolder ? `  (${this.#shortPath(bezelFolder)})` : ''}`);
-        bezelMenu.AppendMenuItem(0, MID.BEZEL_RELOAD, 'Reload Bezel List');
-        bezelMenu.AppendMenuSeparator();
-        bezelMenu.AppendMenuItem(0, MID.PAD_LEFT, `Left padding…  (${props.padLeft}px)`);
-        bezelMenu.AppendMenuItem(0, MID.PAD_RIGHT, `Right padding…  (${props.padRight}px)`);
-        bezelMenu.AppendMenuItem(0, MID.PAD_TOP, `Top padding…  (${props.padTop}px)`);
-        bezelMenu.AppendMenuItem(0, MID.PAD_BOTTOM, `Bottom padding…  (${props.padBottom}px)`);
-        bezelMenu.AppendTo(appearanceMenu, 0, 'Bezel / Overlay');
-        overlaySettingsMenu.AppendTo(appearanceMenu, 0, 'Overlay Settings');
-
-        MeterConstants.OPACITY_SLIDER_TARGETS.forEach((target, i) => {
-            if (i >= 4) return;
-            const toggleId = MID.TOGGLE_BASE + i * TARGET_STRIDE;
-            const adjustId = MID.ADJUST_BASE + i * TARGET_STRIDE;
-            const toggleKey = MeterConstants.OPACITY_TOGGLE_KEYS[target];
-            const opacity = props[MeterConstants.OPACITY_VALUE_KEYS[target]];
-            if (i > 0) overlaySettingsMenu.AppendMenuSeparator();
-            if (toggleKey) {
-                overlaySettingsMenu.AppendMenuItem(0, toggleId, labels[target]);
-                if (props[toggleKey]) overlaySettingsMenu.CheckMenuRadioItem(toggleId, toggleId, toggleId);
-            }
-            overlaySettingsMenu.AppendMenuItem(0, adjustId, `Adjust ${labels[target]} Opacity...  (${pct(opacity)})`);
-        });
-
-        appearanceMenu.AppendMenuSeparator();
-        for (let idx = 4; idx < MeterConstants.OPACITY_SLIDER_TARGETS.length; idx++) {
-            const target = MeterConstants.OPACITY_SLIDER_TARGETS[idx];
-            const adjustId = MID.ADJUST_BASE + idx * TARGET_STRIDE;
-            const opacity = props[MeterConstants.OPACITY_VALUE_KEYS[target]];
-            appearanceMenu.AppendMenuItem(0, adjustId, `Adjust ${labels[target]} Opacity...  (${pct(opacity)})`);
-        }
-
-        appearanceMenu.AppendMenuSeparator();
-        appearanceMenu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.SHOW_MARKERS, 'Show dB scale && L/R labels');
-        if (props.showMarkers) appearanceMenu.CheckMenuRadioItem(MID.SHOW_MARKERS, MID.SHOW_MARKERS, MID.SHOW_MARKERS);
-        appearanceMenu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.MARKER_BORDER_SIZE, `Set marker border size…  (${props.markerBorderSize}px)`);
-        appearanceMenu.AppendMenuItem(0, MID.PANEL_PAD, `Set panel padding…  (${props.panelPad}px)`);
-
-        flatModeMenu.AppendMenuItem(0, MID.FLAT_ENABLE, 'Enable Flat Mode');
-        if (props.flatMode) flatModeMenu.CheckMenuRadioItem(MID.FLAT_ENABLE, MID.FLAT_ENABLE, MID.FLAT_ENABLE);
-        flatModeMenu.AppendMenuSeparator();
-        const fillFlag = props.flatMode ? 0 : 0x0001;
-        flatModeMenu.AppendMenuItem(fillFlag, MID.FLAT_SOLID, 'Solid Fill  (no gradient)');
-        flatModeMenu.AppendMenuItem(fillFlag, MID.FLAT_STRIP, 'Gradient Fill  (LED strip)');
-        flatModeMenu.AppendMenuItem(fillFlag, MID.FLAT_CROSS, 'Gradient Fill  (cross full)');
-        flatModeMenu.AppendMenuItem(fillFlag, MID.FLAT_CROSS_VARIANT, 'Gradient Fill  (cross full variant)');
-        flatModeMenu.AppendMenuItem(fillFlag, MID.FLAT_CROSS_BLEND, 'Gradient Fill  (cross blend)');
-        flatModeMenu.AppendMenuItem(fillFlag, MID.FLAT_FULL, 'Gradient Fill  (full gradient)');
-        if (props.flatMode) {
-            flatModeMenu.CheckMenuRadioItem(MID.FLAT_SOLID, MID.FLAT_FULL, MID.FLAT_SOLID + GdiUtils.clamp(props.flatGradient, 0, MeterConstants.GRADIENT_STYLE_MAX));
-        }
-
-        for (let q = 0; q < MeterConstants.QUALITY_PRESET_OPTIONS.length; q++) {
-            qualityMenu.AppendMenuItem(0, MID.QUALITY_BASE + q, MeterConstants.QUALITY_PRESET_OPTIONS[q]);
-        }
-        const qualityIdx = MeterConstants.QUALITY_PRESET_OPTIONS.indexOf(props.qualityPreset);
-        if (qualityIdx !== -1) {
-            qualityMenu.CheckMenuRadioItem(MID.QUALITY_BASE, MID.QUALITY_BASE + MeterConstants.QUALITY_PRESET_OPTIONS.length - 1, MID.QUALITY_BASE + qualityIdx);
-        }
-
-        for (let mr = 0; mr < MeterConstants.METER_RANGE_OPTIONS.length; mr++) {
-            rangeMenu.AppendMenuItem(0, MID.RANGE_BASE + mr, `${MeterConstants.METER_RANGE_OPTIONS[mr]} dB to 0 dB`);
-        }
-        const rangeIdx = MeterConstants.METER_RANGE_OPTIONS.indexOf(props.meterRange);
-        if (rangeIdx !== -1) {
-            rangeMenu.CheckMenuRadioItem(MID.RANGE_BASE, MID.RANGE_BASE + MeterConstants.METER_RANGE_OPTIONS.length - 1, MID.RANGE_BASE + rangeIdx);
-        }
-
-        themeMenu.AppendTo(menu, 0, 'Theme');
-        displayModeMenu.AppendTo(menu, 0, 'Display Mode');
-        qualityMenu.AppendTo(menu, 0, 'Quality preset');
-        layoutMenu.AppendTo(menu, 0, 'Layout');
-        spectrumBarsMenu.AppendTo(menu, isSpectrum ? 0 : 0x0001, 'Spectrum Bars');
-        segmentMenu.AppendTo(menu, props.flatMode ? 0x0001 : 0, 'Segment count');
-        menu.AppendMenuSeparator();
-        appearanceMenu.AppendTo(menu, 0, 'Appearance');
-        extraSegMenu.AppendTo(menu, (props.flatMode || isSpectrum) ? 0x0001 : 0, 'Over-range segments');
-        flatModeMenu.AppendTo(menu, 0, 'Flat Mode');
-        menu.AppendMenuSeparator();
-        modeMenu.AppendTo(menu, isSpectrum ? 0x0001 : 0, 'Meter mode');
-        rangeMenu.AppendTo(menu, isSpectrum ? 0x0001 : 0, 'Meter range (0 dB ceiling)');
-        attackMenu.AppendTo(menu, 0, 'Attack');
-        releaseMenu.AppendTo(menu, 0, 'Release');
-
-        menu.AppendMenuItem(0, MID.PROFILER, 'Performance Monitor');
-        if (props.profiler) menu.CheckMenuRadioItem(MID.PROFILER, MID.PROFILER, MID.PROFILER);
-
-        menu.AppendMenuItem(0, MID.PEAK_HOLD, 'Peak hold');
-        if (props.peakHold) menu.CheckMenuRadioItem(MID.PEAK_HOLD, MID.PEAK_HOLD, MID.PEAK_HOLD);
-        menu.AppendMenuItem(isSpectrum ? 0x0001 : 0, MID.PEAK_HOLD_TIME, `Peak hold time…  (${(props.peakHoldMs / 1000).toFixed(1)} s)`);
-
-        menu.AppendMenuSeparator();
-        menu.AppendMenuItem(0, MID.STATUS, 'About / Status…');
-        menu.AppendMenuItem(0, MID.RESET, 'Reset Visual Settings to Defaults');
-        menu.AppendMenuItem(0, MID.FACTORY_RESET, 'Factory Reset (All Settings & Themes)...');
-
-        let selected = 0;
-        try {
-            selected = menu.TrackPopupMenu(x, y);
-        } finally {
-            allMenus.forEach(m => { try { if (m) m.Dispose(); } catch {} });
-        }
-
-        if (selected === 0) return true;
-
-        if (selected === MID.THEME_SYNC) {
-            const nextSync = !props.syncTheme;
-            this.main.properties.set('syncTheme', nextSync);
-            if (nextSync) {
-                try { window.NotifyOthers('LcdThemeSync', props.theme); } catch {}
-            }
-        } else if (selected >= MID.THEME_BASE && selected < MID.THEME_BASE + THEME_MENU_MAX) {
-            const chosenTheme = names[selected - MID.THEME_BASE];
-            this.main.themes.clearPreview();
-            this.main.properties.setTheme(chosenTheme);
-            this.main.invalidateCaches({ background: true, effect: true, foreground: true, spectrum: true });
-            if (this.main.properties.values.syncTheme) {
-                try { window.NotifyOthers('LcdThemeSync', chosenTheme); } catch {}
-            }
-
-        } else if (selected === MID.LAYOUT_BASE) {
-            this.main.properties.set('layout', MeterConstants.LAYOUT_OPTIONS[0]);
-            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
-        } else if (selected === MID.LAYOUT_BASE + 1) {
-            this.main.properties.set('layout', MeterConstants.LAYOUT_OPTIONS[1]);
-            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
-
-        } else if (selected >= MID.SEGMENT_BASE && selected < MID.SEGMENT_BASE + MeterConstants.SEGMENT_COUNTS.length) {
-            this.main.properties.set('segments', MeterConstants.SEGMENT_COUNTS[selected - MID.SEGMENT_BASE]);
-            this.main.invalidateCaches({ geometry: true, background: true, foreground: true, spectrum: true });
-
-        } else if (selected >= MID.EXTRA_SEG_BASE && selected <= MID.EXTRA_SEG_BASE + MeterConstants.EXTRA_SEGMENT_MAX) {
-            this.main.properties.set('extraSegments', selected - MID.EXTRA_SEG_BASE);
-            this.main.invalidateCaches({ geometry: true, background: true, foreground: true });
-            this.main.left.reset();
-            this.main.right.reset();
-
-        } else if (selected === MID.PROFILER) {
-            this.main.properties.set('profiler', !props.profiler);
-            this.main.performance.setEnabled(this.main.properties.values.profiler);
-
-        } else if (selected === MID.PEAK_HOLD) {
-            this.main.properties.set('peakHold', !props.peakHold);
-
-        } else if (selected === MID.RESET) {
-            this.main.properties.resetVisuals();
-            this.main.properties.lastFinalizedTheme = this.main.properties.values.theme;
-            this.main.properties.extraSegmentsPreFlat = 0;
-            this.main.opacitySliderTarget = null;
-            this.main.themes.clearPreview();
-            this.main.loadBezel();
-            this.main.performance.setEnabled(this.main.properties.values.profiler);
-            this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
-            this.main.spectrumAnalyzer.setFftSize(MeterConstants.SPECTRUM_FFT_SIZE);
-            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
-            this.main.left.reset();
-            this.main.right.reset();
-            this.main.resetStateTrackers();
-
-        } else if (selected === MID.FACTORY_RESET) {
-            const confirm = GdiUtils.prompt('Type YES to perform a full factory reset (resets all themes, overlays, and paths):', 'Confirm Factory Reset', '');
-            if (confirm?.toUpperCase() === 'YES') {
-                for (const ct of [...this.main.themes.customThemes]) {
-                    this.main.themes.removeCustom(ct.name);
-                }
-                this.main.properties.resetAll();
-                this.main.properties.lastFinalizedTheme = this.main.properties.values.theme;
-                this.main.properties.extraSegmentsPreFlat = 0;
-                this.main.opacitySliderTarget = null;
-                this.main.themes.clearPreview();
-                this.main.invalidateBezelCache();
-                this.main.loadBezel();
-                this.main.performance.setEnabled(this.main.properties.values.profiler);
-                this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
-                this.main.spectrumAnalyzer.setFftSize(MeterConstants.SPECTRUM_FFT_SIZE);
-                this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
-                this.main.left.reset();
-                this.main.right.reset();
-                this.main.resetStateTrackers();
-            }
-
-        } else if (selected === MID.FLAT_ENABLE) {
-            const turningOn = !props.flatMode;
-            this.main.properties.set('flatMode', turningOn);
-            if (turningOn) {
-                this.main.properties.extraSegmentsPreFlat = props.extraSegments;
-                if (props.extraSegments !== 0) {
-                    this.main.properties.set('extraSegments', 0);
-                    this.main.left.reset();
-                    this.main.right.reset();
-                }
-            } else {
-                const restore = this.main.properties.extraSegmentsPreFlat || 0;
-                if (restore !== 0) {
-                    this.main.properties.set('extraSegments', restore);
-                    this.main.left.reset();
-                    this.main.right.reset();
-                }
-                this.main.properties.extraSegmentsPreFlat = 0;
-            }
-            this.main.invalidateCaches({ geometry: true, background: true, foreground: true, spectrum: true });
-        } else if (selected >= MID.FLAT_SOLID && selected <= MID.FLAT_FULL) {
-            this.main.properties.set('flatGradient', selected - MID.FLAT_SOLID);
-            this.main.invalidateCaches({ background: true, foreground: true, spectrum: true });
-
-        } else if (selected === MID.SHOW_MARKERS) {
-            this.main.properties.set('showMarkers', !props.showMarkers);
-            this.main.invalidateCaches({ geometry: true, background: true, effect: true });
-        } else if (selected === MID.MARKER_BORDER_SIZE) {
-            const val = GdiUtils.prompt(`Enter marker border size in pixels (${MARKER_AREA_MIN}–${MARKER_AREA_MAX}):`, 'Marker Border Size', String(props.markerBorderSize));
-            if (val !== null && val !== '') {
-                const n = GdiUtils.clamp(parseInt(val, 10), MARKER_AREA_MIN, MARKER_AREA_MAX);
-                if (!isNaN(n)) {
-                    this.main.properties.set('markerBorderSize', n);
-                    this.main.invalidateCaches({ geometry: true, background: true, effect: true });
-                }
-            }
-
-        } else if (selected === MID.PANEL_PAD) {
-            const val = GdiUtils.prompt(`Enter panel padding in pixels (${PANEL_PAD_MIN}–${PANEL_PAD_MAX}):`, 'Panel Padding', String(props.panelPad));
-            if (val !== null && val !== '') {
-                const n = GdiUtils.clamp(parseInt(val, 10), PANEL_PAD_MIN, PANEL_PAD_MAX);
-                if (!isNaN(n)) {
-                    this.main.properties.set('panelPad', n);
-                    this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true });
-                }
-            }
-
-        } else if (selected === MID.PAD_LEFT || selected === MID.PAD_RIGHT || selected === MID.PAD_TOP || selected === MID.PAD_BOTTOM) {
-            const padKey = { [MID.PAD_LEFT]: 'padLeft', [MID.PAD_RIGHT]: 'padRight', [MID.PAD_TOP]: 'padTop', [MID.PAD_BOTTOM]: 'padBottom' }[selected];
-            const val = GdiUtils.prompt('Enter padding in pixels (0–100):', 'Per-Side Padding', String(props[padKey]));
-            if (val !== null && val !== '') {
-                const n = GdiUtils.clamp(parseInt(val, 10) || 0, 0, scaleDpi(100));
-                if (!isNaN(n)) {
-                    this.main.properties.set(padKey, n);
-                    this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, foreground: true, effect: true });
-                    this.main.invalidate();
-                }
-            }
-
-        } else if (selected === MID.BEZEL_ENABLE) {
-            this.main.properties.set('bezelEnabled', !props.bezelEnabled);
-            if (this.main.properties.values.bezelEnabled && !this.main.properties.values.bezelFile && bezelNames.length > 0) {
-                this.main.properties.set('bezelFile', bezelNames[0]);
-            }
-            this.main.loadBezel();
-            this.main.invalidate();
-
-        } else if (selected === MID.BEZEL_FOLDER) {
-            const path = GdiUtils.prompt('Enter folder path containing bezel images:', 'Set Bezel Folder', this.main.properties.values.bezelFolder || (`${PROFILE_BASE}skins\\overlay`));
-            if (path) {
-                const cleaned = GdiUtils.sanitizePath(path);
-                if (cleaned && utils.IsDirectory(cleaned)) {
-                    this.main.properties.set('bezelFolder', cleaned, true);
-                    this.main.invalidateBezelCache();
-                    this.main.properties.set('bezelEnabled', false, true);
-                    this.main.properties.set('bezelFile', '', true);
-                    this.main.loadBezel();
-                    this.main.invalidate();
-                }
-            }
-
-        } else if (selected === MID.BEZEL_RELOAD) {
-            this.main.invalidateBezelCache();
-            this.main.getBezelImages(true);
-            this.main.loadBezel();
-            this.main.invalidate();
-
-        } else if (selected >= MID.BEZEL_START && selected <= MID.BEZEL_START + bezelNames.length) {
-            if (selected === MID.BEZEL_START) {
-                this.main.properties.set('bezelEnabled', false);
-                this.main.properties.set('bezelFile', '');
-            } else {
-                const choice = bezelNames[selected - MID.BEZEL_START - 1];
-                if (choice !== undefined) {
-                    this.main.properties.set('bezelEnabled', true);
-                    this.main.properties.set('bezelFile', choice);
-                }
-            }
-            this.main.loadBezel();
-            this.main.invalidate();
-
-        } else if (selected >= MID.MODE_BASE && selected < MID.MODE_BASE + MeterConstants.METER_MODE_OPTIONS.length) {
-            this.main.properties.set('meterMode', MeterConstants.METER_MODE_OPTIONS[selected - MID.MODE_BASE]);
-
-        } else if (selected >= MID.ATTACK_BASE && selected < MID.ATTACK_BASE + MeterConstants.SPEED_OPTIONS.length) {
-            this.main.properties.set('attack', MeterConstants.SPEED_OPTIONS[selected - MID.ATTACK_BASE]);
-        } else if (selected >= MID.RELEASE_BASE && selected < MID.RELEASE_BASE + MeterConstants.SPEED_OPTIONS.length) {
-            this.main.properties.set('release', MeterConstants.SPEED_OPTIONS[selected - MID.RELEASE_BASE]);
-
-        } else if (selected >= MID.DISPLAY_MODE_BASE && selected < MID.DISPLAY_MODE_BASE + MeterConstants.DISPLAY_MODE_OPTIONS.length) {
-            const newMode = MeterConstants.DISPLAY_MODE_OPTIONS[selected - MID.DISPLAY_MODE_BASE];
-            this.main.properties.set('displayMode', newMode);
-            const newLayout = (newMode === 'Peak Meter') ? 'Horizontal' : 'Vertical';
-            this.main.properties.set('layout', newLayout);
-            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
-
-        } else if (selected >= MID.QUALITY_BASE && selected < MID.QUALITY_BASE + MeterConstants.QUALITY_PRESET_OPTIONS.length) {
-            this.main.properties.applyQualityPreset(MeterConstants.QUALITY_PRESET_OPTIONS[selected - MID.QUALITY_BASE]);
-            this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
-            this.main.left.reset();
-            this.main.right.reset();
-            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, foreground: true, effect: true });
-
-        } else if (selected >= MID.RANGE_BASE && selected < MID.RANGE_BASE + MeterConstants.METER_RANGE_OPTIONS.length) {
-            this.main.properties.set('meterRange', MeterConstants.METER_RANGE_OPTIONS[selected - MID.RANGE_BASE]);
-            this.main.properties.set('extraSegments', 0);
-            this.main.invalidateCaches({ geometry: true, background: true, foreground: true });
-            this.main.left.reset();
-            this.main.right.reset();
-
-        } else if (selected === MID.PEAK_HOLD_TIME) {
-            const value = GdiUtils.prompt(`Enter peak-hold time in milliseconds (${MeterConstants.PEAK_HOLD_MIN_MS}–${MeterConstants.PEAK_HOLD_MAX_MS}):`, 'Peak Hold Time', String(props.peakHoldMs));
-            if (value !== null && value !== '') {
-                const ms = GdiUtils.clamp(Math.round(Number(value)), MeterConstants.PEAK_HOLD_MIN_MS, MeterConstants.PEAK_HOLD_MAX_MS);
-                if (isFinite(ms)) this.main.properties.set('peakHoldMs', ms);
-            }
-
-        } else if (selected === MID.STATUS) {
-            const mode = props.displayMode === 'Spectrum Analyzer' ? 'Spectrum Analyzer' : (`${props.meterMode} Peak Meter`);
-            const audio = HAS_AUDIO_CHUNK ? 'Available (SMP x64)' : 'Unavailable — requires fb.GetAudioChunk.';
-            fb.ShowPopupMessage(
-                `${MeterConstants.SCRIPT_NAME} v${MeterConstants.VERSION}\n\n` +
-                `Audio capture: ${audio}\n` +
-                `Display mode: ${mode}\n` +
-                `Quality preset: ${props.qualityPreset}\n` +
-                `Meter range: ${props.meterRange} dB to 0 dB\n` +
-                `Peak hold: ${(props.peakHoldMs / 1000).toFixed(1)} s\n` +
-                `Panel size: ${this.main.width} × ${this.main.height} px (DPI: ${SYSTEM_DPI})\n` +
-                `Theme: ${props.theme}`,
-                MeterConstants.SCRIPT_NAME
-            );
-
-        } else if (selected >= MID.SPECTRUM_BARS_BASE && selected < MID.SPECTRUM_BARS_BASE + MeterConstants.SPECTRUM_BAR_COUNTS.length) {
-            const val = MeterConstants.SPECTRUM_BAR_COUNTS[selected - MID.SPECTRUM_BARS_BASE];
-            this.main.properties.set('spectrumBars', val);
-            this.main.spectrumAnalyzer.setBarCount(val);
-
-        } else if (selected >= MID.TOGGLE_BASE && selected < APPEARANCE_RANGE_END) {
-            const offset = selected - MID.TOGGLE_BASE;
-            const targetIdx = Math.floor(offset / TARGET_STRIDE);
-            const withinTarget = offset % TARGET_STRIDE;
-            if (targetIdx >= 0 && targetIdx < MeterConstants.OPACITY_SLIDER_TARGETS.length) {
-                const target = MeterConstants.OPACITY_SLIDER_TARGETS[targetIdx];
-                if (withinTarget === 0) {
-                    const key = MeterConstants.OPACITY_TOGGLE_KEYS[target];
-                    if (key) this.main.properties.set(key, !this.main.properties.values[key]);
-                } else if (withinTarget === (MID.ADJUST_BASE - MID.TOGGLE_BASE)) {
-                    this.main.opacitySliderTarget = target;
-                }
-                if (target === 'OffSegments' || target === 'OnSegments') {
-                    this.main.invalidateCaches({ background: true, foreground: true, spectrum: true });
-                } else if (target === 'Phosphor' || target === 'Scanlines' || target === 'Reflection') {
-                    this.main.invalidateCaches({ effect: true });
-                }
-            }
-
-        } else if (selected === MID.THEME_LOAD_FILE) {
-            this.#doLoadThemeFile();
-        } else if (selected === MID.THEME_RELOAD) {
-            this.#doReloadThemeFile();
-        } else if (selected === MID.THEME_SAVE_CUSTOM) {
-            this.#doSaveThemes(null);
-        } else if (selected === MID.THEME_SAVE_ALL) {
-            this.#doSaveThemes('*');
-        } else if (selected === MID.THEME_EXPORT_TEMPLATE) {
-            this.#doExportTemplate();
-        } else if (selected === MID.SET_SAVE_PATH) {
-            this.#doSetDefaultSavePath();
-
-        } else if (selected === MID.THEME_CREATOR_BASE + 1) {
-            this.#doColorPicker('Background', 'background');
-        } else if (selected === MID.THEME_CREATOR_BASE + 2) {
-            this.#doColorPicker('Inactive Segment', 'inactive');
-        } else if (selected === MID.THEME_CREATOR_BASE + 3) {
-            this.#doColorPicker('Active Segment', 'active');
-        } else if (selected === MID.THEME_CREATOR_BASE + 4) {
-            this.#doColorPicker('Text / Scale', 'text');
-        } else if (selected === MID.THEME_CREATOR_BASE + 5) {
-            this.#doColorPicker('Warning / Overload', 'warning');
-        } else if (selected === MID.THEME_CREATOR_BASE + 6) {
-            this.#doColorPicker('Peak Marker', 'peak');
-        } else if (selected === MID.THEME_CREATOR_BASE + 7) {
-            this.#doColorPicker('Sub-Peak Zone', 'subPeak');
-        } else if (selected === MID.THEME_CREATOR_BASE + 8) {
-            this.#doFinalizeTheme();
-        } else if (selected >= MID.THEME_REMOVE_CUSTOM_BASE && selected < MID.THEME_REMOVE_CUSTOM_BASE + this.main.themes.customThemes.length) {
-            const target = this.main.themes.customThemes[selected - MID.THEME_REMOVE_CUSTOM_BASE];
-            if (target) this.#doRemoveCustomTheme(target.name);
-        }
-
-        if (selected) this.main.invalidate();
-        return true;
     }
 
     #shortPath(p) {
@@ -3409,6 +2798,461 @@ class MenuManager {
             fb.ShowPopupMessage(`Export failed:\n\n${result.error || 'Unknown error'}`, MeterConstants.SCRIPT_NAME);
         }
     }
+
+    show(x, y, mask) {
+        if (panelState !== MeterConstants.LIFECYCLE.LIVE) return false;
+        if (mask & 4) return false;
+
+        if (this.main.opacitySliderTarget) {
+            this.main.opacitySliderTarget = null;
+            this.main.invalidate();
+        }
+        this.#ensureDraftSeeded();
+
+        const names      = this.main.themes.names();
+        const props      = this.main.properties.values;
+        const isSpectrum = props.displayMode === 'Spectrum Analyzer';
+        const hasFile    = Boolean(props.customThemeFile && props.customThemeFile.trim() !== '');
+        const hasCustom  = this.main.themes.customThemes.length > 0;
+        const pct        = (v) => `${Math.round((v / 255) * 100)}%`;
+
+        const labels = {
+            Glow:        'LCD Glow',
+            Phosphor:    'Phosphor Mask',
+            Scanlines:   'Scanlines',
+            Reflection:  'LCD Reflection',
+            OnSegments:  'On Segments',
+            OffSegments: 'Off Segments'
+        };
+
+        const menu = new MenuBuilder();
+
+        // 1. Theme
+        menu.addSubMenu('Theme', (themeMenu) => {
+            themeMenu.addItem('Sync Theme', () => {
+                const nextSync = !props.syncTheme;
+                this.main.properties.set('syncTheme', nextSync);
+                if (nextSync) {
+                    try { window.NotifyOthers('LcdThemeSync', props.theme); } catch {}
+                }
+            }, { checked: props.syncTheme });
+            themeMenu.addSeparator();
+
+            names.forEach((name, i) => {
+                if (i === 8 || i === 20) themeMenu.addSeparator();
+                const isCustom = this.main.themes.themeMap.get(name)?.custom;
+                themeMenu.addItem(`${GdiUtils.escapeMenuLabel(name)}${isCustom ? '  [custom]' : ''}`, () => {
+                    this.main.themes.clearPreview();
+                    this.main.properties.setTheme(name, this.main.themes);
+                    this.main.invalidateCaches({ background: true, effect: true, foreground: true, spectrum: true });
+                    if (this.main.properties.values.syncTheme) {
+                        try { window.NotifyOthers('LcdThemeSync', name); } catch {}
+                    }
+                }, { radio: props.theme === name });
+            });
+
+            themeMenu.addSeparator();
+            themeMenu.addSubMenu('Custom Theme JSON', (themeCustomMenu) => {
+                const safeThemeShort = GdiUtils.escapeMenuLabel(this.#shortPath(props.customThemeFile));
+                themeCustomMenu.addItem('Load themes from JSON file…', () => this.#doLoadThemeFile());
+                themeCustomMenu.addItem(`Reload from last file${hasFile ? `  (${safeThemeShort})` : ''}`, () => this.#doReloadThemeFile(), { disabled: !hasFile });
+                themeCustomMenu.addSeparator();
+                themeCustomMenu.addItem('Save custom themes to JSON…', () => this.#doSaveThemes(null), { disabled: !hasCustom });
+                themeCustomMenu.addItem('Export all themes to JSON…', () => this.#doSaveThemes('*'));
+                themeCustomMenu.addItem('Export template (all built-ins)…', () => this.#doExportTemplate());
+                themeCustomMenu.addSeparator();
+                themeCustomMenu.addItem(`Set Default Save Path…${hasFile ? `  (${safeThemeShort})` : ''}`, () => this.#doSetDefaultSavePath());
+            });
+
+            themeMenu.addSubMenu('Theme Creator', (creatorMenu) => {
+                const draftName = GdiUtils.escapeMenuLabel(this.main.themes.draftTheme.name);
+                const steps = [
+                    ['1. Set Background Color…',         'Background',         'background'],
+                    ['2. Set Inactive Segment Color…',   'Inactive Segment',   'inactive'],
+                    ['3. Set Active Segment Color…',     'Active Segment',     'active'],
+                    ['4. Set Text / Scale Color…',       'Text / Scale',       'text'],
+                    ['5. Set Warning / Overload Color…', 'Warning / Overload', 'warning'],
+                    ['6. Set Peak Marker Color…',        'Peak Marker',        'peak'],
+                    ['7. Set Sub-Peak Zone Color…',      'Sub-Peak Zone',      'subPeak']
+                ];
+                for (const [menuLabel, pickerLabel, key] of steps) {
+                    creatorMenu.addItem(menuLabel, () => this.#doColorPicker(pickerLabel, key));
+                }
+                creatorMenu.addSeparator();
+                creatorMenu.addItem(`Save as Custom Theme…  (draft: "${draftName}")`, () => this.#doFinalizeTheme());
+                creatorMenu.addSeparator();
+
+                creatorMenu.addSubMenu('Remove Custom Theme…', (removeThemeMenu) => {
+                    const customs = this.main.themes.customThemes;
+                    if (customs.length) {
+                        for (const ct of customs) {
+                            removeThemeMenu.addItem(GdiUtils.escapeMenuLabel(ct.name), () => this.#doRemoveCustomTheme(ct.name), { radio: ct.name === props.theme });
+                        }
+                    } else {
+                        removeThemeMenu.addItem('No custom themes', null, { disabled: true });
+                    }
+                });
+            });
+        });
+
+        // 2. Display Mode
+        menu.addSubMenu('Display Mode', (displayModeMenu) => {
+            for (const mode of MeterConstants.DISPLAY_MODE_OPTIONS) {
+                displayModeMenu.addItem(mode, () => {
+                    this.main.properties.set('displayMode', mode);
+                    this.main.properties.set('layout', mode === 'Peak Meter' ? 'Horizontal' : 'Vertical');
+                    this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
+                    this.main.ensureTimer();
+                }, { radio: props.displayMode === mode });
+            }
+        });
+
+        // 3. Quality preset
+        menu.addSubMenu('Quality preset', (qualityMenu) => {
+            for (const q of MeterConstants.QUALITY_PRESET_OPTIONS) {
+                qualityMenu.addItem(q, () => {
+                    this.main.properties.applyQualityPreset(q);
+                    this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
+                    this.main.left.reset();
+                    this.main.right.reset();
+                    this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, foreground: true, effect: true });
+                }, { radio: props.qualityPreset === q });
+            }
+        });
+
+        // 4. Layout
+        menu.addSubMenu('Layout', (layoutMenu) => {
+            for (const lay of MeterConstants.LAYOUT_OPTIONS) {
+                layoutMenu.addItem(lay, () => {
+                    this.main.properties.set('layout', lay);
+                    this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
+                }, { radio: props.layout === lay });
+            }
+        });
+
+        // 5. Spectrum Bars
+        menu.addSubMenu('Spectrum Bars', (spectrumBarsMenu) => {
+            for (const cnt of MeterConstants.SPECTRUM_BAR_COUNTS) {
+                spectrumBarsMenu.addItem(`${cnt} bars`, () => {
+                    this.main.properties.set('spectrumBars', cnt);
+                    this.main.spectrumAnalyzer.setBarCount(cnt);
+                }, { radio: props.spectrumBars === cnt, disabled: !isSpectrum });
+            }
+        }, !isSpectrum);
+
+        // 6. Segment count
+        menu.addSubMenu('Segment count', (segmentMenu) => {
+            for (const seg of MeterConstants.SEGMENT_COUNTS) {
+                segmentMenu.addItem(String(seg), () => {
+                    this.main.properties.set('segments', seg);
+                    this.main.invalidateCaches({ geometry: true, background: true, foreground: true, spectrum: true });
+                }, { radio: props.segments === seg });
+            }
+        }, props.flatMode);
+
+        menu.addSeparator();
+
+        // 7. Appearance
+        menu.addSubMenu('Appearance', (appearanceMenu) => {
+            appearanceMenu.addSubMenu('Bezel / Overlay', (bezelMenu) => {
+                const bezelFolder = String(props.bezelFolder || '');
+                const bezelNames = this.main.listBezelNames();
+                const hasBezelFolder = Boolean(bezelFolder && bezelFolder.trim() !== '');
+                const curFileClean = (props.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
+                const currentIdx = (props.bezelEnabled && curFileClean)
+                    ? bezelNames.findIndex(n => n.toLowerCase().replace(/\.[^/.]+$/, '') === curFileClean)
+                    : -1;
+
+                bezelMenu.addItem('Enable Bezel / Overlay', () => {
+                    this.main.properties.set('bezelEnabled', !props.bezelEnabled);
+                    if (this.main.properties.values.bezelEnabled && !this.main.properties.values.bezelFile && bezelNames.length > 0) {
+                        this.main.properties.set('bezelFile', bezelNames[0]);
+                    }
+                    this.main.loadBezel();
+                }, { checked: props.bezelEnabled });
+                bezelMenu.addSeparator();
+
+                bezelMenu.addItem('None (No Bezel)', () => {
+                    this.main.properties.set('bezelEnabled', false);
+                    this.main.properties.set('bezelFile', '');
+                    this.main.loadBezel();
+                }, { radio: currentIdx < 0 });
+
+                bezelNames.forEach((name, i) => {
+                    bezelMenu.addItem(GdiUtils.escapeMenuLabel(name), () => {
+                        this.main.properties.set('bezelEnabled', true);
+                        this.main.properties.set('bezelFile', name);
+                        this.main.loadBezel();
+                    }, { radio: currentIdx === i });
+                });
+
+                bezelMenu.addSeparator();
+                const safeBezelShort = GdiUtils.escapeMenuLabel(this.#shortPath(bezelFolder));
+                bezelMenu.addItem(`Set Bezel Folder…${hasBezelFolder ? `  (${safeBezelShort})` : ''}`, () => {
+                    const path = GdiUtils.prompt('Enter folder path containing bezel images:', 'Set Bezel Folder', this.main.properties.values.bezelFolder || `${PROFILE_BASE}skins\\overlay`);
+                    if (path) {
+                        const cleaned = GdiUtils.sanitizePath(path);
+                        if (cleaned && utils.IsDirectory(cleaned)) {
+                            this.main.properties.set('bezelFolder', cleaned, true);
+                            this.main.invalidateBezelCache();
+                            this.main.properties.set('bezelEnabled', false, true);
+                            this.main.properties.set('bezelFile', '', true);
+                            this.main.loadBezel();
+                        }
+                    }
+                });
+                bezelMenu.addItem('Reload Bezel List', () => {
+                    this.main.invalidateBezelCache();
+                    this.main.getBezelImages(true);
+                    this.main.loadBezel();
+                });
+
+                bezelMenu.addSeparator();
+                const promptPad = (label, key) => {
+                    const val = GdiUtils.prompt(`Enter ${label.toLowerCase()} padding in pixels (0–${SIDE_PAD_LOGICAL_MAX}):`, 'Per-Side Padding', String(props[key]));
+                    if (val !== null && val.trim() !== '') {
+                        const n = parseInt(val, 10);
+                        if (!Number.isNaN(n)) {
+                            this.main.properties.set(key, GdiUtils.clamp(n, 0, SIDE_PAD_LOGICAL_MAX));
+                            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, foreground: true, effect: true });
+                        }
+                    }
+                };
+                bezelMenu.addItem(`Left padding…  (${props.padLeft}px)`,   () => promptPad('Left',   'padLeft'));
+                bezelMenu.addItem(`Right padding…  (${props.padRight}px)`, () => promptPad('Right',  'padRight'));
+                bezelMenu.addItem(`Top padding…  (${props.padTop}px)`,     () => promptPad('Top',    'padTop'));
+                bezelMenu.addItem(`Bottom padding…  (${props.padBottom}px)`,() => promptPad('Bottom', 'padBottom'));
+            });
+
+            appearanceMenu.addSubMenu('Overlay Settings', (overlaySettingsMenu) => {
+                MeterConstants.OPACITY_SLIDER_TARGETS.slice(0, 4).forEach((target, i) => {
+                    const toggleKey = MeterConstants.OPACITY_TOGGLE_KEYS[target];
+                    const opacity = props[MeterConstants.OPACITY_VALUE_KEYS[target]];
+                    if (i > 0) overlaySettingsMenu.addSeparator();
+                    if (toggleKey) {
+                        overlaySettingsMenu.addItem(labels[target], () => {
+                            this.main.properties.set(toggleKey, !props[toggleKey]);
+                            if (target === 'Phosphor' || target === 'Scanlines' || target === 'Reflection') {
+                                this.main.invalidateCaches({ effect: true });
+                            }
+                        }, { checked: props[toggleKey] });
+                    }
+                    overlaySettingsMenu.addItem(`Adjust ${labels[target]} Opacity...  (${pct(opacity)})`, () => {
+                        this.main.opacitySliderTarget = target;
+                    });
+                });
+            });
+
+            appearanceMenu.addSeparator();
+            for (let idx = 4; idx < MeterConstants.OPACITY_SLIDER_TARGETS.length; idx++) {
+                const target = MeterConstants.OPACITY_SLIDER_TARGETS[idx];
+                const opacity = props[MeterConstants.OPACITY_VALUE_KEYS[target]];
+                appearanceMenu.addItem(`Adjust ${labels[target]} Opacity...  (${pct(opacity)})`, () => {
+                    this.main.opacitySliderTarget = target;
+                });
+            }
+
+            appearanceMenu.addSeparator();
+            appearanceMenu.addItem('Show dB scale && L/R labels', () => {
+                this.main.properties.set('showMarkers', !props.showMarkers);
+                this.main.invalidateCaches({ geometry: true, background: true, effect: true });
+            }, { checked: props.showMarkers, disabled: isSpectrum });
+
+            appearanceMenu.addItem(`Set marker border size…  (${props.markerBorderSize}px)`, () => {
+                const val = GdiUtils.prompt(`Enter marker border size in pixels (${MARKER_AREA_LOGICAL_MIN}–${MARKER_AREA_LOGICAL_MAX}):`, 'Marker Border Size', String(props.markerBorderSize));
+                if (val !== null && val.trim() !== '') {
+                    const n = parseInt(val, 10);
+                    if (!Number.isNaN(n)) {
+                        this.main.properties.set('markerBorderSize', GdiUtils.clamp(n, MARKER_AREA_LOGICAL_MIN, MARKER_AREA_LOGICAL_MAX));
+                        this.main.invalidateCaches({ geometry: true, background: true, effect: true });
+                    }
+                }
+            }, { disabled: isSpectrum });
+
+            appearanceMenu.addItem(`Set panel padding…  (${props.panelPad}px)`, () => {
+                const val = GdiUtils.prompt(`Enter panel padding in pixels (${PANEL_PAD_LOGICAL_MIN}–${PANEL_PAD_LOGICAL_MAX}):`, 'Panel Padding', String(props.panelPad));
+                if (val !== null && val.trim() !== '') {
+                    const n = parseInt(val, 10);
+                    if (!Number.isNaN(n)) {
+                        this.main.properties.set('panelPad', GdiUtils.clamp(n, PANEL_PAD_LOGICAL_MIN, PANEL_PAD_LOGICAL_MAX));
+                        this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true });
+                    }
+                }
+            });
+        });
+
+        // 8. Over-range segments
+        menu.addSubMenu('Over-range segments', (extraSegMenu) => {
+            const extraLabels = ['None', '+1 dB', '+1 dB  –  +2 dB', '+1 dB  –  +2 dB  –  +3 dB'];
+            const curExtra = GdiUtils.clamp(props.extraSegments || 0, 0, 3);
+            extraLabels.forEach((lbl, i) => {
+                extraSegMenu.addItem(lbl, () => {
+                    this.main.properties.set('extraSegments', i);
+                    this.main.invalidateCaches({ geometry: true, background: true, foreground: true });
+                    this.main.left.reset();
+                    this.main.right.reset();
+                }, { radio: curExtra === i, disabled: isSpectrum });
+            });
+        }, props.flatMode || isSpectrum);
+
+        // 9. Flat Mode
+        menu.addSubMenu('Flat Mode', (flatModeMenu) => {
+            flatModeMenu.addItem('Enable Flat Mode', () => {
+                const turningOn = !props.flatMode;
+                this.main.properties.set('flatMode', turningOn);
+                if (turningOn) {
+                    this.main.properties.extraSegmentsPreFlat = props.extraSegments;
+                    if (props.extraSegments !== 0) {
+                        this.main.properties.set('extraSegments', 0);
+                        this.main.left.reset();
+                        this.main.right.reset();
+                    }
+                } else {
+                    const restore = this.main.properties.extraSegmentsPreFlat || 0;
+                    if (restore !== 0) {
+                        this.main.properties.set('extraSegments', restore);
+                        this.main.left.reset();
+                        this.main.right.reset();
+                    }
+                    this.main.properties.extraSegmentsPreFlat = 0;
+                }
+                this.main.invalidateCaches({ geometry: true, background: true, foreground: true, spectrum: true });
+            }, { checked: props.flatMode });
+            flatModeMenu.addSeparator();
+
+            const gradStyles = [
+                'Solid Fill  (no gradient)',
+                'Gradient Fill  (LED strip)',
+                'Gradient Fill  (cross full)',
+                'Gradient Fill  (cross full variant)',
+                'Gradient Fill  (cross blend)',
+                'Gradient Fill  (full gradient)'
+            ];
+            const curGrad = GdiUtils.clamp(props.flatGradient, 0, MeterConstants.GRADIENT_STYLE_MAX);
+            gradStyles.forEach((lbl, i) => {
+                flatModeMenu.addItem(lbl, () => {
+                    this.main.properties.set('flatGradient', i);
+                    this.main.invalidateCaches({ background: true, foreground: true, spectrum: true });
+                }, { radio: props.flatMode && curGrad === i, disabled: !props.flatMode });
+            });
+        });
+
+        menu.addSeparator();
+
+        // 10. Meter mode, range, attack, release
+        menu.addSubMenu('Meter mode', (modeMenu) => {
+            for (const mm of MeterConstants.METER_MODE_OPTIONS) {
+                modeMenu.addItem(mm, () => this.main.properties.set('meterMode', mm), { radio: props.meterMode === mm });
+            }
+        }, isSpectrum);
+
+        menu.addSubMenu('Meter range (0 dB ceiling)', (rangeMenu) => {
+            for (const mr of MeterConstants.METER_RANGE_OPTIONS) {
+                rangeMenu.addItem(`${mr} dB to 0 dB`, () => {
+                    this.main.properties.set('meterRange', mr);
+                    this.main.properties.set('extraSegments', 0);
+                    this.main.invalidateCaches({ geometry: true, background: true, foreground: true });
+                    this.main.left.reset();
+                    this.main.right.reset();
+                }, { radio: props.meterRange === mr });
+            }
+        }, isSpectrum);
+
+        menu.addSubMenu('Attack', (attackMenu) => {
+            for (const spd of MeterConstants.SPEED_OPTIONS) {
+                attackMenu.addItem(spd, () => this.main.properties.set('attack', spd), { radio: props.attack === spd });
+            }
+        });
+
+        menu.addSubMenu('Release', (releaseMenu) => {
+            for (const spd of MeterConstants.SPEED_OPTIONS) {
+                releaseMenu.addItem(spd, () => this.main.properties.set('release', spd), { radio: props.release === spd });
+            }
+        });
+
+        menu.addItem('Performance Monitor', () => {
+            this.main.properties.set('profiler', !props.profiler);
+            this.main.performance.setEnabled(this.main.properties.values.profiler);
+        }, { checked: props.profiler });
+
+        menu.addItem('Peak hold', () => {
+            this.main.properties.set('peakHold', !props.peakHold);
+        }, { checked: props.peakHold });
+
+        menu.addItem(`Peak hold time…  (${(props.peakHoldMs / 1000).toFixed(1)} s)`, () => {
+            const value = GdiUtils.prompt(`Enter peak-hold time in milliseconds (${MeterConstants.PEAK_HOLD_MIN_MS}–${MeterConstants.PEAK_HOLD_MAX_MS}):`, 'Peak Hold Time', String(props.peakHoldMs));
+            if (value !== null && value.trim() !== '') {
+                const n = Number(value);
+                if (Number.isFinite(n)) {
+                    const ms = GdiUtils.clamp(Math.round(n), MeterConstants.PEAK_HOLD_MIN_MS, MeterConstants.PEAK_HOLD_MAX_MS);
+                    this.main.properties.set('peakHoldMs', ms);
+                }
+            }
+        }, { disabled: isSpectrum });
+
+        menu.addSeparator();
+
+        menu.addItem('About / Status…', () => {
+            const mode = props.displayMode === 'Spectrum Analyzer' ? 'Spectrum Analyzer' : `${props.meterMode} Peak Meter`;
+            const audio = HAS_AUDIO_CHUNK ? 'Available (SMP x64)' : 'Unavailable — requires fb.GetAudioChunk.';
+            fb.ShowPopupMessage(
+                `${MeterConstants.SCRIPT_NAME} v${MeterConstants.VERSION}\n\n` +
+                `Audio capture: ${audio}\n` +
+                `Display mode: ${mode}\n` +
+                `Quality preset: ${props.qualityPreset}\n` +
+                `Meter range: ${props.meterRange} dB to 0 dB\n` +
+                `Peak hold: ${(props.peakHoldMs / 1000).toFixed(1)} s\n` +
+                `Panel size: ${this.main.width} × ${this.main.height} px (DPI: ${SYSTEM_DPI})\n` +
+                `Theme: ${props.theme}`,
+                MeterConstants.SCRIPT_NAME
+            );
+        });
+
+        menu.addItem('Reset Visual Settings to Defaults', () => {
+            this.main.properties.resetVisuals();
+            this.main.properties.lastFinalizedTheme = this.main.properties.values.theme;
+            this.main.properties.extraSegmentsPreFlat = 0;
+            this.main.opacitySliderTarget = null;
+            this.main.themes.clearPreview();
+            this.main.themes.draftBaseTheme = null;
+            this.main.loadBezel();
+            this.main.performance.setEnabled(this.main.properties.values.profiler);
+            this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
+            this.main.spectrumAnalyzer.setFftSize(MeterConstants.SPECTRUM_FFT_SIZE);
+            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
+            this.main.left.reset();
+            this.main.right.reset();
+            this.main.resetStateTrackers();
+        });
+
+        menu.addItem('Factory Reset (All Settings & Themes)...', () => {
+            const confirm = GdiUtils.prompt('Type YES to perform a full factory reset (resets all themes, overlays, and paths):', 'Confirm Factory Reset', '');
+            if (confirm?.toUpperCase() === 'YES') {
+                for (const ct of [...this.main.themes.customThemes]) {
+                    this.main.themes.removeCustom(ct.name);
+                }
+                this.main.properties.resetAll();
+                this.main.properties.lastFinalizedTheme = this.main.properties.values.theme;
+                this.main.properties.extraSegmentsPreFlat = 0;
+                this.main.opacitySliderTarget = null;
+                this.main.themes.clearPreview();
+                this.main.themes.draftBaseTheme = null;
+                this.main.invalidateBezelCache();
+                this.main.loadBezel();
+                this.main.performance.setEnabled(this.main.properties.values.profiler);
+                this.main.spectrumAnalyzer.setBarCount(this.main.properties.values.spectrumBars);
+                this.main.spectrumAnalyzer.setFftSize(MeterConstants.SPECTRUM_FFT_SIZE);
+                this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
+                this.main.left.reset();
+                this.main.right.reset();
+                this.main.resetStateTrackers();
+            }
+        });
+
+        const selected = menu.track(x, y);
+        if (selected > 0) this.main.invalidate();
+        return true;
+    }
 }
 
 // ============================================================================================
@@ -3456,7 +3300,7 @@ class LCDPeakMeter {
     #activeArea = { x: 0, y: 0, w: 0, h: 0 };
     isFocused = false;
     #notifyText = '';
-    #notifyExpiry = 0;
+    #notifyTimer = null;
 
     #lastSpectrumTick = Date.now();
     #spectrumNextRunAt = Date.now();
@@ -3477,11 +3321,11 @@ class LCDPeakMeter {
         if (this.properties.values.theme === '~Preview') {
             const fallback = this.properties.lastFinalizedTheme;
             this.themes.clearPreview();
-            this.properties.setTheme(fallback && this.themes.themeMap.has(fallback) ? fallback : 'Pioneer Amber');
+            this.properties.setTheme(fallback && this.themes.themeMap.has(fallback) ? fallback : 'Pioneer Amber', this.themes);
         }
 
         if (!this.themes.names().includes(this.properties.values.theme)) {
-            this.properties.setTheme('Pioneer Amber');
+            this.properties.setTheme('Pioneer Amber', this.themes);
         }
 
         this.audio = new AudioEngine();
@@ -3519,8 +3363,20 @@ class LCDPeakMeter {
         this.loadBezel();
     }
 
+    isIdle() {
+        if (HAS_AUDIO_CHUNK && fb.IsPlaying && !fb.IsPaused) return false;
+        if (this.properties.values.displayMode === 'Spectrum Analyzer') {
+            return !this.spectrumAnalyzer.isDirty && !this.spectrumAnalyzer.hasEnergy();
+        }
+        const now = Date.now();
+        return this.audio.isSilent &&
+            this.left.value <= 0.001 && this.right.value <= 0.001 &&
+            this.left.peak <= 0.001 && this.right.peak <= 0.001 &&
+            !this.left.isClipping(now) && !this.right.isClipping(now);
+    }
+
     start() {
-        if (this.masterTimer) return;
+        if (this.masterTimer || !window.IsVisible || panelState !== MeterConstants.LIFECYCLE.LIVE) return;
         this.masterTimer = window.SetInterval(() => this.engineTick(), MeterConstants.MASTER_TIMER_MS);
     }
 
@@ -3531,13 +3387,31 @@ class LCDPeakMeter {
         }
     }
 
-    ensureTimer() {
-        if (!this.masterTimer && window.IsVisible && panelState === MeterConstants.LIFECYCLE.LIVE) {
+    ensureTimer(force = false) {
+        if (!this.masterTimer && window.IsVisible && panelState === MeterConstants.LIFECYCLE.LIVE && (force || !this.isIdle())) {
             this.start();
         }
     }
 
-    // Zero-Idle Guard: Halts audio sampling, FFT, and animation ticks when hidden or minimized
+    #showNotify(text) {
+        this.#notifyText = text;
+        if (this.#notifyTimer) window.ClearTimeout(this.#notifyTimer);
+        this.#notifyTimer = window.SetTimeout(() => {
+            this.#notifyTimer = null;
+            this.#notifyText = '';
+            this.invalidate();
+        }, 1500);
+        this.invalidate();
+    }
+
+    clearNotifyTimer() {
+        if (this.#notifyTimer) {
+            window.ClearTimeout(this.#notifyTimer);
+            this.#notifyTimer = null;
+        }
+    }
+
+    // Zero-Idle Guard: Halts audio sampling, FFT, and animation ticks when hidden or fully decayed
     engineTick() {
         if (panelState !== MeterConstants.LIFECYCLE.LIVE) return;
 
@@ -3546,10 +3420,6 @@ class LCDPeakMeter {
             return;
         }
 
-        if (this.#notifyText && Date.now() > this.#notifyExpiry) {
-            this.#notifyText = '';
-            this.invalidate();
-        }
         if (this.properties.values.displayMode === 'Spectrum Analyzer') {
             this.spectrumTick();
         } else {
@@ -3560,8 +3430,21 @@ class LCDPeakMeter {
     audioTick() {
         const p = this.properties.values;
         const isPlaying = HAS_AUDIO_CHUNK && fb.IsPlaying && !fb.IsPaused;
+        const nowCheck = Date.now();
+        const isDecayed = this.audio.isSilent &&
+            this.left.value <= 0.001 && this.right.value <= 0.001 &&
+            this.left.peak <= 0.001 && this.right.peak <= 0.001 &&
+            !this.left.isClipping(nowCheck) && !this.right.isClipping(nowCheck);
 
-        if (!isPlaying && this.audio.isSilent && this.left.value <= 0.001 && this.right.value <= 0.001 && this.left.peak <= 0.001 && this.right.peak <= 0.001) {
+        if (!isPlaying && isDecayed) {
+            if (this.#lastLeftLit !== 0 || this.#lastRightLit !== 0 || this.#lastLeftHasPeak || this.#lastRightHasPeak || this.#lastClipActive) {
+                this.#lastLeftLit = 0; this.#lastRightLit = 0;
+                this.#lastLeftPeakSeg = 0; this.#lastRightPeakSeg = 0;
+                this.#lastLeftHasPeak = false; this.#lastRightHasPeak = false;
+                this.#lastClipActive = false;
+                this.invalidateMeterBars();
+            }
+            this.stop();
             return;
         }
 
@@ -3624,10 +3507,14 @@ class LCDPeakMeter {
     spectrumTick() {
         const p = this.properties.values;
         const now = Date.now();
-        if (now < this.#spectrumNextRunAt) return;
-
         const isPlaying = HAS_AUDIO_CHUNK && fb.IsPlaying && !fb.IsPaused;
-        if (!isPlaying && !this.spectrumAnalyzer.isDirty) return;
+
+        if (!isPlaying && !this.spectrumAnalyzer.isDirty && !this.spectrumAnalyzer.hasEnergy()) {
+            this.stop();
+            return;
+        }
+
+        if (now < this.#spectrumNextRunAt) return;
 
         const shortAxis = Math.min(this.width, this.height);
         let gateMs = shortAxis >= SPECTRUM_THROTTLE_FULL_PX ? MeterConstants.SPECTRUM_FPS_FULL_MS : shortAxis >= SPECTRUM_THROTTLE_MEDIUM_PX ? MeterConstants.SPECTRUM_FPS_MEDIUM_MS : MeterConstants.SPECTRUM_FPS_LOW_MS;
@@ -3650,7 +3537,14 @@ class LCDPeakMeter {
         this.spectrumAnalyzer.update(attack, release, elapsed);
         const fftMs = this.performance.enabled ? Math.max(0, Date.now() - fftStart) : 0;
         if (this.performance.enabled) { this.performance.spectrumTierMs = gateMs; this.performance.spectrumFftSize = fftSize; }
-        if (this.spectrumAnalyzer.isDirty) this.invalidateMeterBars(); else this.performance.noteSpectrumClean();
+        if (this.spectrumAnalyzer.isDirty) {
+            this.invalidateMeterBars();
+        } else {
+            this.performance.noteSpectrumClean();
+            if (!isPlaying && !this.spectrumAnalyzer.hasEnergy()) {
+                this.stop();
+            }
+        }
         this.performance.endTick(tickStart, 0, fftMs);
     }
 
@@ -3894,6 +3788,7 @@ class LCDPeakMeter {
         this.properties.set('layout', newLayout);
 
         this.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true, foreground: true });
+        this.ensureTimer();
         this.invalidate();
     }
 
@@ -3924,10 +3819,8 @@ class LCDPeakMeter {
             this.properties.set('bezelFile', choice);
         }
 
-        this.#notifyText = `Bezel: ${chosenName}`;
-        this.#notifyExpiry = Date.now() + 1500;
         this.loadBezel();
-        this.invalidate();
+        this.#showNotify(`Bezel: ${chosenName}`);
     }
 
     cycleMeterStyle(direction) {
@@ -3977,9 +3870,7 @@ class LCDPeakMeter {
             this.invalidateCaches({ background: true, foreground: true, spectrum: true });
         }
 
-        this.#notifyText = `Style: ${target.name}`;
-        this.#notifyExpiry = Date.now() + 1500;
-        this.invalidate();
+        this.#showNotify(`Style: ${target.name}`);
     }
 
     onKeyDown(vkey) {
@@ -4149,7 +4040,7 @@ class LCDPeakMeter {
 // ============================================================================================
 const meter = new LCDPeakMeter();
 panelState = MeterConstants.LIFECYCLE.LIVE;
-meter.start();
+meter.ensureTimer();
 
 function on_paint(gr) { meter.onPaint(gr); }
 function on_size() { meter.onSize(); }
@@ -4163,10 +4054,10 @@ function on_focus(is_focused) { meter.onFocus(is_focused); }
 
 function on_playback_stop(reason) {
     if (panelState !== MeterConstants.LIFECYCLE.LIVE) return;
-    if (meter) {
+    if (meter && reason !== 2) {
         meter.audio.isSilent = false;
         meter.spectrumAnalyzer.isDirty = true;
-        meter.ensureTimer();
+        meter.ensureTimer(true);
         meter.invalidate();
     }
 }
@@ -4176,7 +4067,7 @@ function on_playback_pause(state) {
     if (meter) {
         meter.audio.isSilent = false;
         meter.spectrumAnalyzer.isDirty = true;
-        meter.ensureTimer();
+        meter.ensureTimer(true);
         meter.invalidate();
     }
 }
@@ -4185,7 +4076,17 @@ function on_playback_starting(cmd, is_paused) {
     if (panelState !== MeterConstants.LIFECYCLE.LIVE) return;
     if (meter) {
         meter.audio.isSilent = false;
-        meter.ensureTimer();
+        meter.spectrumAnalyzer.isDirty = true;
+        meter.ensureTimer(true);
+    }
+}
+
+function on_playback_new_track(metadb) {
+    if (panelState !== MeterConstants.LIFECYCLE.LIVE) return;
+    if (meter) {
+        meter.audio.isSilent = false;
+        meter.spectrumAnalyzer.isDirty = true;
+        meter.ensureTimer(true);
     }
 }
 
@@ -4211,7 +4112,7 @@ function on_notify_data(name, info) {
         if (!meter.properties.values.syncTheme) return; // Guarded by syncTheme toggle
         if (meter.themes.names().includes(info) && meter.properties.values.theme !== info) {
             meter.themes.clearPreview();
-            meter.properties.setTheme(info);
+            meter.properties.setTheme(info, meter.themes);
             meter.invalidateCaches({ background: true, effect: true, foreground: true, spectrum: true, repaint: true });
         }
     }
@@ -4221,6 +4122,7 @@ function on_script_unload() {
     panelState = MeterConstants.LIFECYCLE.SHUTDOWN;
     if (meter?.properties) meter.properties.persistSync();
     try { meter?.stop(); } catch {}
+    try { meter?.clearNotifyTimer(); } catch {}
     try { meter?.segments?.dispose(); } catch {}
     try { meter?.spectrumRenderer?.dispose(); } catch {}
     try { meter?.effectCache?.dispose(); } catch {}

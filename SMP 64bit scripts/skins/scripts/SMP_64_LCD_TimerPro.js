@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.6 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.7 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -16,7 +16,7 @@
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.6', 
+    version: '2.7', 
     features: { grab_focus: true } 
 });
 
@@ -24,7 +24,7 @@ if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode  = 0x0004; // DLGC_WANTALLKEYS
 
 // ============================================================================================
-// 1. HELPERS & MATH UTILITIES
+// 1. HELPERS, MENU BUILDER, SETTINGS SCHEMA & MATH UTILITIES
 // ============================================================================================
 class GdiUtils {
     static #dpiScale = (typeof window.DPI === 'number' && window.DPI > 0) ? window.DPI / 96 : 1;
@@ -68,6 +68,10 @@ class GdiUtils {
         return clean.replace(/[\/\\]+$/, '');
     }
 
+    static escapeMenuLabel(str) {
+        return String(str ?? '').replace(/&/g, '&&');
+    }
+
     static prompt(promptText, titleText, defaultVal) {
         try {
             const res = utils.InputBox(window.ID, promptText, titleText, String(defaultVal ?? ''), true);
@@ -78,11 +82,220 @@ class GdiUtils {
     }
 }
 
+class MenuBuilder {
+    #menu;
+    #state;
+
+    constructor(state = null, startId = 1) {
+        this.#menu = window.CreatePopupMenu();
+        this.#state = state || {
+            nextId: startId,
+            callbacks: new Map(),
+            menus: []
+        };
+        this.#state.menus.push(this.#menu);
+    }
+
+    get raw() {
+        return this.#menu;
+    }
+
+    addItem(label, callback, opts = {}) {
+        const id = this.#state.nextId++;
+        const flags = opts.disabled ? 0x0001 : 0;
+        this.#menu.AppendMenuItem(flags, id, label);
+        if (opts.checked || opts.radio) {
+            this.#menu.CheckMenuRadioItem(id, id, id);
+        }
+        if (typeof callback === 'function') {
+            this.#state.callbacks.set(id, callback);
+        }
+        return this;
+    }
+
+    addSeparator() {
+        this.#menu.AppendMenuSeparator();
+        return this;
+    }
+
+    addSubMenu(title, buildFn, disabled = false) {
+        const sub = new MenuBuilder(this.#state);
+        buildFn(sub);
+        sub.#menu.AppendTo(this.#menu, disabled ? 0x0001 : 0, title);
+        return this;
+    }
+
+    track(x, y) {
+        let selected = 0;
+        try {
+            selected = this.#menu.TrackPopupMenu(x, y);
+        } finally {
+            for (const m of this.#state.menus) {
+                try { if (m && typeof m.Dispose === 'function') m.Dispose(); } catch {}
+            }
+            this.#state.menus.length = 0;
+        }
+        if (selected > 0) {
+            const cb = this.#state.callbacks.get(selected);
+            if (cb) cb();
+        }
+        return selected;
+    }
+}
+
+class SettingsSchema {
+    static THEME_COUNT = 20;
+
+    static FIELDS = [
+        { key: 'themeIdx',             prop: 'LCD.Theme',               type: 'int',   def: 0,     min: 0,    max: 20 },
+        { key: 'syncTheme',            prop: 'LCD.SyncTheme',           type: 'bool',  def: true },
+        { key: 'borderMode',           prop: 'LCD.BorderPx',            type: 'int',   def: 2,     min: 0,    max: 50 },
+        { key: 'showGhost',            prop: 'LCD.ShowGhost',           type: 'bool',  def: true },
+        { key: 'useReflection',        prop: 'LCD.UseReflection',       type: 'bool',  def: true },
+        { key: 'showShadow',           prop: 'LCD.ShowShadow',          type: 'bool',  def: false },
+        { key: 'showGlow',             prop: 'LCD.ShowGlow',            type: 'bool',  def: false },
+        { key: 'showScanlines',        prop: 'LCD.ShowScanlines',       type: 'bool',  def: false },
+        { key: 'showPhosphor',         prop: 'LCD.ShowPhosphor',        type: 'bool',  def: true },
+        { key: 'displayMode',          prop: 'LCD.DisplayMode',         type: 'int',   def: 0,     min: 0,    max: 1 },
+        { key: 'autoFontSize',         prop: 'LCD.AutoFontSize',        type: 'bool',  def: true },
+        { key: 'modeRemaining',        prop: 'LCD.ModeRemaining',       type: 'bool',  def: false },
+        { key: 'italicSlant',          prop: 'LCD.ItalicSlant',         type: 'bool',  def: false },
+        { key: 'useThemeColorForTech', prop: 'LCD.UseThemeColorForTech',type: 'bool',  def: true },
+        { key: 'showM0Codec',          prop: 'LCD.ShowM0Codec',         type: 'bool',  def: true },
+        { key: 'showM0Tech',           prop: 'LCD.ShowM0Tech',          type: 'bool',  def: true },
+        { key: 'showM1Title',          prop: 'LCD.ShowM1Title',         type: 'bool',  def: true },
+        { key: 'showM1Album',          prop: 'LCD.ShowM1Album',         type: 'bool',  def: true },
+        { key: 'showM1Codec',          prop: 'LCD.ShowM1Codec',         type: 'bool',  def: true },
+        { key: 'showM1Tech',           prop: 'LCD.ShowM1Tech',          type: 'bool',  def: true },
+
+        { key: 'vOffset',              prop: 'LCD.VerticalOffset',      type: 'int',   def: 0,     min: -200, max: 200 },
+        { key: 'codecOffX',            prop: 'LCD.CodecOffsetX',        type: 'int',   def: -10,   min: -200, max: 200 },
+        { key: 'codecOffY',            prop: 'LCD.CodecOffsetY',        type: 'int',   def: -20,   min: -200, max: 200 },
+        { key: 'detailOffX',           prop: 'LCD.DetailOffsetX',       type: 'int',   def: -10,   min: -200, max: 200 },
+        { key: 'detailOffY',           prop: 'LCD.DetailOffsetY',       type: 'int',   def: -5,    min: -200, max: 200 },
+        { key: 'm1TitleOffX',          prop: 'LCD.M1TitleOffsetX',      type: 'int',   def: -10,   min: -200, max: 200 },
+        { key: 'm1TitleOffY',          prop: 'LCD.M1TitleOffsetY',      type: 'int',   def: -20,   min: -200, max: 200 },
+        { key: 'm1CodecOffX',          prop: 'LCD.M1CodecOffsetX',      type: 'int',   def: -10,   min: -200, max: 200 },
+        { key: 'm1CodecOffY',          prop: 'LCD.M1CodecOffsetY',      type: 'int',   def: -5,    min: -200, max: 200 },
+
+        { key: 'opClock',              prop: 'LCD.OpClock',             type: 'int',   def: 255,   min: 0,    max: 255 },
+        { key: 'opGhost',              prop: 'LCD.OpGhost',             type: 'int',   def: 5,     min: 0,    max: 255 },
+        { key: 'opTech',               prop: 'LCD.OpTech',              type: 'int',   def: 255,   min: 0,    max: 255 },
+        { key: 'opBorder',             prop: 'LCD.OpBorder',            type: 'int',   def: 60,    min: 0,    max: 255 },
+        { key: 'opBG',                 prop: 'LCD.OpBG',                type: 'int',   def: 255,   min: 0,    max: 255 },
+        { key: 'opReflection',         prop: 'LCD.OpReflection',        type: 'int',   def: 20,    min: 0,    max: 255 },
+        { key: 'opShadow',             prop: 'LCD.OpShadow',            type: 'int',   def: 60,    min: 0,    max: 255 },
+        { key: 'opGlow',               prop: 'LCD.OpGlow',              type: 'int',   def: 110,   min: 0,    max: 255 },
+        { key: 'opScanlines',          prop: 'LCD.OpScanlines',         type: 'int',   def: 50,    min: 0,    max: 255 },
+        { key: 'opPhosphor',           prop: 'LCD.OpPhosphor',          type: 'int',   def: 10,    min: 0,    max: 255 },
+        { key: 'overlayAllOff',        prop: 'LCD.OverlayAllOff',       type: 'bool',  def: false },
+
+        { key: 'bezelFolder',          prop: 'LCD.BezelFolder',         type: 'path',  def: '',    resetAll: true },
+        { key: 'bezelEnabled',         prop: 'LCD.BezelEnabled',        type: 'bool',  def: false },
+        { key: 'bezelFile',            prop: 'LCD.BezelFile',           type: 'str',   def: '' },
+
+        { key: 'padLeft',              prop: 'LCD.PadLeft',             type: 'int',   def: 4,     min: 0,    max: 100 },
+        { key: 'padRight',             prop: 'LCD.PadRight',            type: 'int',   def: 4,     min: 0,    max: 100 },
+        { key: 'padTop',               prop: 'LCD.PadTop',              type: 'int',   def: 4,     min: 0,    max: 100 },
+        { key: 'padBottom',            prop: 'LCD.PadBottom',           type: 'int',   def: 4,     min: 0,    max: 100 },
+
+        { key: 'clockFontName',        prop: 'LCD.ClockFontName',       type: 'str',   def: 'Digital',  nonEmpty: true },
+        { key: 'clockFontSize',        prop: 'LCD.ClockFontSize',       type: 'int',   def: 48,    min: 8,    max: 120 },
+        { key: 'codecFontName',        prop: 'LCD.CodecFontName',       type: 'str',   def: 'Segoe UI', nonEmpty: true },
+        { key: 'codecFontSize',        prop: 'LCD.CodecFontSize',       type: 'int',   def: 14,    min: 8,    max: 80 },
+        { key: 'techFontName',         prop: 'LCD.TechFontName',        type: 'str',   def: 'Segoe UI', nonEmpty: true },
+        { key: 'techFontSize',         prop: 'LCD.TechFontSize',        type: 'int',   def: 14,    min: 8,    max: 80 },
+        { key: 'textRowFontName',      prop: 'LCD.TextRowFontName',     type: 'str',   def: 'Segoe UI', nonEmpty: true },
+        { key: 'textRowFontSize',      prop: 'LCD.TextRowFontSize',     type: 'int',   def: 20,    min: 8,    max: 100 },
+        { key: 'm1CodecFontSize',      prop: 'LCD.M1CodecFontSize',     type: 'int',   def: 0,     min: 0,    max: 80 },
+
+        { key: 'playIconType',         prop: 'LCD.PlayIconType',        type: 'int',   def: 2,     min: 0,    max: 3 },
+        { key: 'playIconBlink',        prop: 'LCD.PlayIconBlink',       type: 'bool',  def: false },
+
+        { key: 'custBg',               prop: 'LCD.CustomBg',            type: 'color', def: GdiUtils.RGB(10, 15, 15),   resetAll: true },
+        { key: 'custLcd',              prop: 'LCD.CustomLcd',           type: 'color', def: GdiUtils.RGB(0, 255, 200),  resetAll: true },
+        { key: 'custBorder',           prop: 'LCD.CustomBorder',        type: 'color', def: GdiUtils.RGB(0, 255, 200),  resetAll: true },
+        { key: 'useCustomBorder',      prop: 'LCD.UseCustomBorder',     type: 'bool',  def: false }
+    ];
+
+    static defaults(overrides = null) {
+        const o = {};
+        for (const f of this.FIELDS) o[f.key] = f.def;
+        if (overrides) Object.assign(o, overrides);
+        return o;
+    }
+
+    static coerce(f, raw, defVal) {
+        const fallback = defVal !== undefined ? defVal : f.def;
+        if (raw === null || raw === undefined) return fallback;
+        switch (f.type) {
+            case 'bool':
+                if (typeof raw === 'boolean') return raw;
+                if (typeof raw === 'string') return raw !== 'false' && raw !== '0' && raw !== '';
+                return Boolean(raw);
+            case 'int': {
+                const n = parseInt(raw, 10);
+                return Number.isNaN(n) ? fallback : GdiUtils.clamp(n, f.min, f.max);
+            }
+            case 'color': {
+                const n = Number(raw);
+                return (Number.isFinite(n) && (n >>> 0) !== 0) ? (n >>> 0) : fallback;
+            }
+            case 'path':
+                return GdiUtils.sanitizePath(String(raw || fallback));
+            default: {
+                const s = String(raw ?? fallback);
+                if (f.nonEmpty) return s.trim() || fallback;
+                return s;
+            }
+        }
+    }
+
+    static sanitize(raw, fallback) {
+        const base = fallback || this.defaults();
+        const out = { ...base };
+        if (!raw || typeof raw !== 'object') return out;
+        for (const f of this.FIELDS) {
+            if (Object.prototype.hasOwnProperty.call(raw, f.key)) {
+                out[f.key] = this.coerce(f, raw[f.key], base[f.key]);
+            }
+        }
+        return out;
+    }
+
+    static loadProperties(fallbackDefaults) {
+        const out = {};
+        for (const f of this.FIELDS) {
+            const def = (fallbackDefaults && f.key in fallbackDefaults) ? fallbackDefaults[f.key] : f.def;
+            out[f.key] = this.coerce(f, window.GetProperty(f.prop, def), def);
+        }
+        return out;
+    }
+
+    static saveProperties(config) {
+        for (const f of this.FIELDS) {
+            if (Object.prototype.hasOwnProperty.call(config, f.key)) {
+                window.SetProperty(f.prop, config[f.key]);
+            }
+        }
+    }
+
+    static reset(currentConfig, { includeResetAll = false, defaults = null } = {}) {
+        const base = defaults || this.defaults();
+        const out = { ...currentConfig };
+        for (const f of this.FIELDS) {
+            if (f.resetAll && !includeResetAll) continue;
+            out[f.key] = base[f.key] ?? f.def;
+        }
+        return out;
+    }
+}
+
 window.MinWidth  = GdiUtils.scale(120);
 window.MinHeight = GdiUtils.scale(36);
 
 // ============================================================================================
-// 2. FONT MANAGEMENT (LRU CACHED WITH PROBE DISPOSAL)
+// 2. FONT MANAGEMENT (LRU CACHED)
 // ============================================================================================
 class FontRegistry {
     #cache = new Map();
@@ -126,35 +339,45 @@ class FontRegistry {
 
     fitSize(gr, text, fontName, fontStyle, maxW, maxH, startSize, minSize = 12) {
         const minBound = Math.max(4, Math.round(minSize));
-        let low = minBound;
-        let high = Math.max(minBound, Math.round(startSize));
-        let best = minBound;
+        const maxBound = Math.max(minBound, Math.round(startSize));
+        if (maxW <= 0 || maxH <= 0) return minBound;
+
         const testText = text && text.trim().length > 0 ? text : '-88:88';
         const name = (typeof fontName === 'string' && fontName.trim().length > 0) ? fontName.trim() : 'Segoe UI';
 
-        while (low <= high) {
-            const mid = (low + high) >>> 1;
-            let tempFont = null;
-            try { 
-                tempFont = gdi.Font(name, mid, fontStyle); 
-            } catch { 
-                tempFont = gdi.Font('Segoe UI', mid, fontStyle); 
-            }
-            if (!tempFont) { high = mid - 1; continue; }
-
-            const m = gr.MeasureString(testText, tempFont, 0, 0, 9999, 9999);
-            if (tempFont && typeof tempFont.Dispose === 'function') {
-                try { tempFont.Dispose(); } catch {}
-            }
-
-            if (m.Width <= maxW && m.Height <= maxH) {
-                best = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
+        const topFont = this.get(name, maxBound, fontStyle);
+        if (topFont) {
+            const topM = gr.MeasureString(testText, topFont, 0, 0, 9999, 9999);
+            if (topM.Width <= maxW && topM.Height <= maxH) return maxBound;
+            if (topM.Width > 0 && topM.Height > 0) {
+                const est = Math.round(maxBound * Math.min(maxW / topM.Width, maxH / topM.Height));
+                let low = Math.max(minBound, est - 4);
+                let high = Math.min(maxBound - 1, est + 4);
+                const lowFont = this.get(name, low, fontStyle);
+                if (lowFont) {
+                    const lowM = gr.MeasureString(testText, lowFont, 0, 0, 9999, 9999);
+                    if (lowM.Width > maxW || lowM.Height > maxH) {
+                        high = low - 1;
+                        low = minBound;
+                    }
+                }
+                let best = minBound;
+                while (low <= high) {
+                    const mid = (low + high) >>> 1;
+                    const f = this.get(name, mid, fontStyle);
+                    if (!f) { high = mid - 1; continue; }
+                    const m = gr.MeasureString(testText, f, 0, 0, 9999, 9999);
+                    if (m.Width <= maxW && m.Height <= maxH) {
+                        best = mid;
+                        low = mid + 1;
+                    } else {
+                        high = mid - 1;
+                    }
+                }
+                return Math.max(minBound, best);
             }
         }
-        return Math.max(minBound, best);
+        return minBound;
     }
 
     truncateToFit(gr, text, font, maxW) {
@@ -688,7 +911,7 @@ class LcdBackplateEngine {
 }
 
 // ============================================================================================
-// 6. MAIN CONTROLLER & STATE MANAGEMENT (PART 1 OF CONTROLLER)
+// 6. MAIN CONTROLLER & STATE MANAGEMENT
 // ============================================================================================
 class LcdTimerController {
     static LIFECYCLE = { BOOT: 0, INIT: 1, LIVE: 2, SHUTDOWN: 3 };
@@ -701,65 +924,6 @@ class LcdTimerController {
         MODE1:     1 << 3,
         LAYOUT:    1 << 4,
         ALL:       ~0
-    };
-
-    static MENU_ID = {
-        THEME_SYNC:          1000,
-        THEME_BASE:          1001,
-        CUST_LCD_COLOR:      800,
-        CUST_BG_COLOR:       801,
-        CUST_BORDER_COLOR:   802,
-        BORDER_SIZE:         1030,
-        BORDER_CUSTOM_TOGGLE:1031,
-        BORDER_CUSTOM_SETUP: 1032,
-        SHOW_GHOST:          100,
-        USE_REFLECTION:      101,
-        SHOW_SHADOW:         102,
-        SHOW_GLOW:           103,
-        SHOW_SCANLINES:      104,
-        SHOW_PHOSPHOR:       105,
-        MATCH_TECH_COLOR:    110,
-        OVERLAY_ALL_OFF:     199,
-        OPACITY_BASE:        300,
-        POS_CLOCK:           200,
-        POS_CODEC:           201,
-        POS_DETAILS:         202,
-        POS_M1_TITLE:        203,
-        POS_M1_CODEC:        204,
-        POS_RESET_ALL:       210,
-        AUTO_FONT_SIZE:      501,
-        SHOW_M0_CODEC:       106,
-        SHOW_M0_TECH:        107,
-        CLOCK_FONT_EXTERNAL: 400,
-        CLOCK_FONT_DIGITAL:  401,
-        CODEC_FONT_NAME:     402,
-        TECH_FONT_NAME:      403,
-        CLOCK_ITALIC_TOGGLE: 406,
-        CLOCK_FONT_SIZE:     410,
-        CODEC_FONT_SIZE:     411,
-        TECH_FONT_SIZE:      412,
-        SHOW_M1_TITLE:       120,
-        SHOW_M1_ALBUM:       121,
-        SHOW_M1_CODEC:       122,
-        SHOW_M1_TECH:        123,
-        M1_TEXT_FONT_NAME:   420,
-        M1_TEXT_FONT_SIZE:   421,
-        M1_CODEC_FONT_SIZE:  422,
-        PLAY_ICON_BLINK:     710,
-        PLAY_ICON_BASE:      700,
-        PRESET_LOAD_BASE:    901,
-        PRESET_SAVE_BASE:    911,
-        BEZEL_ENABLE:        2000,
-        BEZEL_FOLDER:        2001,
-        BEZEL_RELOAD:        2002,
-        BEZEL_NONE:          2005,
-        BEZEL_BASE:          2006,
-        PAD_LEFT:            3110,
-        PAD_RIGHT:           3111,
-        PAD_TOP:             3112,
-        PAD_BOTTOM:          3113,
-        RESET_DEFAULTS:      5000,
-        FACTORY_RESET:       5001
     };
 
     static THEMES = [
@@ -801,117 +965,7 @@ class LcdTimerController {
     };
 
     static BEZEL_EXTS = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp'];
-
-    static DEFAULTS = {
-        themeIdx: 0,
-        syncTheme: true,
-        borderMode: 2,
-        showGhost: true,
-        useReflection: true,
-        showShadow: false,
-        showGlow: false,
-        showScanlines: false,
-        showPhosphor: true,
-        displayMode: 0,
-        autoFontSize: true,
-        modeRemaining: false,
-        italicSlant: false,
-        useThemeColorForTech: true,
-        showM0Codec: true,
-        showM0Tech: true,
-        showM1Title: true,
-        showM1Album: true,
-        showM1Codec: true,
-        showM1Tech: true,
-        vOffset: 0,
-        codecOffX: -10, codecOffY: -20,
-        detailOffX: -10, detailOffY: -5,
-        m1TitleOffX: -10, m1TitleOffY: -20,
-        m1CodecOffX: -10, m1CodecOffY: -5,
-        opClock: 255, opGhost: 5, opTech: 255, opBorder: 60, opBG: 255,
-        opReflection: 20, opShadow: 60, opGlow: 110, opScanlines: 50, opPhosphor: 10,
-        overlayAllOff: false,
-        bezelFolder: '',
-        bezelEnabled: false,
-        bezelFile: '',
-        padLeft: 4, padRight: 4, padTop: 4, padBottom: 4,
-        clockFontName: 'Digital', clockFontSize: 48,
-        codecFontName: 'Segoe UI', codecFontSize: 14,
-        techFontName: 'Segoe UI', techFontSize: 14,
-        textRowFontName: 'Segoe UI', textRowFontSize: 20,
-        m1CodecFontSize: 0,
-        playIconType: 2,
-        playIconBlink: false,
-        custBg: GdiUtils.RGB(10, 15, 15),
-        custLcd: GdiUtils.RGB(0, 255, 200),
-        custBorder: GdiUtils.RGB(0, 255, 200),
-        useCustomBorder: false
-    };
-
-    static PROP_MAP = {
-        themeIdx:             'LCD.Theme',
-        syncTheme:            'LCD.SyncTheme',
-        borderMode:           'LCD.BorderPx',
-        showGhost:            'LCD.ShowGhost',
-        useReflection:        'LCD.UseReflection',
-        showShadow:           'LCD.ShowShadow',
-        showGlow:             'LCD.ShowGlow',
-        showScanlines:        'LCD.ShowScanlines',
-        showPhosphor:         'LCD.ShowPhosphor',
-        displayMode:          'LCD.DisplayMode',
-        autoFontSize:         'LCD.AutoFontSize',
-        modeRemaining:        'LCD.ModeRemaining',
-        italicSlant:          'LCD.ItalicSlant',
-        useThemeColorForTech: 'LCD.UseThemeColorForTech',
-        showM0Codec:          'LCD.ShowM0Codec',
-        showM0Tech:           'LCD.ShowM0Tech',
-        showM1Title:          'LCD.ShowM1Title',
-        showM1Album:          'LCD.ShowM1Album',
-        showM1Codec:          'LCD.ShowM1Codec',
-        showM1Tech:           'LCD.ShowM1Tech',
-        vOffset:              'LCD.VerticalOffset',
-        codecOffX:            'LCD.CodecOffsetX',
-        codecOffY:            'LCD.CodecOffsetY',
-        detailOffX:           'LCD.DetailOffsetX',
-        detailOffY:           'LCD.DetailOffsetY',
-        m1TitleOffX:          'LCD.M1TitleOffsetX',
-        m1TitleOffY:          'LCD.M1TitleOffsetY',
-        m1CodecOffX:          'LCD.M1CodecOffsetX',
-        m1CodecOffY:          'LCD.M1CodecOffsetY',
-        opClock:              'LCD.OpClock',
-        opGhost:              'LCD.OpGhost',
-        opTech:               'LCD.OpTech',
-        opBorder:             'LCD.OpBorder',
-        opBG:                 'LCD.OpBG',
-        opReflection:         'LCD.OpReflection',
-        opShadow:             'LCD.OpShadow',
-        opGlow:               'LCD.OpGlow',
-        opScanlines:          'LCD.OpScanlines',
-        opPhosphor:           'LCD.OpPhosphor',
-        overlayAllOff:        'LCD.OverlayAllOff',
-        bezelFolder:          'LCD.BezelFolder',
-        bezelEnabled:         'LCD.BezelEnabled',
-        bezelFile:            'LCD.BezelFile',
-        padLeft:              'LCD.PadLeft',
-        padRight:             'LCD.PadRight',
-        padTop:               'LCD.PadTop',
-        padBottom:            'LCD.PadBottom',
-        clockFontName:        'LCD.ClockFontName',
-        clockFontSize:        'LCD.ClockFontSize',
-        codecFontName:        'LCD.CodecFontName',
-        codecFontSize:        'LCD.CodecFontSize',
-        techFontName:         'LCD.TechFontName',
-        techFontSize:         'LCD.TechFontSize',
-        textRowFontName:      'LCD.TextRowFontName',
-        textRowFontSize:      'LCD.TextRowFontSize',
-        m1CodecFontSize:      'LCD.M1CodecFontSize',
-        playIconType:         'LCD.PlayIconType',
-        playIconBlink:        'LCD.PlayIconBlink',
-        custBg:               'LCD.CustomBg',
-        custLcd:              'LCD.CustomLcd',
-        custBorder:           'LCD.CustomBorder',
-        useCustomBorder:      'LCD.UseCustomBorder'
-    };
+    static DEFAULTS = SettingsSchema.defaults();
 
     #lifecycle = LcdTimerController.LIFECYCLE.BOOT;
     #dpiScale  = 1;
@@ -926,6 +980,7 @@ class LcdTimerController {
     #blinkTimer         = null;
     #saveTimeout        = null;
     #bezelNotifyTimeout = null;
+    #clickTimer         = null;
 
     #bezelBmp           = null;
     #profileBase        = '';
@@ -988,7 +1043,7 @@ class LcdTimerController {
             if (this.#lifecycle === LcdTimerController.LIFECYCLE.SHUTDOWN) return;
             if (fb.IsPlaying || fb.IsPaused) {
                 this.startTimers();
-                this.refreshClock(true);
+                this.refreshClock(true, false);
             }
             window.Repaint();
         }, 0);
@@ -997,104 +1052,18 @@ class LcdTimerController {
     }
 
     static sanitizeConfig(raw, fallback = LcdTimerController.DEFAULTS) {
-        const out = { ...fallback };
-        if (!raw || typeof raw !== 'object') return out;
-
-        const intOr = (val, def) => {
-            const n = parseInt(val, 10);
-            return Number.isNaN(n) ? def : n;
-        };
-
-        out.themeIdx             = GdiUtils.clamp(intOr(raw.themeIdx, fallback.themeIdx), 0, LcdTimerController.THEMES.length);
-        out.syncTheme            = typeof raw.syncTheme === 'boolean' ? raw.syncTheme : fallback.syncTheme;
-        out.borderMode           = GdiUtils.clamp(intOr(raw.borderMode, fallback.borderMode), 0, 50);
-        out.showGhost            = typeof raw.showGhost === 'boolean' ? raw.showGhost : fallback.showGhost;
-        out.useReflection        = typeof raw.useReflection === 'boolean' ? raw.useReflection : fallback.useReflection;
-        out.showShadow           = typeof raw.showShadow === 'boolean' ? raw.showShadow : fallback.showShadow;
-        out.showGlow             = typeof raw.showGlow === 'boolean' ? raw.showGlow : fallback.showGlow;
-        out.showScanlines        = typeof raw.showScanlines === 'boolean' ? raw.showScanlines : fallback.showScanlines;
-        out.showPhosphor         = typeof raw.showPhosphor === 'boolean' ? raw.showPhosphor : fallback.showPhosphor;
-        out.displayMode          = GdiUtils.clamp(intOr(raw.displayMode, fallback.displayMode), 0, 1);
-        out.autoFontSize         = typeof raw.autoFontSize === 'boolean' ? raw.autoFontSize : fallback.autoFontSize;
-        out.modeRemaining        = typeof raw.modeRemaining === 'boolean' ? raw.modeRemaining : fallback.modeRemaining;
-        out.italicSlant          = typeof raw.italicSlant === 'boolean' ? raw.italicSlant : fallback.italicSlant;
-        out.useThemeColorForTech = typeof raw.useThemeColorForTech === 'boolean' ? raw.useThemeColorForTech : fallback.useThemeColorForTech;
-
-        out.showM0Codec          = typeof raw.showM0Codec === 'boolean' ? raw.showM0Codec : fallback.showM0Codec;
-        out.showM0Tech           = typeof raw.showM0Tech === 'boolean' ? raw.showM0Tech : fallback.showM0Tech;
-        out.showM1Title          = typeof raw.showM1Title === 'boolean' ? raw.showM1Title : fallback.showM1Title;
-        out.showM1Album          = typeof raw.showM1Album === 'boolean' ? raw.showM1Album : fallback.showM1Album;
-        out.showM1Codec          = typeof raw.showM1Codec === 'boolean' ? raw.showM1Codec : fallback.showM1Codec;
-        out.showM1Tech           = typeof raw.showM1Tech === 'boolean' ? raw.showM1Tech : fallback.showM1Tech;
-
-        out.vOffset              = GdiUtils.clamp(intOr(raw.vOffset, fallback.vOffset), -200, 200);
-        out.codecOffX            = GdiUtils.clamp(intOr(raw.codecOffX, fallback.codecOffX), -200, 200);
-        out.codecOffY            = GdiUtils.clamp(intOr(raw.codecOffY, fallback.codecOffY), -200, 200);
-        out.detailOffX           = GdiUtils.clamp(intOr(raw.detailOffX, fallback.detailOffX), -200, 200);
-        out.detailOffY           = GdiUtils.clamp(intOr(raw.detailOffY, fallback.detailOffY), -200, 200);
-        out.m1TitleOffX          = GdiUtils.clamp(intOr(raw.m1TitleOffX, fallback.m1TitleOffX), -200, 200);
-        out.m1TitleOffY          = GdiUtils.clamp(intOr(raw.m1TitleOffY, fallback.m1TitleOffY), -200, 200);
-        out.m1CodecOffX          = GdiUtils.clamp(intOr(raw.m1CodecOffX, fallback.m1CodecOffX), -200, 200);
-        out.m1CodecOffY          = GdiUtils.clamp(intOr(raw.m1CodecOffY, fallback.m1CodecOffY), -200, 200);
-
-        out.opClock              = GdiUtils.clamp(intOr(raw.opClock, fallback.opClock), 0, 255);
-        out.opGhost              = GdiUtils.clamp(intOr(raw.opGhost, fallback.opGhost), 0, 255);
-        out.opTech               = GdiUtils.clamp(intOr(raw.opTech, fallback.opTech), 0, 255);
-        out.opBorder             = GdiUtils.clamp(intOr(raw.opBorder, fallback.opBorder), 0, 255);
-        out.opBG                 = GdiUtils.clamp(intOr(raw.opBG, fallback.opBG), 0, 255);
-        out.opReflection         = GdiUtils.clamp(intOr(raw.opReflection, fallback.opReflection), 0, 255);
-        out.opShadow             = GdiUtils.clamp(intOr(raw.opShadow, fallback.opShadow), 0, 255);
-        out.opGlow               = GdiUtils.clamp(intOr(raw.opGlow, fallback.opGlow), 0, 255);
-        out.opScanlines          = GdiUtils.clamp(intOr(raw.opScanlines, fallback.opScanlines), 0, 255);
-        out.opPhosphor           = GdiUtils.clamp(intOr(raw.opPhosphor, fallback.opPhosphor), 0, 255);
-
-        out.overlayAllOff        = typeof raw.overlayAllOff === 'boolean' ? raw.overlayAllOff : fallback.overlayAllOff;
-        out.bezelFolder          = GdiUtils.sanitizePath(String(raw.bezelFolder || fallback.bezelFolder));
-        out.bezelEnabled         = typeof raw.bezelEnabled === 'boolean' ? raw.bezelEnabled : fallback.bezelEnabled;
-        out.bezelFile            = String(raw.bezelFile || '');
-
-        out.padLeft              = GdiUtils.clamp(intOr(raw.padLeft, fallback.padLeft), 0, 100);
-        out.padRight             = GdiUtils.clamp(intOr(raw.padRight, fallback.padRight), 0, 100);
-        out.padTop               = GdiUtils.clamp(intOr(raw.padTop, fallback.padTop), 0, 100);
-        out.padBottom            = GdiUtils.clamp(intOr(raw.padBottom, fallback.padBottom), 0, 100);
-
-        out.clockFontName        = String(raw.clockFontName || 'Digital').trim() || 'Digital';
-        out.clockFontSize        = GdiUtils.clamp(intOr(raw.clockFontSize, fallback.clockFontSize), 8, 120);
-        out.codecFontName        = String(raw.codecFontName || 'Segoe UI').trim() || 'Segoe UI';
-        out.codecFontSize        = GdiUtils.clamp(intOr(raw.codecFontSize, fallback.codecFontSize), 8, 80);
-        out.techFontName         = String(raw.techFontName || 'Segoe UI').trim() || 'Segoe UI';
-        out.techFontSize         = GdiUtils.clamp(intOr(raw.techFontSize, fallback.techFontSize), 8, 80);
-        out.textRowFontName      = String(raw.textRowFontName || 'Segoe UI').trim() || 'Segoe UI';
-        out.textRowFontSize      = GdiUtils.clamp(intOr(raw.textRowFontSize, fallback.textRowFontSize), 8, 100);
-        out.m1CodecFontSize      = GdiUtils.clamp(intOr(raw.m1CodecFontSize, fallback.m1CodecFontSize), 0, 80);
-
-        out.playIconType         = GdiUtils.clamp(intOr(raw.playIconType, fallback.playIconType), 0, 3);
-        out.playIconBlink        = typeof raw.playIconBlink === 'boolean' ? raw.playIconBlink : fallback.playIconBlink;
-
-        out.custBg               = (Number(raw.custBg) >>> 0) || fallback.custBg;
-        out.custLcd              = (Number(raw.custLcd) >>> 0) || fallback.custLcd;
-        out.custBorder           = (Number(raw.custBorder) >>> 0) || fallback.custBorder;
-        out.useCustomBorder      = typeof raw.useCustomBorder === 'boolean' ? raw.useCustomBorder : fallback.useCustomBorder;
-
-        return out;
+        return SettingsSchema.sanitize(raw, fallback);
     }
 
     #loadProperties() {
-        const raw = {};
-        for (const [key, propName] of Object.entries(LcdTimerController.PROP_MAP)) {
-            raw[key] = window.GetProperty(propName, LcdTimerController.DEFAULTS[key]);
+        this.config = SettingsSchema.loadProperties(LcdTimerController.DEFAULTS);
+        if (!this.config.bezelFolder) {
+            this.config.bezelFolder = LcdTimerController.DEFAULTS.bezelFolder;
         }
-        if (!raw.bezelFolder) raw.bezelFolder = `${this.#profileBase}skins\\overlay`;
-        this.config = LcdTimerController.sanitizeConfig(raw, LcdTimerController.DEFAULTS);
     }
 
     saveAll() {
-        const cfg = this.config;
-        for (const [key, propName] of Object.entries(LcdTimerController.PROP_MAP)) {
-            if (Object.prototype.hasOwnProperty.call(cfg, key)) {
-                window.SetProperty(propName, cfg[key]);
-            }
-        }
+        SettingsSchema.saveProperties(this.config);
     }
 
     requestSave() {
@@ -1326,13 +1295,8 @@ class LcdTimerController {
             lo.ghostStr = this.getGhostTemplate(maxH, this.config.modeRemaining, curM);
             this.#lastGhostTemplate = lo.ghostStr;
 
-            if (isInternal) {
-                lo.ghostW = this.#digitSprites.getStringWidth(lo.ghostStr);
-                lo.ghostH = lo.clockSize;
-            } else {
-                lo.ghostW = this.#digitSprites.getStringWidth(lo.ghostStr);
-                lo.ghostH = this.#digitSprites.digitH || lo.clockSize;
-            }
+            lo.ghostW = this.#digitSprites.getStringWidth(lo.ghostStr);
+            lo.ghostH = isInternal ? lo.clockSize : (this.#digitSprites.digitH || lo.clockSize);
 
             lo.m0TechParts = [
                 { text: this.#trackInfo.bitrate,    baseCol: LcdTimerController.COLORS.TN_YELLOW },
@@ -1437,6 +1401,16 @@ class LcdTimerController {
             if (fb.IsPlaying || fb.IsPaused) {
                 this.startTimers();
             }
+        }
+
+        // Always keep Mode 0 clock fresh on paint (prevents stale clock after tab/visibility restore)
+        if (!this.#displayOff && this.config.displayMode === 0 && (fb.IsPlaying || fb.IsPaused)) {
+            const { ghostTpl, timeStr } = this.#computeClockState();
+            if (ghostTpl !== this.#lastGhostTemplate) {
+                this.#lastGhostTemplate = ghostTpl;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+            }
+            this.#lastTimeStr = timeStr;
         }
 
         const theme = this.getActiveColors();
@@ -1589,37 +1563,55 @@ class LcdTimerController {
             try { np = fb.GetNowPlaying(); } catch { np = null; }
         }
 
+        let nextCodec = '', nextTitle = '', nextArtist = '', nextAlbum = '', nextBitrate = '', nextSample = '', nextBits = '', nextChannels = '';
+
         if (np) {
             try {
-                const raw = this.#compoundTf.EvalWithMetadb(np, true) || '';
+                const raw = this.#compoundTf.EvalWithMetadb(np) || '';
                 const parts = raw.split('\x01');
-                const co = parts[0] ? String(parts[0]).toUpperCase() : '';
-                this.#trackInfo.codec      = co;
-                this.#trackInfo.title      = parts[1] || 'Unknown Title';
-                this.#trackInfo.artist     = parts[2] || 'Unknown Artist';
-                this.#trackInfo.album      = parts[3] || '';
-                const br                   = parts[4] || '';
-                const sr                   = parts[5] || '';
-                const bits                 = parts[6] || '';
-                this.#trackInfo.bitrate    = br ? `${br} kbps` : '';
-                this.#trackInfo.samplerate = sr ? `${sr} Hz` : '';
-                this.#trackInfo.bits       = bits ? `${bits} bit` : '';
-                this.#trackInfo.channels   = parts[7] || '';
-            } catch {
-                for (const k of Object.keys(this.#trackInfo)) this.#trackInfo[k] = '';
-            }
-        } else {
-            for (const k of Object.keys(this.#trackInfo)) this.#trackInfo[k] = '';
+                nextCodec    = parts[0] ? String(parts[0]).toUpperCase() : '';
+                nextTitle    = parts[1] || 'Unknown Title';
+                nextArtist   = parts[2] || 'Unknown Artist';
+                nextAlbum    = parts[3] || '';
+                const br     = parts[4] || '';
+                const sr     = parts[5] || '';
+                const bits   = parts[6] || '';
+                nextBitrate  = br ? `${br} kbps` : '';
+                nextSample   = sr ? `${sr} Hz` : '';
+                nextBits     = bits ? `${bits} bit` : '';
+                nextChannels = parts[7] || '';
+            } catch {}
         }
+
+        const ti = this.#trackInfo;
+        const changed = (
+            ti.codec      !== nextCodec ||
+            ti.title      !== nextTitle ||
+            ti.artist     !== nextArtist ||
+            ti.album      !== nextAlbum ||
+            ti.bitrate    !== nextBitrate ||
+            ti.samplerate !== nextSample ||
+            ti.bits       !== nextBits ||
+            ti.channels   !== nextChannels
+        );
+
+        if (!changed) return false;
+
+        ti.codec      = nextCodec;
+        ti.title      = nextTitle;
+        ti.artist     = nextArtist;
+        ti.album      = nextAlbum;
+        ti.bitrate    = nextBitrate;
+        ti.samplerate = nextSample;
+        ti.bits       = nextBits;
+        ti.channels   = nextChannels;
 
         this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
         this.#mode1Cache.invalidate();
+        return true;
     }
 
-    refreshClock(forceImmediate = false) {
-        if (this.#displayOff || this.config.displayMode !== 0 || this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || !window.IsVisible) return;
-        if (!fb.IsPlaying && !fb.IsPaused) return;
-
+    #computeClockState() {
         const maxLen = Math.max(fb.PlaybackLength || 0, fb.PlaybackTime || 0);
         const maxH = Math.floor(maxLen / 3600);
 
@@ -1632,11 +1624,6 @@ class LcdTimerController {
         const rem = this.config.modeRemaining;
 
         const ghostTpl = this.getGhostTemplate(maxH, rem, m);
-        const tplChanged = (ghostTpl !== this.#lastGhostTemplate);
-        if (tplChanged) {
-            this.#lastGhostTemplate = ghostTpl;
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
-        }
 
         let timeStr = '';
         if (maxH >= 10) {
@@ -1649,8 +1636,23 @@ class LcdTimerController {
             timeStr = m < 10 ? (rem ? `-${m}:${sStr}` : ` ${m}:${sStr}`) : (rem ? `-${m}:${sStr}` : `${m}:${sStr}`);
         }
 
+        return { ghostTpl, timeStr };
+    }
+
+    refreshClock(forceImmediate = false, doRepaint = true) {
+        if (this.#displayOff || this.config.displayMode !== 0 || this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || !window.IsVisible) return;
+        if (!fb.IsPlaying && !fb.IsPaused) return;
+
+        const { ghostTpl, timeStr } = this.#computeClockState();
+        const tplChanged = (ghostTpl !== this.#lastGhostTemplate);
+        if (tplChanged) {
+            this.#lastGhostTemplate = ghostTpl;
+            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+        }
+
         if (forceImmediate || tplChanged || timeStr !== this.#lastTimeStr) {
             this.#lastTimeStr = timeStr;
+            if (!doRepaint) return;
 
             if (tplChanged) {
                 window.Repaint();
@@ -1721,9 +1723,13 @@ class LcdTimerController {
             this.#lastTimeStr = '';
         }
     }
-	
-onSize() {
+
+    onSize() {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
+        if (window.Width <= 0 || window.Height <= 0) {
+            this.#wasHidden = true;
+            return;
+        }
         this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
         this.#digitSprites.invalidate();
         this.#mode1Cache.invalidate();
@@ -1796,13 +1802,17 @@ onSize() {
         this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
         this.startTimers();
         this.requestSave();
-        if (this.config.displayMode === 0) this.refreshClock(true);
+        if (this.config.displayMode === 0) this.refreshClock(true, false);
         window.Repaint();
         return true;
     }
 
     onLbtnDblClk() {
         if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return;
+        if (this.#clickTimer) {
+            window.ClearTimeout(this.#clickTimer);
+            this.#clickTimer = null;
+        }
         this.#lastDblClkTime = Date.now();
         this.#displayOff = !this.#displayOff;
         window.Repaint();
@@ -1819,11 +1829,16 @@ onSize() {
             return;
         }
         if (this.config.displayMode === 0) {
-            this.config.modeRemaining = !this.config.modeRemaining;
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
-            this.refreshClock(true);
-            this.saveAll();
-            window.Repaint();
+            if (this.#clickTimer) window.ClearTimeout(this.#clickTimer);
+            this.#clickTimer = window.SetTimeout(() => {
+                this.#clickTimer = null;
+                if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || this.#displayOff || this.config.displayMode !== 0) return;
+                this.config.modeRemaining = !this.config.modeRemaining;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                this.refreshClock(true, false);
+                this.saveAll();
+                window.Repaint();
+            }, 220);
         }
     }
 
@@ -1875,7 +1890,7 @@ onSize() {
             this.#mode1Cache.invalidate();
             this.#backplate.invalidate();
             this.startTimers();
-            if (this.config.displayMode === 0) this.refreshClock(true);
+            if (this.config.displayMode === 0) this.refreshClock(true, false);
             window.Repaint();
         } catch (err) {
             console.log(`Failed to load preset ${slot}: ${err}`);
@@ -1891,441 +1906,449 @@ onSize() {
         window.SetProperty(`LCD.Preset${slot}`, JSON.stringify(payload));
     }
 
+    // ========================================================================================
+    // CONTEXT MENU (DECLARATIVE MENU BUILDER)
+    // ========================================================================================
     showContextMenu(x, y) {
+        if (this.#clickTimer) {
+            window.ClearTimeout(this.#clickTimer);
+            this.#clickTimer = null;
+        }
         if (this.#positionAdjustMode || this.#opacityTarget) {
             this.#positionAdjustMode = null;
             this.#opacityTarget = null;
             window.Repaint();
         }
 
-        const MID = LcdTimerController.MENU_ID;
-
-        const menus = [];
-        const createMenu = () => {
-            const m = window.CreatePopupMenu();
-            menus.push(m);
-            return m;
-        };
-
-        const m        = createMenu();
-        const themeM   = createMenu();
-        const appM     = createMenu();
-        const bzM      = createMenu();
-        const iconM    = createMenu();
-        const borderM  = createMenu();
-        const opacityM = createMenu();
-        const layoutM  = createMenu();
-        const fontM    = createMenu();
-        const m0FontM  = createMenu();
-        const m1FontM  = createMenu();
-        const presetM  = createMenu();
-        const loadM    = createMenu();
-        const saveM    = createMenu();
-
-        // 1. Top Toggle: Sync Theme Across Panels
-        themeM.AppendMenuItem(0, MID.THEME_SYNC, 'Sync Theme');
-        if (this.config.syncTheme) themeM.CheckMenuRadioItem(MID.THEME_SYNC, MID.THEME_SYNC, MID.THEME_SYNC);
-        themeM.AppendMenuSeparator();
-
-        // 2. Themes with matching separator layout (at index 8 and 20)
-        LcdTimerController.THEMES.forEach((t, i) => {
-            if (i === 8 || i === 20) themeM.AppendMenuSeparator();
-            themeM.AppendMenuItem(0, MID.THEME_BASE + i, t.name);
-        });
-        themeM.AppendMenuSeparator();
-        themeM.AppendMenuItem(0, MID.THEME_BASE + LcdTimerController.THEMES.length, 'USER CUSTOM');
-        themeM.CheckMenuRadioItem(MID.THEME_BASE, MID.THEME_BASE + LcdTimerController.THEMES.length, MID.THEME_BASE + this.config.themeIdx);
-        themeM.AppendMenuSeparator();
-        themeM.AppendMenuItem(0, MID.CUST_LCD_COLOR, 'Custom LCD Color...');
-        themeM.AppendMenuItem(0, MID.CUST_BG_COLOR, 'Custom BG Color...');
-        themeM.AppendMenuItem(0, MID.CUST_BORDER_COLOR, 'Custom Border Color...');
-        themeM.AppendTo(m, 0, 'Themes');
-
-        bzM.AppendMenuItem(0, MID.BEZEL_ENABLE, 'Enable Bezel Frame');
-        if (this.config.bezelEnabled && this.config.bezelFile) bzM.CheckMenuRadioItem(MID.BEZEL_ENABLE, MID.BEZEL_ENABLE, MID.BEZEL_ENABLE);
-        bzM.AppendMenuSeparator();
+        const cfg = this.config;
+        const m = new MenuBuilder();
         const bezelNames = this.listBezelNames();
-        const bzStart = MID.BEZEL_NONE;
-        const bzEnd = bezelNames.length > 0 ? (bzStart + bezelNames.length) : bzStart;
-        bzM.AppendMenuItem(0, bzStart, 'None (No Bezel)');
-        if (bezelNames.length > 0) {
-            bzM.AppendMenuSeparator();
-            bezelNames.forEach((name, bi) => bzM.AppendMenuItem(0, bzStart + 1 + bi, name));
-        }
-        
-        const curClean = (this.config.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
-        const curBzIdx = (this.config.bezelEnabled && curClean) 
-            ? bezelNames.findIndex(n => n.toLowerCase() === curClean) 
-            : -1;
-        if (curBzIdx !== -1) bzM.CheckMenuRadioItem(bzStart, bzEnd, bzStart + 1 + curBzIdx);
-        else bzM.CheckMenuRadioItem(bzStart, bzEnd, bzStart);
 
-        bzM.AppendMenuSeparator();
-        bzM.AppendMenuItem(0, MID.BEZEL_FOLDER, 'Set Bezel Folder...');
-        bzM.AppendMenuItem(0, MID.BEZEL_RELOAD, 'Reload Bezel List');
-        bzM.AppendMenuSeparator();
-        bzM.AppendMenuItem(0, MID.PAD_LEFT, `Left padding... (${this.config.padLeft}px)`);
-        bzM.AppendMenuItem(0, MID.PAD_RIGHT, `Right padding... (${this.config.padRight}px)`);
-        bzM.AppendMenuItem(0, MID.PAD_TOP, `Top padding... (${this.config.padTop}px)`);
-        bzM.AppendMenuItem(0, MID.PAD_BOTTOM, `Bottom padding... (${this.config.padBottom}px)`);
-        bzM.AppendTo(appM, 0, 'Bezel / Overlay');
-
-        iconM.AppendMenuItem(0, MID.PLAY_ICON_BLINK, 'Blink When Playing');
-        if (this.config.playIconBlink) iconM.CheckMenuRadioItem(MID.PLAY_ICON_BLINK, MID.PLAY_ICON_BLINK, MID.PLAY_ICON_BLINK);
-        iconM.AppendMenuSeparator();
-        iconM.AppendMenuItem(0, MID.PLAY_ICON_BASE, 'Hidden');
-        iconM.AppendMenuItem(0, MID.PLAY_ICON_BASE + 1, 'Guifx2');
-        iconM.AppendMenuItem(0, MID.PLAY_ICON_BASE + 2, 'FontAwesome');
-        iconM.AppendMenuItem(0, MID.PLAY_ICON_BASE + 3, 'Segoe MDL2');
-        iconM.CheckMenuRadioItem(MID.PLAY_ICON_BASE, MID.PLAY_ICON_BASE + 3, MID.PLAY_ICON_BASE + this.config.playIconType);
-        iconM.AppendTo(appM, 0, 'Play Icon (Mode 1)');
-
-        borderM.AppendMenuItem(0, MID.BORDER_SIZE, `Set Border Size... (Current: ${this.config.borderMode}px)`);
-        borderM.AppendMenuSeparator();
-        borderM.AppendMenuItem(0, MID.BORDER_CUSTOM_TOGGLE, 'Use Custom Border Color');
-        if (this.config.useCustomBorder) borderM.CheckMenuRadioItem(MID.BORDER_CUSTOM_TOGGLE, MID.BORDER_CUSTOM_TOGGLE, MID.BORDER_CUSTOM_TOGGLE);
-        borderM.AppendMenuItem(0, MID.BORDER_CUSTOM_SETUP, 'Setup Custom Border Color...');
-        borderM.AppendTo(appM, 0, 'Border');
-
-        appM.AppendMenuSeparator();
-        appM.AppendMenuItem(0, MID.SHOW_GHOST, 'Ghost Segments');
-        if (this.config.showGhost) appM.CheckMenuRadioItem(MID.SHOW_GHOST, MID.SHOW_GHOST, MID.SHOW_GHOST);
-        appM.AppendMenuItem(0, MID.USE_REFLECTION, 'LCD Reflection');
-        if (this.config.useReflection) appM.CheckMenuRadioItem(MID.USE_REFLECTION, MID.USE_REFLECTION, MID.USE_REFLECTION);
-        appM.AppendMenuItem(0, MID.SHOW_SHADOW, 'Segment Shadow');
-        if (this.config.showShadow) appM.CheckMenuRadioItem(MID.SHOW_SHADOW, MID.SHOW_SHADOW, MID.SHOW_SHADOW);
-        appM.AppendMenuItem(0, MID.SHOW_GLOW, 'CRT Glow');
-        if (this.config.showGlow) appM.CheckMenuRadioItem(MID.SHOW_GLOW, MID.SHOW_GLOW, MID.SHOW_GLOW);
-        appM.AppendMenuItem(0, MID.SHOW_SCANLINES, 'CRT Scanlines');
-        if (this.config.showScanlines) appM.CheckMenuRadioItem(MID.SHOW_SCANLINES, MID.SHOW_SCANLINES, MID.SHOW_SCANLINES);
-        appM.AppendMenuItem(0, MID.SHOW_PHOSPHOR, 'Phosphor Mask');
-        if (this.config.showPhosphor) appM.CheckMenuRadioItem(MID.SHOW_PHOSPHOR, MID.SHOW_PHOSPHOR, MID.SHOW_PHOSPHOR);
-        appM.AppendMenuSeparator();
-        appM.AppendMenuItem(0, MID.MATCH_TECH_COLOR, 'Match Tech/Codec to Theme Color');
-        if (this.config.useThemeColorForTech) appM.CheckMenuRadioItem(MID.MATCH_TECH_COLOR, MID.MATCH_TECH_COLOR, MID.MATCH_TECH_COLOR);
-
-        appM.AppendMenuSeparator();
-        ['Clock', 'Ghost', 'Tech', 'Border', 'Background', 'Reflection', 'Shadow', 'Glow', 'Scanlines', 'Phosphor']
-            .forEach((n, i) => opacityM.AppendMenuItem(0, MID.OPACITY_BASE + i, n));
-        opacityM.AppendTo(appM, 0, 'Opacity');
-
-        appM.AppendMenuSeparator();
-        appM.AppendMenuItem(0, MID.OVERLAY_ALL_OFF, 'Disable All Overlays');
-        if (this.config.overlayAllOff) appM.CheckMenuRadioItem(MID.OVERLAY_ALL_OFF, MID.OVERLAY_ALL_OFF, MID.OVERLAY_ALL_OFF);
-        appM.AppendTo(m, 0, 'Appearance');
-
-        layoutM.AppendMenuItem(0, MID.POS_CLOCK, 'Adjust Clock Position...');
-        layoutM.AppendMenuItem(0, MID.POS_CODEC, 'Adjust Codec Position...');
-        layoutM.AppendMenuItem(0, MID.POS_DETAILS, 'Adjust Details Position...');
-        layoutM.AppendMenuSeparator();
-        layoutM.AppendMenuItem(0, MID.POS_M1_TITLE, 'Adjust Mode 1 Title Position...');
-        layoutM.AppendMenuItem(0, MID.POS_M1_CODEC, 'Adjust Mode 1 Codec Position...');
-        layoutM.AppendMenuSeparator();
-        layoutM.AppendMenuItem(0, MID.POS_RESET_ALL, 'Reset All Positions');
-        layoutM.AppendTo(m, 0, 'Layout');
-
-        fontM.AppendMenuItem(0, MID.AUTO_FONT_SIZE, 'Auto Font Size');
-        if (this.config.autoFontSize) fontM.CheckMenuRadioItem(MID.AUTO_FONT_SIZE, MID.AUTO_FONT_SIZE, MID.AUTO_FONT_SIZE);
-        fontM.AppendMenuSeparator();
-
-        m0FontM.AppendMenuItem(0, MID.SHOW_M0_CODEC, 'Show Codec Label');
-        if (this.config.showM0Codec) m0FontM.CheckMenuRadioItem(MID.SHOW_M0_CODEC, MID.SHOW_M0_CODEC, MID.SHOW_M0_CODEC);
-        m0FontM.AppendMenuItem(0, MID.SHOW_M0_TECH, 'Show Tech Details');
-        if (this.config.showM0Tech) m0FontM.CheckMenuRadioItem(MID.SHOW_M0_TECH, MID.SHOW_M0_TECH, MID.SHOW_M0_TECH);
-        m0FontM.AppendMenuSeparator();
-        m0FontM.AppendMenuItem(0, MID.CLOCK_FONT_DIGITAL, 'Digital (Internal 7-Segment LCD)');
-        m0FontM.AppendMenuItem(0, MID.CLOCK_FONT_EXTERNAL, `External Font… (${this.config.clockFontName !== 'Digital' ? this.config.clockFontName : 'Digital-7 Mono'})`);
-        m0FontM.CheckMenuRadioItem(MID.CLOCK_FONT_EXTERNAL, MID.CLOCK_FONT_DIGITAL, this.config.clockFontName === 'Digital' ? MID.CLOCK_FONT_DIGITAL : MID.CLOCK_FONT_EXTERNAL);
-        m0FontM.AppendMenuSeparator();
-        m0FontM.AppendMenuItem(0, MID.CLOCK_ITALIC_TOGGLE, 'Italic (5° Slanted)');
-        if (this.config.italicSlant) m0FontM.CheckMenuRadioItem(MID.CLOCK_ITALIC_TOGGLE, MID.CLOCK_ITALIC_TOGGLE, MID.CLOCK_ITALIC_TOGGLE);
-        m0FontM.AppendMenuSeparator();
-        m0FontM.AppendMenuItem(0, MID.CODEC_FONT_NAME, 'Codec Font...');
-        m0FontM.AppendMenuItem(0, MID.TECH_FONT_NAME, 'Tech Font...');
-        m0FontM.AppendMenuSeparator();
-        m0FontM.AppendMenuItem(this.config.autoFontSize ? 0x0001 : 0, MID.CLOCK_FONT_SIZE, `Clock Font Size (${this.config.clockFontSize}pt)...`);
-        m0FontM.AppendMenuItem(this.config.autoFontSize ? 0x0001 : 0, MID.CODEC_FONT_SIZE, 'Codec Font Size...');
-        m0FontM.AppendMenuItem(this.config.autoFontSize ? 0x0001 : 0, MID.TECH_FONT_SIZE, 'Tech Font Size...');
-        m0FontM.AppendTo(fontM, this.config.displayMode === 0 ? 0 : 0x0001, 'Mode 0 (Timer)');
-
-        m1FontM.AppendMenuItem(0, MID.SHOW_M1_TITLE, 'Show Title');
-        if (this.config.showM1Title) m1FontM.CheckMenuRadioItem(MID.SHOW_M1_TITLE, MID.SHOW_M1_TITLE, MID.SHOW_M1_TITLE);
-        m1FontM.AppendMenuItem(0, MID.SHOW_M1_ALBUM, 'Show Artist & Album');
-        if (this.config.showM1Album) m1FontM.CheckMenuRadioItem(MID.SHOW_M1_ALBUM, MID.SHOW_M1_ALBUM, MID.SHOW_M1_ALBUM);
-        m1FontM.AppendMenuItem(0, MID.SHOW_M1_CODEC, 'Show Codec Name');
-        if (this.config.showM1Codec) m1FontM.CheckMenuRadioItem(MID.SHOW_M1_CODEC, MID.SHOW_M1_CODEC, MID.SHOW_M1_CODEC);
-        m1FontM.AppendMenuItem(0, MID.SHOW_M1_TECH, 'Show Tech Details');
-        if (this.config.showM1Tech) m1FontM.CheckMenuRadioItem(MID.SHOW_M1_TECH, MID.SHOW_M1_TECH, MID.SHOW_M1_TECH);
-        m1FontM.AppendMenuSeparator();
-        m1FontM.AppendMenuItem(0, MID.M1_TEXT_FONT_NAME, 'Text Row Font...');
-        m1FontM.AppendMenuItem(this.config.autoFontSize ? 0x0001 : 0, MID.M1_TEXT_FONT_SIZE, 'Text Row Font Size...');
-        m1FontM.AppendMenuItem(0, MID.M1_CODEC_FONT_SIZE, `Codec Font Size (Current: ${this.config.m1CodecFontSize > 0 ? this.config.m1CodecFontSize + 'pt' : 'Auto'})...`);
-        m1FontM.AppendTo(fontM, this.config.displayMode === 1 ? 0 : 0x0001, 'Mode 1 (Text)');
-        fontM.AppendTo(m, 0, 'Fonts & Visibility');
-
-        [1, 2, 3].forEach(i => {
-            const hasPreset = Boolean(window.GetProperty(`LCD.Preset${i}`, null));
-            loadM.AppendMenuItem(hasPreset ? 0 : 0x0001, MID.PRESET_LOAD_BASE + (i - 1), `Preset ${i}${hasPreset ? '' : ' (Empty)'}`);
-        });
-        loadM.AppendTo(presetM, 0, 'Load Preset');
-        [1, 2, 3].forEach(i => saveM.AppendMenuItem(0, MID.PRESET_SAVE_BASE + (i - 1), `Preset ${i}`));
-        saveM.AppendTo(presetM, 0, 'Save Preset');
-        presetM.AppendTo(m, 0, 'Presets');
-
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(0, MID.RESET_DEFAULTS, 'Reset Visual Settings to Defaults');
-        m.AppendMenuItem(0, MID.FACTORY_RESET, 'Factory Reset (All Settings & Overlays)...');
-
-        let id = 0;
-        try {
-            id = m.TrackPopupMenu(x, y);
-        } finally {
-            for (const menu of menus) {
-                try { menu.Dispose(); } catch {}
-            }
-        }
-
-        if (id === 0) return true;
-
-        if (id === MID.THEME_SYNC) {
-            this.config.syncTheme = !this.config.syncTheme;
-            this.saveAll();
-            if (this.config.syncTheme) {
-                const themeName = LcdTimerController.THEMES[this.config.themeIdx]?.name;
-                if (themeName) {
-                    try { window.NotifyOthers('LcdThemeSync', themeName); } catch {}
+        // 1. Themes
+        m.addSubMenu('Themes', (themeM) => {
+            themeM.addItem('Sync Theme', () => {
+                cfg.syncTheme = !cfg.syncTheme;
+                this.saveAll();
+                if (cfg.syncTheme) {
+                    const themeName = LcdTimerController.THEMES[cfg.themeIdx]?.name;
+                    if (themeName) {
+                        try { window.NotifyOthers('LcdThemeSync', themeName); } catch {}
+                    }
                 }
-            }
-        } else if (id >= MID.THEME_BASE && id < MID.THEME_BASE + LcdTimerController.THEMES.length) {
-            const chosenTheme = LcdTimerController.THEMES[id - MID.THEME_BASE];
-            this.setThemeByName(chosenTheme.name, true);
-        } else if (id === MID.THEME_BASE + LcdTimerController.THEMES.length) {
-            this.config.themeIdx = LcdTimerController.THEMES.length;
-            this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
-            this.#backplate.invalidate();
-            this.#digitSprites.invalidate();
-            this.#mode1Cache.invalidate();
-        } else if (id === MID.CUST_LCD_COLOR) {
-            const prev = this.config.custLcd >>> 0;
-            const c = utils.ColourPicker(window.ID, prev);
-            const next = (c | 0xFF000000) >>> 0;
-            if (c !== -1 && next !== prev) {
-                this.config.custLcd = next;
-                this.config.themeIdx = LcdTimerController.THEMES.length;
+            }, { checked: cfg.syncTheme });
+            themeM.addSeparator();
+
+            LcdTimerController.THEMES.forEach((t, i) => {
+                if (i === 8 || i === 20) themeM.addSeparator();
+                themeM.addItem(t.name, () => {
+                    this.setThemeByName(t.name, true);
+                }, { radio: cfg.themeIdx === i });
+            });
+
+            themeM.addSeparator();
+            themeM.addItem('USER CUSTOM', () => {
+                cfg.themeIdx = LcdTimerController.THEMES.length;
                 this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
                 this.#backplate.invalidate();
                 this.#digitSprites.invalidate();
                 this.#mode1Cache.invalidate();
-            }
-        } else if (id === MID.CUST_BG_COLOR) {
-            const prev = this.config.custBg >>> 0;
-            const c = utils.ColourPicker(window.ID, prev);
-            const next = (c | 0xFF000000) >>> 0;
-            if (c !== -1 && next !== prev) {
-                this.config.custBg = next;
-                this.config.themeIdx = LcdTimerController.THEMES.length;
-                this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
-                this.#backplate.invalidate();
-                this.#digitSprites.invalidate();
-                this.#mode1Cache.invalidate();
-            }
-        } else if (id === MID.CUST_BORDER_COLOR || id === MID.BORDER_CUSTOM_SETUP) {
-            const prev = this.config.custBorder >>> 0;
-            const c = utils.ColourPicker(window.ID, prev);
-            const next = (c | 0xFF000000) >>> 0;
-            if (c !== -1 && next !== prev) {
-                this.config.custBorder = next;
-                this.config.useCustomBorder = true;
-                this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-                this.#backplate.invalidate();
-            }
-        } else if (id === MID.BORDER_SIZE) {
-            const val = GdiUtils.prompt('Enter border thickness in px (0-50):', 'Border Thickness', this.config.borderMode);
-            if (val !== null && val !== '') { 
-                this.config.borderMode = GdiUtils.clamp(parseInt(val, 10) || 0, 0, 50); 
-                this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.OVERLAY);
-                this.#backplate.invalidate(); 
-            }
-        } else if (id === MID.BORDER_CUSTOM_TOGGLE) {
-            this.config.useCustomBorder = !this.config.useCustomBorder;
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidate();
-        } else if (id === MID.SHOW_GHOST) { 
-            this.config.showGhost = !this.config.showGhost; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; 
-        } else if (id === MID.USE_REFLECTION) { 
-            this.config.useReflection = !this.config.useReflection; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay(); 
-        } else if (id === MID.SHOW_SHADOW) { 
-            this.config.showShadow = !this.config.showShadow; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
-            this.#digitSprites.invalidate();
-        } else if (id === MID.SHOW_GLOW) { 
-            this.config.showGlow = !this.config.showGlow; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
-            this.#digitSprites.invalidate();
-        } else if (id === MID.SHOW_SCANLINES) { 
-            this.config.showScanlines = !this.config.showScanlines; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay(); 
-        } else if (id === MID.SHOW_PHOSPHOR) { 
-            this.config.showPhosphor = !this.config.showPhosphor; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay(); 
-        } else if (id === MID.OVERLAY_ALL_OFF) { 
-            this.config.overlayAllOff = !this.config.overlayAllOff; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay(); 
-        } else if (id === MID.BEZEL_ENABLE) {
-            this.config.bezelEnabled = !this.config.bezelEnabled;
-            if (this.config.bezelEnabled && !this.config.bezelFile && bezelNames.length > 0) {
-                this.config.bezelFile = bezelNames[0];
-            }
-            this.loadBezel();
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay();
-            this.saveAll();
-            window.Repaint();
-        } else if (id === MID.BEZEL_NONE) {
-            this.config.bezelEnabled = false;
-            this.config.bezelFile = '';
-            this.loadBezel();
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay();
-        } else if (id >= MID.BEZEL_BASE && id < MID.BEZEL_BASE + bezelNames.length) {
-            this.config.bezelEnabled = true;
-            this.config.bezelFile = bezelNames[id - MID.BEZEL_BASE];
-            this.loadBezel();
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay();
-        } else if (id === MID.BEZEL_FOLDER) {
-            const f = GdiUtils.prompt('Enter folder path containing bezel/overlay images:', 'Set Bezel Folder', this.config.bezelFolder);
-            if (f) {
-                const cleaned = GdiUtils.sanitizePath(f);
-                if (cleaned && utils.IsDirectory(cleaned)) {
-                    this.config.bezelFolder = cleaned;
-                    this.#cachedBezelImages = null;
+            }, { radio: cfg.themeIdx === LcdTimerController.THEMES.length });
+
+            themeM.addSeparator();
+            themeM.addItem('Custom LCD Color...', () => {
+                const prev = cfg.custLcd >>> 0;
+                const c = utils.ColourPicker(window.ID, prev);
+                const next = (c | 0xFF000000) >>> 0;
+                if (c !== -1 && next !== prev) {
+                    cfg.custLcd = next;
+                    cfg.themeIdx = LcdTimerController.THEMES.length;
+                    this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
+                    this.#backplate.invalidate();
+                    this.#digitSprites.invalidate();
+                    this.#mode1Cache.invalidate();
+                }
+            });
+            themeM.addItem('Custom BG Color...', () => {
+                const prev = cfg.custBg >>> 0;
+                const c = utils.ColourPicker(window.ID, prev);
+                const next = (c | 0xFF000000) >>> 0;
+                if (c !== -1 && next !== prev) {
+                    cfg.custBg = next;
+                    cfg.themeIdx = LcdTimerController.THEMES.length;
+                    this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
+                    this.#backplate.invalidate();
+                    this.#digitSprites.invalidate();
+                    this.#mode1Cache.invalidate();
+                }
+            });
+            themeM.addItem('Custom Border Color...', () => {
+                const prev = cfg.custBorder >>> 0;
+                const c = utils.ColourPicker(window.ID, prev);
+                const next = (c | 0xFF000000) >>> 0;
+                if (c !== -1 && next !== prev) {
+                    cfg.custBorder = next;
+                    cfg.useCustomBorder = true;
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                    this.#backplate.invalidate();
+                }
+            });
+        });
+
+        // 2. Appearance
+        m.addSubMenu('Appearance', (appM) => {
+            appM.addSubMenu('Bezel / Overlay', (bzM) => {
+                bzM.addItem('Enable Bezel Frame', () => {
+                    cfg.bezelEnabled = !cfg.bezelEnabled;
+                    if (cfg.bezelEnabled && !cfg.bezelFile && bezelNames.length > 0) {
+                        cfg.bezelFile = bezelNames[0];
+                    }
                     this.loadBezel();
                     this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
                     this.#backplate.invalidateOverlay();
+                    this.saveAll();
+                }, { checked: Boolean(cfg.bezelEnabled && cfg.bezelFile) });
+
+                bzM.addSeparator();
+                const curClean = (cfg.bezelFile || '').toLowerCase().replace(/\.[^/.]+$/, '');
+                const curBzIdx = (cfg.bezelEnabled && curClean)
+                    ? bezelNames.findIndex(n => n.toLowerCase() === curClean)
+                    : -1;
+
+                bzM.addItem('None (No Bezel)', () => {
+                    cfg.bezelEnabled = false;
+                    cfg.bezelFile = '';
+                    this.loadBezel();
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                    this.#backplate.invalidateOverlay();
+                }, { radio: curBzIdx === -1 });
+
+                if (bezelNames.length > 0) {
+                    bzM.addSeparator();
+                    bezelNames.forEach((name, bi) => {
+                        bzM.addItem(GdiUtils.escapeMenuLabel(name), () => {
+                            cfg.bezelEnabled = true;
+                            cfg.bezelFile = name;
+                            this.loadBezel();
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                            this.#backplate.invalidateOverlay();
+                        }, { radio: curBzIdx === bi });
+                    });
                 }
-            }
-        } else if (id === MID.BEZEL_RELOAD) {
-            this.#cachedBezelImages = null;
-            this.loadBezel();
-            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
-            this.#backplate.invalidateOverlay();
-        } else if (id === MID.PAD_LEFT) {
-            const v = GdiUtils.prompt('Enter left padding in pixels (0-100):', 'Per-Side Padding', this.config.padLeft);
-            if (v !== null && v !== '') { this.config.padLeft = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.PAD_RIGHT) {
-            const v = GdiUtils.prompt('Enter right padding in pixels (0-100):', 'Per-Side Padding', this.config.padRight);
-            if (v !== null && v !== '') { this.config.padRight = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.PAD_TOP) {
-            const v = GdiUtils.prompt('Enter top padding in pixels (0-100):', 'Per-Side Padding', this.config.padTop);
-            if (v !== null && v !== '') { this.config.padTop = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.PAD_BOTTOM) {
-            const v = GdiUtils.prompt('Enter bottom padding in pixels (0-100):', 'Per-Side Padding', this.config.padBottom);
-            if (v !== null && v !== '') { this.config.padBottom = GdiUtils.clamp(parseInt(v, 10) || 0, 0, 100); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.SHOW_M0_CODEC) { 
-            this.config.showM0Codec = !this.config.showM0Codec; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; 
-            this.startTimers();
-        } else if (id === MID.SHOW_M0_TECH) { 
-            this.config.showM0Tech = !this.config.showM0Tech; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; 
-        } else if (id === MID.MATCH_TECH_COLOR) { 
-            this.config.useThemeColorForTech = !this.config.useThemeColorForTech; 
-            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-            this.#mode1Cache.invalidate();
-        } else if (id === MID.SHOW_M1_TITLE) { 
-            this.config.showM1Title = !this.config.showM1Title; 
-            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-        } else if (id === MID.SHOW_M1_ALBUM) { 
-            this.config.showM1Album = !this.config.showM1Album; 
-            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-        } else if (id === MID.SHOW_M1_CODEC) {
-            this.config.showM1Codec = !this.config.showM1Codec;
-            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-            this.#mode1Cache.invalidate();
-        } else if (id === MID.SHOW_M1_TECH) {
-            this.config.showM1Tech = !this.config.showM1Tech;
-            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-            this.#mode1Cache.invalidate();
-        } else if (id === MID.AUTO_FONT_SIZE) { 
-            this.config.autoFontSize = !this.config.autoFontSize; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; 
-        } else if (id >= MID.PLAY_ICON_BASE && id <= MID.PLAY_ICON_BASE + 3) { 
-            this.config.playIconType = id - MID.PLAY_ICON_BASE; 
-            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; 
-            this.startTimers();
-        } else if (id === MID.PLAY_ICON_BLINK) { 
-            this.config.playIconBlink = !this.config.playIconBlink; 
-            this.startTimers();
-        } else if (id >= MID.OPACITY_BASE && id < MID.OPACITY_BASE + 10) {
-            const targets = ['Clock', 'Ghost', 'Tech', 'Border', 'Background', 'Reflection', 'Shadow', 'Glow', 'Scanlines', 'Phosphor'];
-            this.#opacityTarget = targets[id - MID.OPACITY_BASE];
-        } else if (id >= MID.POS_CLOCK && id <= MID.POS_M1_CODEC) {
-            const pTargets = ['Clock', 'Codec', 'Details', 'M1Title', 'M1Codec'];
-            this.#positionAdjustMode = pTargets[id - MID.POS_CLOCK];
-        } else if (id === MID.POS_RESET_ALL) {
-            this.config.vOffset = 0; this.config.codecOffX = -10; this.config.codecOffY = -20;
-            this.config.detailOffX = -10; this.config.detailOffY = -5;
-            this.config.m1TitleOffX = -10; this.config.m1TitleOffY = -20;
-            this.config.m1CodecOffX = -10; this.config.m1CodecOffY = -5;
-            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
-            this.#mode1Cache.invalidate();
-        } else if (id === MID.CLOCK_FONT_DIGITAL) {
-            this.config.clockFontName = 'Digital';
-            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
-            this.#digitSprites.invalidate();
-        } else if (id === MID.CLOCK_ITALIC_TOGGLE) {
-            this.config.italicSlant = !this.config.italicSlant;
-            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
-            this.#digitSprites.invalidate();
-        } else if (id === MID.CLOCK_FONT_EXTERNAL) {
-            const cur = this.config.clockFontName === 'Digital' ? 'Digital-7 Mono' : this.config.clockFontName;
-            const f = GdiUtils.prompt('Clock Font Name (Installed Font):', 'Font Selection', cur);
-            if (f?.trim()) { 
-                this.config.clockFontName = f.trim(); 
+
+                bzM.addSeparator();
+                bzM.addItem('Set Bezel Folder...', () => {
+                    const f = GdiUtils.prompt('Enter folder path containing bezel/overlay images:', 'Set Bezel Folder', cfg.bezelFolder);
+                    if (f) {
+                        const cleaned = GdiUtils.sanitizePath(f);
+                        if (cleaned && utils.IsDirectory(cleaned)) {
+                            cfg.bezelFolder = cleaned;
+                            this.#cachedBezelImages = null;
+                            this.#cachedBezelFolder = null;
+                            this.loadBezel();
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                            this.#backplate.invalidateOverlay();
+                        }
+                    }
+                });
+                bzM.addItem('Reload Bezel List', () => {
+                    this.#cachedBezelImages = null;
+                    this.#cachedBezelFolder = null;
+                    this.loadBezel();
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                    this.#backplate.invalidateOverlay();
+                });
+
+                bzM.addSeparator();
+                const promptPad = (label, key) => {
+                    const v = GdiUtils.prompt(`Enter ${label} padding in pixels (0-100):`, 'Per-Side Padding', cfg[key]);
+                    if (v !== null && v.trim() !== '') {
+                        const n = parseInt(v, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg[key] = GdiUtils.clamp(n, 0, 100);
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                        }
+                    }
+                };
+                bzM.addItem(`Left padding... (${cfg.padLeft}px)`,     () => promptPad('left',   'padLeft'));
+                bzM.addItem(`Right padding... (${cfg.padRight}px)`,   () => promptPad('right',  'padRight'));
+                bzM.addItem(`Top padding... (${cfg.padTop}px)`,       () => promptPad('top',    'padTop'));
+                bzM.addItem(`Bottom padding... (${cfg.padBottom}px)`, () => promptPad('bottom', 'padBottom'));
+            });
+
+            appM.addSubMenu('Play Icon (Mode 1)', (iconM) => {
+                iconM.addItem('Blink When Playing', () => {
+                    cfg.playIconBlink = !cfg.playIconBlink;
+                    this.startTimers();
+                }, { checked: cfg.playIconBlink });
+                iconM.addSeparator();
+                ['Hidden', 'Guifx2', 'FontAwesome', 'Segoe MDL2'].forEach((lbl, i) => {
+                    iconM.addItem(lbl, () => {
+                        cfg.playIconType = i;
+                        this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                        this.startTimers();
+                    }, { radio: cfg.playIconType === i });
+                });
+            });
+
+            appM.addSubMenu('Border', (borderM) => {
+                borderM.addItem(`Set Border Size... (Current: ${cfg.borderMode}px)`, () => {
+                    const val = GdiUtils.prompt('Enter border thickness in px (0-50):', 'Border Thickness', cfg.borderMode);
+                    if (val !== null && val.trim() !== '') {
+                        const n = parseInt(val, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.borderMode = GdiUtils.clamp(n, 0, 50);
+                            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.OVERLAY);
+                            this.#backplate.invalidate();
+                        }
+                    }
+                });
+                borderM.addSeparator();
+                borderM.addItem('Use Custom Border Color', () => {
+                    cfg.useCustomBorder = !cfg.useCustomBorder;
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                    this.#backplate.invalidate();
+                }, { checked: cfg.useCustomBorder });
+                borderM.addItem('Setup Custom Border Color...', () => {
+                    const prev = cfg.custBorder >>> 0;
+                    const c = utils.ColourPicker(window.ID, prev);
+                    const next = (c | 0xFF000000) >>> 0;
+                    if (c !== -1 && next !== prev) {
+                        cfg.custBorder = next;
+                        cfg.useCustomBorder = true;
+                        this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                        this.#backplate.invalidate();
+                    }
+                });
+            });
+
+            appM.addSeparator();
+            appM.addItem('Ghost Segments', () => {
+                cfg.showGhost = !cfg.showGhost;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+            }, { checked: cfg.showGhost });
+
+            appM.addItem('LCD Reflection', () => {
+                cfg.useReflection = !cfg.useReflection;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                this.#backplate.invalidateOverlay();
+            }, { checked: cfg.useReflection });
+
+            appM.addItem('Segment Shadow', () => {
+                cfg.showShadow = !cfg.showShadow;
                 this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
                 this.#digitSprites.invalidate();
-            }
-        } else if (id === MID.CODEC_FONT_NAME) {
-            const f = GdiUtils.prompt('Codec Font Name:', 'Font Selection', this.config.codecFontName);
-            if (f?.trim()) { this.config.codecFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.TECH_FONT_NAME) {
-            const f = GdiUtils.prompt('Tech Details Font Name:', 'Font Selection', this.config.techFontName);
-            if (f?.trim()) { this.config.techFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.CLOCK_FONT_SIZE) {
-            const s = GdiUtils.prompt('Clock Font Size (pt):', 'Font Size', this.config.clockFontSize);
-            if (s) { 
-                this.config.clockFontSize = GdiUtils.clamp(parseInt(s, 10) || 48, 8, 120); 
+            }, { checked: cfg.showShadow });
+
+            appM.addItem('CRT Glow', () => {
+                cfg.showGlow = !cfg.showGlow;
                 this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
                 this.#digitSprites.invalidate();
-            }
-        } else if (id === MID.CODEC_FONT_SIZE) {
-            const s = GdiUtils.prompt('Codec Font Size (pt):', 'Font Size', this.config.codecFontSize);
-            if (s) { this.config.codecFontSize = GdiUtils.clamp(parseInt(s, 10) || 14, 8, 80); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.TECH_FONT_SIZE) {
-            const s = GdiUtils.prompt('Tech Font Size (pt):', 'Font Size', this.config.techFontSize);
-            if (s) { this.config.techFontSize = GdiUtils.clamp(parseInt(s, 10) || 14, 8, 80); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.M1_TEXT_FONT_NAME) {
-            const f = GdiUtils.prompt('Mode 1 Text Font Name:', 'Font Selection', this.config.textRowFontName);
-            if (f?.trim()) { this.config.textRowFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.M1_TEXT_FONT_SIZE) {
-            const s = GdiUtils.prompt('Mode 1 Text Font Size (pt):', 'Font Size', this.config.textRowFontSize);
-            if (s) { this.config.textRowFontSize = GdiUtils.clamp(parseInt(s, 10) || 20, 8, 100); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id === MID.M1_CODEC_FONT_SIZE) {
-            const s = GdiUtils.prompt('Mode 1 Codec Font Size (pt, 0=auto):', 'Font Size', this.config.m1CodecFontSize);
-            if (s !== null && s !== '') { this.config.m1CodecFontSize = GdiUtils.clamp(parseInt(s, 10) || 0, 0, 80); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
-        } else if (id >= MID.PRESET_LOAD_BASE && id <= MID.PRESET_LOAD_BASE + 2) {
-            this.loadPreset((id - MID.PRESET_LOAD_BASE) + 1);
-        } else if (id >= MID.PRESET_SAVE_BASE && id <= MID.PRESET_SAVE_BASE + 2) {
-            this.savePreset((id - MID.PRESET_SAVE_BASE) + 1);
-        } else if (id === MID.RESET_DEFAULTS) {
-            this.config = LcdTimerController.sanitizeConfig(LcdTimerController.DEFAULTS);
+            }, { checked: cfg.showGlow });
+
+            appM.addItem('CRT Scanlines', () => {
+                cfg.showScanlines = !cfg.showScanlines;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                this.#backplate.invalidateOverlay();
+            }, { checked: cfg.showScanlines });
+
+            appM.addItem('Phosphor Mask', () => {
+                cfg.showPhosphor = !cfg.showPhosphor;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                this.#backplate.invalidateOverlay();
+            }, { checked: cfg.showPhosphor });
+
+            appM.addSeparator();
+            appM.addItem('Match Tech/Codec to Theme Color', () => {
+                cfg.useThemeColorForTech = !cfg.useThemeColorForTech;
+                this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+                this.#mode1Cache.invalidate();
+            }, { checked: cfg.useThemeColorForTech });
+
+            appM.addSeparator();
+            appM.addSubMenu('Opacity', (opacityM) => {
+                ['Clock', 'Ghost', 'Tech', 'Border', 'Background', 'Reflection', 'Shadow', 'Glow', 'Scanlines', 'Phosphor']
+                    .forEach((n) => opacityM.addItem(n, () => { this.#opacityTarget = n; }));
+            });
+
+            appM.addSeparator();
+            appM.addItem('Disable All Overlays', () => {
+                cfg.overlayAllOff = !cfg.overlayAllOff;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.OVERLAY;
+                this.#backplate.invalidateOverlay();
+            }, { checked: cfg.overlayAllOff });
+        });
+
+        // 3. Layout
+        m.addSubMenu('Layout', (layoutM) => {
+            layoutM.addItem('Adjust Clock Position...',         () => { this.#positionAdjustMode = 'Clock'; });
+            layoutM.addItem('Adjust Codec Position...',         () => { this.#positionAdjustMode = 'Codec'; });
+            layoutM.addItem('Adjust Details Position...',       () => { this.#positionAdjustMode = 'Details'; });
+            layoutM.addSeparator();
+            layoutM.addItem('Adjust Mode 1 Title Position...',  () => { this.#positionAdjustMode = 'M1Title'; });
+            layoutM.addItem('Adjust Mode 1 Codec Position...',  () => { this.#positionAdjustMode = 'M1Codec'; });
+            layoutM.addSeparator();
+            layoutM.addItem('Reset All Positions', () => {
+                cfg.vOffset = 0; cfg.codecOffX = -10; cfg.codecOffY = -20;
+                cfg.detailOffX = -10; cfg.detailOffY = -5;
+                cfg.m1TitleOffX = -10; cfg.m1TitleOffY = -20;
+                cfg.m1CodecOffX = -10; cfg.m1CodecOffY = -5;
+                this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+                this.#mode1Cache.invalidate();
+            });
+        });
+
+        // 4. Fonts & Visibility
+        m.addSubMenu('Fonts & Visibility', (fontM) => {
+            fontM.addItem('Auto Font Size', () => {
+                cfg.autoFontSize = !cfg.autoFontSize;
+                this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+            }, { checked: cfg.autoFontSize });
+            fontM.addSeparator();
+
+            fontM.addSubMenu('Mode 0 (Timer)', (m0FontM) => {
+                m0FontM.addItem('Show Codec Label', () => {
+                    cfg.showM0Codec = !cfg.showM0Codec;
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                    this.startTimers();
+                }, { checked: cfg.showM0Codec });
+                m0FontM.addItem('Show Tech Details', () => {
+                    cfg.showM0Tech = !cfg.showM0Tech;
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                }, { checked: cfg.showM0Tech });
+                m0FontM.addSeparator();
+
+                m0FontM.addItem('Digital (Internal 7-Segment LCD)', () => {
+                    cfg.clockFontName = 'Digital';
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
+                    this.#digitSprites.invalidate();
+                }, { radio: cfg.clockFontName === 'Digital' });
+                m0FontM.addItem(`External Font\u2026 (${GdiUtils.escapeMenuLabel(cfg.clockFontName !== 'Digital' ? cfg.clockFontName : 'Digital-7 Mono')})`, () => {
+                    const cur = cfg.clockFontName === 'Digital' ? 'Digital-7 Mono' : cfg.clockFontName;
+                    const f = GdiUtils.prompt('Clock Font Name (Installed Font):', 'Font Selection', cur);
+                    if (f?.trim()) {
+                        cfg.clockFontName = f.trim();
+                        this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
+                        this.#digitSprites.invalidate();
+                    }
+                }, { radio: cfg.clockFontName !== 'Digital' });
+                m0FontM.addSeparator();
+
+                m0FontM.addItem('Italic (5\u00B0 Slanted)', () => {
+                    cfg.italicSlant = !cfg.italicSlant;
+                    this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
+                    this.#digitSprites.invalidate();
+                }, { checked: cfg.italicSlant });
+                m0FontM.addSeparator();
+
+                m0FontM.addItem('Codec Font...', () => {
+                    const f = GdiUtils.prompt('Codec Font Name:', 'Font Selection', cfg.codecFontName);
+                    if (f?.trim()) { cfg.codecFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+                });
+                m0FontM.addItem('Tech Font...', () => {
+                    const f = GdiUtils.prompt('Tech Details Font Name:', 'Font Selection', cfg.techFontName);
+                    if (f?.trim()) { cfg.techFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+                });
+                m0FontM.addSeparator();
+
+                m0FontM.addItem(`Clock Font Size (${cfg.clockFontSize}pt)...`, () => {
+                    const s = GdiUtils.prompt('Clock Font Size (pt):', 'Font Size', cfg.clockFontSize);
+                    if (s !== null && s.trim() !== '') {
+                        const n = parseInt(s, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.clockFontSize = GdiUtils.clamp(n, 8, 120);
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.DIGITS | LcdTimerController.DIRTY.LAYOUT;
+                            this.#digitSprites.invalidate();
+                        }
+                    }
+                }, { disabled: cfg.autoFontSize });
+                m0FontM.addItem('Codec Font Size...', () => {
+                    const s = GdiUtils.prompt('Codec Font Size (pt):', 'Font Size', cfg.codecFontSize);
+                    if (s !== null && s.trim() !== '') {
+                        const n = parseInt(s, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.codecFontSize = GdiUtils.clamp(n, 8, 80);
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                        }
+                    }
+                }, { disabled: cfg.autoFontSize });
+                m0FontM.addItem('Tech Font Size...', () => {
+                    const s = GdiUtils.prompt('Tech Font Size (pt):', 'Font Size', cfg.techFontSize);
+                    if (s !== null && s.trim() !== '') {
+                        const n = parseInt(s, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.techFontSize = GdiUtils.clamp(n, 8, 80);
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                        }
+                    }
+                }, { disabled: cfg.autoFontSize });
+            }, cfg.displayMode !== 0);
+
+            fontM.addSubMenu('Mode 1 (Text)', (m1FontM) => {
+                m1FontM.addItem('Show Title', () => {
+                    cfg.showM1Title = !cfg.showM1Title;
+                    this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+                }, { checked: cfg.showM1Title });
+                m1FontM.addItem('Show Artist & Album', () => {
+                    cfg.showM1Album = !cfg.showM1Album;
+                    this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+                }, { checked: cfg.showM1Album });
+                m1FontM.addItem('Show Codec Name', () => {
+                    cfg.showM1Codec = !cfg.showM1Codec;
+                    this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+                    this.#mode1Cache.invalidate();
+                }, { checked: cfg.showM1Codec });
+                m1FontM.addItem('Show Tech Details', () => {
+                    cfg.showM1Tech = !cfg.showM1Tech;
+                    this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1);
+                    this.#mode1Cache.invalidate();
+                }, { checked: cfg.showM1Tech });
+                m1FontM.addSeparator();
+
+                m1FontM.addItem('Text Row Font...', () => {
+                    const f = GdiUtils.prompt('Mode 1 Text Font Name:', 'Font Selection', cfg.textRowFontName);
+                    if (f?.trim()) { cfg.textRowFontName = f.trim(); this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT; }
+                });
+                m1FontM.addItem('Text Row Font Size...', () => {
+                    const s = GdiUtils.prompt('Mode 1 Text Font Size (pt):', 'Font Size', cfg.textRowFontSize);
+                    if (s !== null && s.trim() !== '') {
+                        const n = parseInt(s, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.textRowFontSize = GdiUtils.clamp(n, 8, 100);
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                        }
+                    }
+                }, { disabled: cfg.autoFontSize });
+                m1FontM.addItem(`Codec Font Size (Current: ${cfg.m1CodecFontSize > 0 ? cfg.m1CodecFontSize + 'pt' : 'Auto'})...`, () => {
+                    const s = GdiUtils.prompt('Mode 1 Codec Font Size (pt, 0=auto):', 'Font Size', cfg.m1CodecFontSize);
+                    if (s !== null && s.trim() !== '') {
+                        const n = parseInt(s, 10);
+                        if (!Number.isNaN(n)) {
+                            cfg.m1CodecFontSize = GdiUtils.clamp(n, 0, 80);
+                            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
+                        }
+                    }
+                });
+            }, cfg.displayMode !== 1);
+        });
+
+        // 5. Presets
+        m.addSubMenu('Presets', (presetM) => {
+            presetM.addSubMenu('Load Preset', (loadM) => {
+                [1, 2, 3].forEach((i) => {
+                    const hasPreset = Boolean(window.GetProperty(`LCD.Preset${i}`, null));
+                    loadM.addItem(`Preset ${i}${hasPreset ? '' : ' (Empty)'}`, () => this.loadPreset(i), { disabled: !hasPreset });
+                });
+            });
+            presetM.addSubMenu('Save Preset', (saveM) => {
+                [1, 2, 3].forEach((i) => {
+                    saveM.addItem(`Preset ${i}`, () => this.savePreset(i));
+                });
+            });
+        });
+
+        m.addSeparator();
+        m.addItem('Reset Visual Settings to Defaults', () => {
+            this.config = SettingsSchema.reset(this.config, { includeResetAll: false, defaults: LcdTimerController.DEFAULTS });
             this.#positionAdjustMode = null;
             this.#opacityTarget = null;
             this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
@@ -2334,29 +2357,30 @@ onSize() {
             this.#mode1Cache.invalidate();
             this.loadBezel();
             this.startTimers();
-            if (this.config.displayMode === 0) this.refreshClock(true);
-        } else if (id === MID.FACTORY_RESET) {
-            const confirm = GdiUtils.prompt("Type YES to reset all settings, custom colors and bezel paths to factory defaults:", "Confirm Factory Reset", "");
+            if (this.config.displayMode === 0) this.refreshClock(true, false);
+        });
+        m.addItem('Factory Reset (All Settings & Overlays)...', () => {
+            const confirm = GdiUtils.prompt('Type YES to reset all settings, custom colors and bezel paths to factory defaults:', 'Confirm Factory Reset', '');
             if (confirm?.toUpperCase() === 'YES') {
-                for (let p = 1; p <= 3; p++) window.SetProperty(`LCD.Preset${p}`, '');
-                this.config = LcdTimerController.sanitizeConfig(LcdTimerController.DEFAULTS);
+                for (let p = 1; p <= 3; p++) window.SetProperty(`LCD.Preset${p}`, null);
+                this.config = SettingsSchema.reset(this.config, { includeResetAll: true, defaults: LcdTimerController.DEFAULTS });
                 this.config.bezelFolder = `${this.#profileBase}skins\\overlay`;
-                this.config.custBg = GdiUtils.RGB(10, 15, 15);
-                this.config.custLcd = GdiUtils.RGB(0, 255, 200);
-                this.config.custBorder = GdiUtils.RGB(0, 255, 200);
-                this.config.useCustomBorder = false;
                 this.#positionAdjustMode = null;
                 this.#opacityTarget = null;
                 this.#cachedBezelImages = null;
+                this.#cachedBezelFolder = null;
                 this.loadBezel();
                 this.#dirtyFlags = LcdTimerController.DIRTY.ALL;
                 this.#backplate.invalidate();
                 this.#digitSprites.invalidate();
                 this.#mode1Cache.invalidate();
                 this.startTimers();
-                if (this.config.displayMode === 0) this.refreshClock(true);
+                if (this.config.displayMode === 0) this.refreshClock(true, false);
             }
-        }
+        });
+
+        const selected = m.track(x, y);
+        if (selected === 0) return true;
 
         this.requestSave();
         window.Repaint();
@@ -2391,6 +2415,7 @@ onSize() {
         this.saveAll();
         this.#lifecycle = LcdTimerController.LIFECYCLE.SHUTDOWN;
         this.stopTimers();
+        if (this.#clickTimer)         window.ClearTimeout(this.#clickTimer);
         if (this.#saveTimeout)        window.ClearTimeout(this.#saveTimeout);
         if (this.#bezelNotifyTimeout) window.ClearTimeout(this.#bezelNotifyTimeout);
 
@@ -2416,35 +2441,35 @@ function on_size() {
 }
 
 function on_playback_starting() { 
-    app.updateInfo(); 
+    const infoChanged = app.updateInfo(); 
     app.startTimers(); 
-    app.refreshClock(true);
-    window.Repaint(); 
+    app.refreshClock(true, !infoChanged);
+    if (infoChanged) window.Repaint(); 
 }
 
 function on_playback_new_track() { 
-    app.updateInfo(); 
+    const infoChanged = app.updateInfo(); 
     app.startTimers(); 
-    app.refreshClock(true);
-    window.Repaint(); 
+    app.refreshClock(true, !infoChanged);
+    if (infoChanged) window.Repaint(); 
 }
 
 function on_playback_stop(reason) { 
     app.stopTimers();
-    app.updateInfo();
     if (reason !== 2) {
+        app.updateInfo();
         window.Repaint(); 
     } 
 }
 
 function on_playback_pause(status) { 
     app.startTimers();
-    if (!status) app.refreshClock(true);
+    if (!status) app.refreshClock(true, false);
     window.Repaint(); 
 }
 
 function on_playback_seek() { 
-    app.refreshClock(true);
+    app.refreshClock(true, false);
     window.Repaint(); 
 }
 
@@ -2465,8 +2490,7 @@ function on_metadb_changed(handles, fromhook) {
     try {
         const np = fb.GetNowPlaying();
         if (np && (!handles || handles.Find(np) !== -1)) {
-            app.updateInfo();
-            window.Repaint();
+            if (app.updateInfo()) window.Repaint();
         }
     } catch {}
 }
