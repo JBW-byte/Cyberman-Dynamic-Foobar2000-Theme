@@ -82,7 +82,7 @@ This method uses a preconfigured **profile folder**.
 If your library has missing or incompatible artwork:
 
 Album Artwork Downloader is a good option for artwork downloads.  
-Added Biography-v1.4.2.mod.29, for artwork that downlaods a cover to your music folder.  
+Added Biography-v1.4.2.mod.46, for artwork that downlaods a cover to your music folder.  
 
 * A **Last.fm API key** is required for some options:
 
@@ -141,7 +141,7 @@ This theme includes and depends on community-developed components and scripts fr
   [https://github.com/regorxxx/Library-Tree-SMP](https://github.com/regorxxx/Library-Tree-SMP)
 
 * **Biography** — regor
-  [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1084983.html#msg1084983)
+  [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1086723.html#msg1086723)
 
 ### Optional Components
 
