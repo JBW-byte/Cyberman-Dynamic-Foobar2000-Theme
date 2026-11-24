@@ -145,7 +145,7 @@ This theme includes and depends on community-developed components and scripts fr
 
 ### Optional Components
 
-* Additional audio outputs and codecs:
+* Additional Components and audio outputs/codecs:
   [https://www.foobar2000.org/components](https://www.foobar2000.org/components)
 
 * SACD Decoder:
