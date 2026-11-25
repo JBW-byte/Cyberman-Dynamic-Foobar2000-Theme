@@ -149,7 +149,7 @@ This theme includes and depends on community-developed components and scripts fr
   [https://www.foobar2000.org/components](https://www.foobar2000.org/components)
 
 * SACD Decoder:
-  [https://sourceforge.net/projects/sacddecoder/](https://sourceforge.net/projects/sacddecoder/)<br><br><br>
+  [https://www.foobar2000.org/components/view/foo_input_dsd/release/3.0.2](https://www.foobar2000.org/components/view/foo_input_dsd/release/3.0.2)<br><br><br>
 
 ---
 # Full Manual Installation
