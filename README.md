@@ -109,6 +109,16 @@ Install the `.ttf` files.
 
 ---
 
+
+### Optional Components
+
+* Additional Components and audio outputs/codecs:
+  [https://www.foobar2000.org/components](https://www.foobar2000.org/components)
+
+* SACD and DSD Decoder:
+  [https://www.foobar2000.org/components/view/foo_input_dsd/release/3.0.2](https://www.foobar2000.org/components/view/foo_input_dsd/release/3.0.2)<br><br><br>
+
+
 ## Credits & Dependencies
 
 This theme includes and depends on community-developed components and scripts from the
@@ -142,14 +152,6 @@ This theme includes and depends on community-developed components and scripts fr
 
 * **Biography** — regor
   [Biography](https://hydrogenaudio.org/index.php/topic,112914.msg1086723.html#msg1086723)
-
-### Optional Components
-
-* Additional Components and audio outputs/codecs:
-  [https://www.foobar2000.org/components](https://www.foobar2000.org/components)
-
-* SACD Decoder:
-  [https://www.foobar2000.org/components/view/foo_input_dsd/release/3.0.2](https://www.foobar2000.org/components/view/foo_input_dsd/release/3.0.2)<br><br><br>
 
 ---
 # Full Manual Installation
