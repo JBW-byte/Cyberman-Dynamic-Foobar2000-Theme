@@ -1,6 +1,6 @@
 'use strict';
 		   // ======== AUTHOR L.E.D. AI ASSISTED ======== \\
-		  // ======== SMP 64bit LCD TimerPro v2.7 ========= \\
+		  // ======== SMP 64bit LCD TimerPro v2.8 ========= \\
 	     // ====== LCD Timer Various Custom Effects  ====== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -12,11 +12,12 @@
  * Copyright (c) 2026 [L.E.D.]
  * Allowed: Non-commercial use and modification.
  * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ * See License.txt.
  */
 
 window.DefineScript('SMP 64bit LCD TimerPro', { 
     author: 'L.E.D.', 
-    version: '2.7', 
+    version: '2.8', 
     features: { grab_focus: true } 
 });
 
@@ -320,7 +321,8 @@ class FontRegistry {
         try { 
             f = gdi.Font(fontName, s, style); 
         } catch { 
-            try { f = gdi.Font('Segoe UI', s, style); } catch { f = null; } 
+            try { f = gdi.Font('Segoe UI', s, style); } 
+            catch { f = null; } 
         }
 
         if (f) {
@@ -730,7 +732,7 @@ class Mode1TextCache {
     }
 
     render(w, h, lo, config, themeColor, isPlaying, scaleFn) {
-        const key = `${w}|${h}|${lo.truncatedTitle}|${lo.truncatedAlbum}|${lo.m1TitleSize}|${lo.m1AlbumSize}|${lo.m1TechSize}|${themeColor}|${config.opClock}|${isPlaying ? 1 : 0}|${config.showM1Title}|${config.showM1Album}|${config.showM1Codec}|${config.showM1Tech}|${config.useThemeColorForTech}`;
+        const key = `${w}|${h}|${lo.truncatedTitle}|${lo.truncatedAlbum}|${lo.m1TitleSize}|${lo.m1AlbumSize}|${lo.m1TechSize}|${themeColor}|${config.opClock}|${config.opTech}|${isPlaying ? 1 : 0}|${config.showM1Title}|${config.showM1Album}|${config.showM1Codec}|${config.showM1Tech}|${config.useThemeColorForTech}`;
         if (key === this.#key && this.#bmp) return this.#bmp;
 
         this.invalidate();
@@ -770,7 +772,7 @@ class Mode1TextCache {
 
                     for (const part of lo.m1TechParts) {
                         const col = config.useThemeColorForTech ? themeColor : part.baseCol;
-                        g.DrawString(part.text, lo.m1TechFont, GdiUtils.setAlpha(col, 220), xPos, yPos, part.w + 2, lo.dh);
+                        g.DrawString(part.text, lo.m1TechFont, GdiUtils.setAlpha(col, config.opTech), xPos, yPos, part.w + 2, lo.dh);
                         xPos += part.w + sep;
                     }
                 }
@@ -1175,6 +1177,7 @@ class LcdTimerController {
         const count = bezelNames.length + 1;
         const nextIdx = (currentIdx + direction + count) % count;
 
+        let chosenName = 'None';
         if (nextIdx === 0) {
             this.config.bezelEnabled = false;
             this.config.bezelFile = '';
@@ -1239,6 +1242,7 @@ class LcdTimerController {
         const minM1TextSize = Math.max(8, this.scale(9));
 
         const isInternal = (this.config.clockFontName === 'Digital');
+        const clockStyle = this.config.italicSlant ? 3 : 1;
 
         if (this.config.displayMode === 0) {
             const maxLen = Math.max(fb.PlaybackLength || 0, fb.PlaybackTime || 0);
@@ -1264,7 +1268,7 @@ class LcdTimerController {
                         lo.clockSize = GdiUtils.clamp(targetH, 12, 220);
                     }
                 } else {
-                    lo.clockSize = this.#fonts.fitSize(gr, maxSampleTime, this.config.clockFontName, 1, availW, targetH, targetH, 10);
+                    lo.clockSize = this.#fonts.fitSize(gr, maxSampleTime, this.config.clockFontName, clockStyle, availW, targetH, targetH, 10);
                 }
                 lo.codecSize = GdiUtils.clamp(Math.round(lo.dh * 0.14), 8, 72);
                 lo.techSize  = GdiUtils.clamp(Math.round(lo.dh * 0.10), 8, 52);
@@ -1274,7 +1278,7 @@ class LcdTimerController {
                 lo.techSize  = this.scale(this.config.techFontSize);
             }
 
-            lo.clockFont = isInternal ? null : this.#fonts.get(this.config.clockFontName, lo.clockSize, 1);
+            lo.clockFont = isInternal ? null : this.#fonts.get(this.config.clockFontName, lo.clockSize, clockStyle);
             lo.codecFont = this.#fonts.get(this.config.codecFontName, lo.codecSize, 0);
             lo.techFont  = this.#fonts.get(this.config.techFontName, lo.techSize, 0);
             lo.bottomH   = Math.max(12, Math.round(lo.techSize * 1.25));
@@ -1476,7 +1480,7 @@ class LcdTimerController {
 
                 for (const part of lo.m0TechParts) {
                     const col = this.config.useThemeColorForTech ? theme.lcd : part.baseCol;
-                    gr.DrawString(part.text, lo.techFont, GdiUtils.setAlpha(col, 220), xPos, yPos, part.w + 2, lo.bottomH);
+                    gr.DrawString(part.text, lo.techFont, GdiUtils.setAlpha(col, this.config.opTech), xPos, yPos, part.w + 2, lo.bottomH);
                     xPos += part.w + sep;
                 }
             }
@@ -1519,17 +1523,42 @@ class LcdTimerController {
         }
     }
 
+    #getSliderMeta(key) {
+        switch (key) {
+            case 'Clock':      return { label: 'Clock',          min: 0, max: 255, unit: '',   step: 5 };
+            case 'Ghost':      return { label: 'Ghost',          min: 0, max: 255, unit: '',   step: 5 };
+            case 'Tech':       return { label: 'Tech',           min: 0, max: 255, unit: '',   step: 5 };
+            case 'Border':     return { label: 'Border',         min: 0, max: 255, unit: '',   step: 5 };
+            case 'Background': return { label: 'Background',     min: 0, max: 255, unit: '',   step: 5 };
+            case 'Reflection': return { label: 'Reflection',     min: 0, max: 255, unit: '',   step: 5 };
+            case 'Shadow':     return { label: 'Shadow',         min: 0, max: 255, unit: '',   step: 5 };
+            case 'Glow':       return { label: 'Glow',           min: 0, max: 255, unit: '',   step: 5 };
+            case 'Scanlines':  return { label: 'Scanlines',      min: 0, max: 255, unit: '',   step: 5 };
+            case 'Phosphor':   return { label: 'Phosphor',       min: 0, max: 255, unit: '',   step: 5 };
+            case 'BorderSize': return { label: 'Border Size',    min: 0, max: 50,  unit: 'px', step: 1 };
+            case 'PadLeft':    return { label: 'Left Padding',   min: 0, max: 100, unit: 'px', step: 1 };
+            case 'PadRight':   return { label: 'Right Padding',  min: 0, max: 100, unit: 'px', step: 1 };
+            case 'PadTop':     return { label: 'Top Padding',    min: 0, max: 100, unit: 'px', step: 1 };
+            case 'PadBottom':  return { label: 'Bottom Padding', min: 0, max: 100, unit: 'px', step: 1 };
+            default:           return null;
+        }
+    }
+
     #drawSliderHud(gr, w, h) {
+        const meta = this.#getSliderMeta(this.#opacityTarget);
+        if (!meta) return;
         const barW = Math.min(this.scale(220), Math.round(w * 0.6));
+        const barH = this.scale(6);
         const bx = Math.floor((w - barW) / 2);
-        const by = h - this.scale(18);
         const font = this.#fonts.get('Segoe UI', this.scale(12));
         const val = this.getOpacity(this.#opacityTarget);
-        const label = `${this.#opacityTarget}: ${val}`;
+        const label = `${meta.label}: ${val}${meta.unit}`;
         const lSize = gr.MeasureString(label, font, 0, 0, 9999, 9999);
+        const by = Math.min(h - barH - this.scale(2), Math.max(Math.ceil(lSize.Height) + 4, h - this.scale(18)));
+        const ratio = meta.max > meta.min ? (val - meta.min) / (meta.max - meta.min) : 0;
 
-        gr.FillSolidRect(bx, by, barW, this.scale(6), GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 60));
-        gr.FillSolidRect(bx, by, Math.floor(barW * (val / 255)), this.scale(6), GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
+        gr.FillSolidRect(bx, by, barW, barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 60));
+        gr.FillSolidRect(bx, by, Math.floor(barW * ratio), barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
         gr.DrawString(label, font, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 220), (w - lSize.Width) / 2, by - lSize.Height - 2, lSize.Width + 4, lSize.Height);
     }
 
@@ -1761,16 +1790,22 @@ class LcdTimerController {
             case 'Glow':       return this.config.opGlow;
             case 'Scanlines':  return this.config.opScanlines;
             case 'Phosphor':   return this.config.opPhosphor;
+            case 'BorderSize': return this.config.borderMode;
+            case 'PadLeft':    return this.config.padLeft;
+            case 'PadRight':   return this.config.padRight;
+            case 'PadTop':     return this.config.padTop;
+            case 'PadBottom':  return this.config.padBottom;
             default:           return 255;
         }
     }
 
     setOpacity(key, val) {
-        const clamped = GdiUtils.clamp(val, 0, 255);
+        const meta = this.#getSliderMeta(key);
+        const clamped = GdiUtils.clamp(val, meta ? meta.min : 0, meta ? meta.max : 255);
         switch (key) {
             case 'Clock':      this.config.opClock = clamped; this.#digitSprites.invalidate(); this.#mode1Cache.invalidate(); break;
             case 'Ghost':      this.config.opGhost = clamped; this.#digitSprites.invalidate(); break;
-            case 'Tech':       this.config.opTech = clamped; break;
+            case 'Tech':       this.config.opTech = clamped; this.#mode1Cache.invalidate(); break;
             case 'Border':     this.config.opBorder = clamped; break;
             case 'Background': this.config.opBG = clamped; this.#dirtyFlags |= LcdTimerController.DIRTY.BACKPLATE; break;
             case 'Reflection': this.config.opReflection = clamped; break;
@@ -1778,6 +1813,15 @@ class LcdTimerController {
             case 'Glow':       this.config.opGlow = clamped; this.#digitSprites.invalidate(); break;
             case 'Scanlines':  this.config.opScanlines = clamped; break;
             case 'Phosphor':   this.config.opPhosphor = clamped; break;
+            case 'BorderSize':
+                this.config.borderMode = clamped;
+                this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1 | LcdTimerController.DIRTY.OVERLAY);
+                this.#mode1Cache.invalidate();
+                break;
+            case 'PadLeft':    this.config.padLeft = clamped;   this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1); this.#mode1Cache.invalidate(); break;
+            case 'PadRight':   this.config.padRight = clamped;  this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1); this.#mode1Cache.invalidate(); break;
+            case 'PadTop':     this.config.padTop = clamped;    this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1); this.#mode1Cache.invalidate(); break;
+            case 'PadBottom':  this.config.padBottom = clamped; this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.MODE1); this.#mode1Cache.invalidate(); break;
         }
         this.#backplate.invalidateOverlay();
         this.requestSave();
@@ -1785,9 +1829,12 @@ class LcdTimerController {
     }
 
     onMouseWheel(step) {
-        if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE) return false;
+        if (this.#lifecycle !== LcdTimerController.LIFECYCLE.LIVE || this.#displayOff) return false;
         if (this.#opacityTarget) {
-            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? 5 : -5));
+            const meta = this.#getSliderMeta(this.#opacityTarget);
+            const baseStep = meta ? meta.step : 5;
+            const inc = (baseStep === 1 && utils.IsKeyPressed(0x10)) ? 5 : baseStep;
+            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? inc : -inc));
             return true;
         }
         if (this.#positionAdjustMode) {
@@ -1851,6 +1898,11 @@ class LcdTimerController {
                 window.Repaint();
                 return true;
             }
+        }
+
+        if (this.#opacityTarget && !this.#positionAdjustMode && !utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x12)) {
+            if (vkey === 0x26 || vkey === 0x27) return this.onMouseWheel(1);
+            if (vkey === 0x28 || vkey === 0x25) return this.onMouseWheel(-1);
         }
 
         if (!this.#positionAdjustMode && utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
@@ -2059,20 +2111,10 @@ class LcdTimerController {
                 });
 
                 bzM.addSeparator();
-                const promptPad = (label, key) => {
-                    const v = GdiUtils.prompt(`Enter ${label} padding in pixels (0-100):`, 'Per-Side Padding', cfg[key]);
-                    if (v !== null && v.trim() !== '') {
-                        const n = parseInt(v, 10);
-                        if (!Number.isNaN(n)) {
-                            cfg[key] = GdiUtils.clamp(n, 0, 100);
-                            this.#dirtyFlags |= LcdTimerController.DIRTY.LAYOUT;
-                        }
-                    }
-                };
-                bzM.addItem(`Left padding... (${cfg.padLeft}px)`,     () => promptPad('left',   'padLeft'));
-                bzM.addItem(`Right padding... (${cfg.padRight}px)`,   () => promptPad('right',  'padRight'));
-                bzM.addItem(`Top padding... (${cfg.padTop}px)`,       () => promptPad('top',    'padTop'));
-                bzM.addItem(`Bottom padding... (${cfg.padBottom}px)`, () => promptPad('bottom', 'padBottom'));
+                bzM.addItem(`Left padding... (${cfg.padLeft}px)`,     () => { this.#positionAdjustMode = null; this.#opacityTarget = 'PadLeft'; });
+                bzM.addItem(`Right padding... (${cfg.padRight}px)`,   () => { this.#positionAdjustMode = null; this.#opacityTarget = 'PadRight'; });
+                bzM.addItem(`Top padding... (${cfg.padTop}px)`,       () => { this.#positionAdjustMode = null; this.#opacityTarget = 'PadTop'; });
+                bzM.addItem(`Bottom padding... (${cfg.padBottom}px)`, () => { this.#positionAdjustMode = null; this.#opacityTarget = 'PadBottom'; });
             });
 
             appM.addSubMenu('Play Icon (Mode 1)', (iconM) => {
@@ -2092,15 +2134,8 @@ class LcdTimerController {
 
             appM.addSubMenu('Border', (borderM) => {
                 borderM.addItem(`Set Border Size... (Current: ${cfg.borderMode}px)`, () => {
-                    const val = GdiUtils.prompt('Enter border thickness in px (0-50):', 'Border Thickness', cfg.borderMode);
-                    if (val !== null && val.trim() !== '') {
-                        const n = parseInt(val, 10);
-                        if (!Number.isNaN(n)) {
-                            cfg.borderMode = GdiUtils.clamp(n, 0, 50);
-                            this.#dirtyFlags |= (LcdTimerController.DIRTY.LAYOUT | LcdTimerController.DIRTY.OVERLAY);
-                            this.#backplate.invalidate();
-                        }
-                    }
+                    this.#positionAdjustMode = null;
+                    this.#opacityTarget = 'BorderSize';
                 });
                 borderM.addSeparator();
                 borderM.addItem('Use Custom Border Color', () => {
@@ -2180,12 +2215,12 @@ class LcdTimerController {
 
         // 3. Layout
         m.addSubMenu('Layout', (layoutM) => {
-            layoutM.addItem('Adjust Clock Position...',         () => { this.#positionAdjustMode = 'Clock'; });
-            layoutM.addItem('Adjust Codec Position...',         () => { this.#positionAdjustMode = 'Codec'; });
-            layoutM.addItem('Adjust Details Position...',       () => { this.#positionAdjustMode = 'Details'; });
+            layoutM.addItem('Adjust Clock Position...',         () => { this.#opacityTarget = null; this.#positionAdjustMode = 'Clock'; });
+            layoutM.addItem('Adjust Codec Position...',         () => { this.#opacityTarget = null; this.#positionAdjustMode = 'Codec'; });
+            layoutM.addItem('Adjust Details Position...',       () => { this.#opacityTarget = null; this.#positionAdjustMode = 'Details'; });
             layoutM.addSeparator();
-            layoutM.addItem('Adjust Mode 1 Title Position...',  () => { this.#positionAdjustMode = 'M1Title'; });
-            layoutM.addItem('Adjust Mode 1 Codec Position...',  () => { this.#positionAdjustMode = 'M1Codec'; });
+            layoutM.addItem('Adjust Mode 1 Title Position...',  () => { this.#opacityTarget = null; this.#positionAdjustMode = 'M1Title'; });
+            layoutM.addItem('Adjust Mode 1 Codec Position...',  () => { this.#opacityTarget = null; this.#positionAdjustMode = 'M1Codec'; });
             layoutM.addSeparator();
             layoutM.addItem('Reset All Positions', () => {
                 cfg.vOffset = 0; cfg.codecOffX = -10; cfg.codecOffY = -20;
@@ -2444,14 +2479,14 @@ function on_playback_starting() {
     const infoChanged = app.updateInfo(); 
     app.startTimers(); 
     app.refreshClock(true, !infoChanged);
-    if (infoChanged) window.Repaint(); 
+    if (infoChanged || app.config.displayMode === 1) window.Repaint(); 
 }
 
 function on_playback_new_track() { 
     const infoChanged = app.updateInfo(); 
     app.startTimers(); 
     app.refreshClock(true, !infoChanged);
-    if (infoChanged) window.Repaint(); 
+    if (infoChanged || app.config.displayMode === 1) window.Repaint(); 
 }
 
 function on_playback_stop(reason) { 

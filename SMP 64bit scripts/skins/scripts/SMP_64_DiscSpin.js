@@ -1,6 +1,6 @@
 ﻿'use strict';
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Disc Spin V5.7 =======- \\
+		     // -======= SMP 64bit Disc Spin V5.8 =======- \\
 		    // -====== Spins Disc + Artwork + Cover ======- \\
 
     // ===================*** Foobar2000 64bit ***================== \\
@@ -14,11 +14,12 @@
  * Copyright (c) 2026 [L.E.D.]
  * Allowed: Non-commercial use and modification.
  * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ * See License.txt.
  */
 
 window.DefineScript('SMP 64bit Disc Spin', { 
     author: 'L.E.D.', 
-    version: '5.7',
+    version: '5.8',
     features: { grab_focus: true } 
 });
 
@@ -239,7 +240,7 @@ class SettingsSchema {
 
         { key: 'borderSize',          prop: 'Disc.BorderSize',            type: 'int',   def: 0,     min: 0,   max: 50, group: 'style' },
         { key: 'borderColor',         prop: 'Disc.BorderColor',           type: 'color', def: 0xFF202020, group: 'style' },
-        { key: 'discPadding',         prop: 'Disc.Padding',               type: 'int',   def: 20,    min: 0,   max: 100, group: 'style' },
+        { key: 'discPadding',         prop: 'Disc.Padding',               type: 'int',   def: 12,    min: 0,   max: 100, group: 'style' },
         { key: 'albumPadding',        prop: 'Disc.AlbumPadding',          type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
         { key: 'padLeft',             prop: 'Disc.PadLeft',               type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
         { key: 'padRight',            prop: 'Disc.PadRight',              type: 'int',   def: 0,     min: 0,   max: 100, group: 'style' },
@@ -1717,12 +1718,13 @@ class DiscSpinController {
 
     #rebuildBackground() {
         const activeBackdrop = this.#coverImg || this.#discImgSource;
+        const bgActive = this.config.backgroundEnabled && !this.config.useAlbumArtOnly;
         this.#backdrop.rebuildBlur(
             activeBackdrop,
             window.Width,
             window.Height,
-            this.config.backgroundEnabled && this.config.blurEnabled && !this.config.useAlbumArtOnly,
-            this.config.blurRadius,
+            bgActive,
+            this.config.blurEnabled ? this.config.blurRadius : 0,
             this.config.bgUseUIColor,
             this.config.interpolationMode
         );
@@ -1731,7 +1733,7 @@ class DiscSpinController {
             window.Height,
             this.config.bgUseUIColor,
             this.config.customBgColor,
-            this.config.backgroundEnabled && !this.config.useAlbumArtOnly,
+            bgActive,
             this.config.darkenValue,
             this.#getSafeUIColour(),
             this.config.interpolationMode
@@ -2183,8 +2185,8 @@ class DiscSpinController {
         }
         this.loadDefaultArt(this.#artSearchToken);
     }
-	
-startSpinTimer() {
+
+    startSpinTimer() {
         this.stopSpinTimer();
         if (!this.config.spinningEnabled || this.config.useAlbumArtOnly || !fb.IsPlaying || this.#isPaused || this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) {
             return;
@@ -2330,18 +2332,38 @@ startSpinTimer() {
         this.#needsFullRepaint = false;
     }
 
+    #getSliderMeta(target) {
+        switch (target) {
+            case 'Reflection':     return { key: 'opReflection', label: 'Reflection',     min: 0, max: 255, unit: '',   step: 5, kind: 'overlay' };
+            case 'Glow':           return { key: 'opGlow',       label: 'Glow',           min: 0, max: 255, unit: '',   step: 5, kind: 'glow' };
+            case 'Scanlines':      return { key: 'opScanlines',  label: 'Scanlines',      min: 0, max: 255, unit: '',   step: 5, kind: 'overlay' };
+            case 'Phosphor':       return { key: 'opPhosphor',   label: 'Phosphor',       min: 0, max: 255, unit: '',   step: 5, kind: 'overlay' };
+            case 'Border Size':    return { key: 'borderSize',   label: 'Border Size',    min: 0, max: 50,  unit: 'px', step: 1, kind: 'border' };
+            case 'Disc Padding':   return { key: 'discPadding',  label: 'Disc Padding',   min: 0, max: 100, unit: 'px', step: 1, kind: 'geom' };
+            case 'Album Padding':  return { key: 'albumPadding', label: 'Album Padding',  min: 0, max: 100, unit: 'px', step: 1, kind: 'geom' };
+            case 'Left Padding':   return { key: 'padLeft',      label: 'Left Padding',   min: 0, max: 100, unit: 'px', step: 1, kind: 'geom' };
+            case 'Right Padding':  return { key: 'padRight',     label: 'Right Padding',  min: 0, max: 100, unit: 'px', step: 1, kind: 'geom' };
+            case 'Top Padding':    return { key: 'padTop',       label: 'Top Padding',    min: 0, max: 100, unit: 'px', step: 1, kind: 'geom' };
+            case 'Bottom Padding': return { key: 'padBottom',    label: 'Bottom Padding', min: 0, max: 100, unit: 'px', step: 1, kind: 'geom' };
+            default:               return null;
+        }
+    }
+
     #drawSliderHud(gr, w, h) {
+        const meta = this.#getSliderMeta(this.#opacityTarget);
+        if (!meta) return;
         const barW = Math.min(this.scale(220), Math.round(w * 0.6));
         const barH = Math.max(4, this.scale(6));
         const bx = Math.floor((w - barW) / 2);
-        const by = h - Math.max(16, this.scale(24));
-        const font = this.getHudFont();
-        const val = this.getOpacity(this.#opacityTarget);
-        const label = `${this.#opacityTarget}: ${val}`;
         const lH = Math.max(16, this.scale(20));
+        const by = Math.min(h - barH - this.scale(2), Math.max(lH + this.scale(2), h - Math.max(16, this.scale(24))));
+        const font = this.getHudFont();
+        const val = this.config[meta.key];
+        const ratio = meta.max > meta.min ? (val - meta.min) / (meta.max - meta.min) : 0;
+        const label = `${meta.label}: ${val}${meta.unit}`;
 
         gr.FillSolidRect(bx, by, barW, barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 60));
-        gr.FillSolidRect(bx, by, Math.floor(barW * (val / 255)), barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
+        gr.FillSolidRect(bx, by, Math.floor(barW * ratio), barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
         gr.DrawString(label, font, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 230), 0, by - lH - 2, w, lH, 0x11000000);
     }
 
@@ -2441,28 +2463,31 @@ startSpinTimer() {
     }
 
     getOpacity(target) {
-        switch (target) {
-            case 'Reflection': return this.config.opReflection;
-            case 'Glow':       return this.config.opGlow;
-            case 'Scanlines':  return this.config.opScanlines;
-            case 'Phosphor':   return this.config.opPhosphor;
-            default:           return 255;
-        }
+        const meta = this.#getSliderMeta(target);
+        return meta ? this.config[meta.key] : 255;
     }
 
     setOpacity(target, val) {
-        const clamped = GdiUtils.clamp(val, 0, 255);
-        switch (target) {
-            case 'Reflection': this.config.opReflection = clamped; break;
-            case 'Glow':
-                this.config.opGlow = clamped;
-                this.#geom.valid = false;
-                this.#refreshGlow();
-                break;
-            case 'Scanlines':  this.config.opScanlines  = clamped; break;
-            case 'Phosphor':   this.config.opPhosphor   = clamped; break;
+        const meta = this.#getSliderMeta(target);
+        if (!meta) return;
+        const clamped = GdiUtils.clamp(val, meta.min, meta.max);
+        this.config[meta.key] = clamped;
+
+        if (meta.kind === 'glow') {
+            this.#geom.valid = false;
+            this.#refreshGlow();
+            this.#rebuildOverlay();
+        } else if (meta.kind === 'overlay') {
+            this.#rebuildOverlay();
+        } else if (meta.kind === 'border') {
+            this.#geom.valid = false;
+            if (window.Width > 0 && window.Height > 0) this.#updateGeometry(window.Width, window.Height);
+            this.#rebuildOverlay();
+        } else if (meta.kind === 'geom') {
+            this.#geom.valid = false;
+            if (window.Width > 0 && window.Height > 0) this.#updateGeometry(window.Width, window.Height);
         }
-        this.#rebuildOverlay();
+
         this.requestSave();
         this.#needsFullRepaint = true;
         window.Repaint();
@@ -2471,7 +2496,10 @@ startSpinTimer() {
     onMouseWheel(step) {
         if (this.#lifecycle !== DiscSpinController.LIFECYCLE.LIVE) return false;
         if (this.#opacityTarget) {
-            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? 5 : -5));
+            const meta = this.#getSliderMeta(this.#opacityTarget);
+            if (!meta) return false;
+            const inc = (meta.step === 1 && utils.IsKeyPressed(0x10)) ? 5 : meta.step;
+            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? inc : -inc));
             return true;
         }
         return false;
@@ -2604,6 +2632,10 @@ startSpinTimer() {
                 window.Repaint();
                 return true;
             }
+        }
+        if (this.#opacityTarget && !utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x12)) {
+            if (vkey === 0x26 || vkey === 0x27) return this.onMouseWheel(1);  // Up/Right
+            if (vkey === 0x28 || vkey === 0x25) return this.onMouseWheel(-1); // Down/Left
         }
         if (utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
             if (vkey === 0x26) { this.cycleBezel(-1); return true; } // Ctrl+Up
@@ -2780,21 +2812,10 @@ startSpinTimer() {
                 });
 
                 bzM.addSeparator();
-                const promptPad = (label, key) => {
-                    const val = GdiUtils.prompt(`Enter ${label} padding in pixels (0-100):`, 'Per-Side Padding', cfg[key]);
-                    if (val !== null && val.trim() !== '') {
-                        const n = parseInt(val, 10);
-                        if (!Number.isNaN(n)) {
-                            cfg[key] = GdiUtils.clamp(n, 0, 100);
-                            this.#geom.valid = false;
-                            this.#updateGeometry(window.Width, window.Height);
-                        }
-                    }
-                };
-                bzM.addItem(`Left Padding... (${cfg.padLeft}px)`, () => promptPad('left', 'padLeft'));
-                bzM.addItem(`Right Padding... (${cfg.padRight}px)`, () => promptPad('right', 'padRight'));
-                bzM.addItem(`Top Padding... (${cfg.padTop}px)`, () => promptPad('top', 'padTop'));
-                bzM.addItem(`Bottom Padding... (${cfg.padBottom}px)`, () => promptPad('bottom', 'padBottom'));
+                bzM.addItem(`Left Padding... (${cfg.padLeft}px)`,     () => this.setOpacityTarget('Left Padding'));
+                bzM.addItem(`Right Padding... (${cfg.padRight}px)`,   () => this.setOpacityTarget('Right Padding'));
+                bzM.addItem(`Top Padding... (${cfg.padTop}px)`,       () => this.setOpacityTarget('Top Padding'));
+                bzM.addItem(`Bottom Padding... (${cfg.padBottom}px)`, () => this.setOpacityTarget('Bottom Padding'));
             });
 
             overlayM.addSubMenu('Phosphor Palette', (phosphorM) => {
@@ -2854,18 +2875,7 @@ startSpinTimer() {
 
         // Border and Padding
         m.addSubMenu('Border and Padding', (borderM) => {
-            borderM.addItem(`Set Border Size... (${cfg.borderSize}px)`, () => {
-                const val = GdiUtils.prompt('Enter border thickness (0-50 px):', 'Border Size', cfg.borderSize);
-                if (val !== null && val.trim() !== '') {
-                    const n = parseInt(val, 10);
-                    if (!Number.isNaN(n)) {
-                        cfg.borderSize = GdiUtils.clamp(n, 0, 50);
-                        this.#geom.valid = false;
-                        this.#updateGeometry(window.Width, window.Height);
-                        this.#rebuildOverlay();
-                    }
-                }
-            });
+            borderM.addItem(`Set Border Size... (${cfg.borderSize}px)`, () => this.setOpacityTarget('Border Size'));
             borderM.addItem('Change Border Color...', () => {
                 const c = utils.ColourPicker(window.ID, cfg.borderColor);
                 if (c !== -1) {
@@ -2874,30 +2884,8 @@ startSpinTimer() {
                 }
             });
             borderM.addSeparator();
-            borderM.addItem(`Set Disc Padding... (${cfg.discPadding}px)`, () => {
-                const val = GdiUtils.prompt('Enter disc padding (0-100 px):', 'Disc Padding', cfg.discPadding);
-                if (val !== null && val.trim() !== '') {
-                    const n = parseInt(val, 10);
-                    if (!Number.isNaN(n)) {
-                        cfg.discPadding = GdiUtils.clamp(n, 0, 100);
-                        this.#geom.valid = false;
-                        this.#updateGeometry(window.Width, window.Height);
-                        this.updateDiscArtwork();
-                    }
-                }
-            });
-            borderM.addItem(`Set Album Art Padding... (${cfg.albumPadding}px)`, () => {
-                const val = GdiUtils.prompt('Enter album art padding (0-100 px):', 'Album Art Padding', cfg.albumPadding);
-                if (val !== null && val.trim() !== '') {
-                    const n = parseInt(val, 10);
-                    if (!Number.isNaN(n)) {
-                        cfg.albumPadding = GdiUtils.clamp(n, 0, 100);
-                        this.#geom.valid = false;
-                        this.#updateGeometry(window.Width, window.Height);
-                        this.updateDiscArtwork();
-                    }
-                }
-            });
+            borderM.addItem(`Set Disc Padding... (${cfg.discPadding}px)`, () => this.setOpacityTarget('Disc Padding'));
+            borderM.addItem(`Set Album Art Padding... (${cfg.albumPadding}px)`, () => this.setOpacityTarget('Album Padding'));
         });
 
         // Background
@@ -2996,6 +2984,7 @@ startSpinTimer() {
             this.#currentCoverPath = '';
             this.#currentDiscPath = '';
             this.#currentArtKey = '';
+            this.#isDefault = false;
             this.loadBezel();
             if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
             else this.restoreLastAlbum();
@@ -3006,6 +2995,7 @@ startSpinTimer() {
             this.#discProc.clearNormalizedCache();
             this.#geom.valid = false;
             if (window.Width > 0 && window.Height > 0) this.#updateGeometry(window.Width, window.Height);
+            this.autoDetectMask(this.#currentDiscPath);
             this.updateDiscArtwork();
             this.#rebuildBackground();
             this.loadBezel();
@@ -3022,12 +3012,18 @@ startSpinTimer() {
                 this.#scanner.clearCaches();
                 this.#discProc.clearNormalizedCache();
                 this.#cachedBezelImages = null;
+                this.#cachedBezelFolder = null;
+                this.#isDefault = false;
                 this.saveAll();
                 this.loadBezel();
                 this.#geom.valid = false;
                 if (window.Width > 0 && window.Height > 0) this.#updateGeometry(window.Width, window.Height);
+                this.autoDetectMask(this.#currentDiscPath);
+                this.updateDiscArtwork();
+                this.#rebuildBackground();
                 this.#rebuildOverlay();
-                this.loadArtworkForTrack(this.#getSafeHandle(null), false);
+                this.startSpinTimer();
+                window.Repaint();
             }
         });
 

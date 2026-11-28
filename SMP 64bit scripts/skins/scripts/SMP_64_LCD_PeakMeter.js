@@ -1,7 +1,7 @@
 'use strict';
 
 		      // -============ AUTHOR L.E.D. ===========- \\
-		     // -======= SMP 64bit Peakmeter V2.6 =======- \\
+		     // -======= SMP 64bit Peakmeter V2.7 =======- \\
 		    // -===== Peakmeter + Spectrum Analyzer ======- \\
  
     // ===================*** Foobar2000 64bit ***================== \\
@@ -13,11 +13,12 @@
  * Copyright (c) 2026 [L.E.D.]
  * Allowed: Non-commercial use and modification.
  * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ * See License.txt.
  */
 
 window.DefineScript('SMP 64bit LCD Peak Meter VFX', { 
     author: 'L.E.D.', 
-    version: '2.6', 
+    version: '2.7', 
     features: { grab_focus: true } 
 });
 
@@ -3008,20 +3009,10 @@ class MenuManager {
                 });
 
                 bezelMenu.addSeparator();
-                const promptPad = (label, key) => {
-                    const val = GdiUtils.prompt(`Enter ${label.toLowerCase()} padding in pixels (0–${SIDE_PAD_LOGICAL_MAX}):`, 'Per-Side Padding', String(props[key]));
-                    if (val !== null && val.trim() !== '') {
-                        const n = parseInt(val, 10);
-                        if (!Number.isNaN(n)) {
-                            this.main.properties.set(key, GdiUtils.clamp(n, 0, SIDE_PAD_LOGICAL_MAX));
-                            this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, foreground: true, effect: true });
-                        }
-                    }
-                };
-                bezelMenu.addItem(`Left padding…  (${props.padLeft}px)`,   () => promptPad('Left',   'padLeft'));
-                bezelMenu.addItem(`Right padding…  (${props.padRight}px)`, () => promptPad('Right',  'padRight'));
-                bezelMenu.addItem(`Top padding…  (${props.padTop}px)`,     () => promptPad('Top',    'padTop'));
-                bezelMenu.addItem(`Bottom padding…  (${props.padBottom}px)`,() => promptPad('Bottom', 'padBottom'));
+                bezelMenu.addItem(`Left padding…  (${props.padLeft}px)`,   () => { this.main.opacitySliderTarget = 'PadLeft'; });
+                bezelMenu.addItem(`Right padding…  (${props.padRight}px)`, () => { this.main.opacitySliderTarget = 'PadRight'; });
+                bezelMenu.addItem(`Top padding…  (${props.padTop}px)`,     () => { this.main.opacitySliderTarget = 'PadTop'; });
+                bezelMenu.addItem(`Bottom padding…  (${props.padBottom}px)`,() => { this.main.opacitySliderTarget = 'PadBottom'; });
             });
 
             appearanceMenu.addSubMenu('Overlay Settings', (overlaySettingsMenu) => {
@@ -3059,25 +3050,11 @@ class MenuManager {
             }, { checked: props.showMarkers, disabled: isSpectrum });
 
             appearanceMenu.addItem(`Set marker border size…  (${props.markerBorderSize}px)`, () => {
-                const val = GdiUtils.prompt(`Enter marker border size in pixels (${MARKER_AREA_LOGICAL_MIN}–${MARKER_AREA_LOGICAL_MAX}):`, 'Marker Border Size', String(props.markerBorderSize));
-                if (val !== null && val.trim() !== '') {
-                    const n = parseInt(val, 10);
-                    if (!Number.isNaN(n)) {
-                        this.main.properties.set('markerBorderSize', GdiUtils.clamp(n, MARKER_AREA_LOGICAL_MIN, MARKER_AREA_LOGICAL_MAX));
-                        this.main.invalidateCaches({ geometry: true, background: true, effect: true });
-                    }
-                }
+                this.main.opacitySliderTarget = 'MarkerBorderSize';
             }, { disabled: isSpectrum });
 
             appearanceMenu.addItem(`Set panel padding…  (${props.panelPad}px)`, () => {
-                const val = GdiUtils.prompt(`Enter panel padding in pixels (${PANEL_PAD_LOGICAL_MIN}–${PANEL_PAD_LOGICAL_MAX}):`, 'Panel Padding', String(props.panelPad));
-                if (val !== null && val.trim() !== '') {
-                    const n = parseInt(val, 10);
-                    if (!Number.isNaN(n)) {
-                        this.main.properties.set('panelPad', GdiUtils.clamp(n, PANEL_PAD_LOGICAL_MIN, PANEL_PAD_LOGICAL_MAX));
-                        this.main.invalidateCaches({ geometry: true, spectrum: true, background: true, effect: true });
-                    }
-                }
+                this.main.opacitySliderTarget = 'PanelPad';
             });
         });
 
@@ -3355,8 +3332,42 @@ class LCDPeakMeter {
         MeterConstants.OPACITY_SLIDER_TARGETS.forEach((target) => {
             const key = MeterConstants.OPACITY_VALUE_KEYS[target];
             this.opacityAccessors[target] = {
+                label: target,
+                min: 0,
+                max: 255,
+                unit: '',
+                step: MeterConstants.OPACITY_STEP,
                 get: () => this.properties.values[key],
-                set: (v) => this.properties.set(key, GdiUtils.clamp(Math.round(v), 0, 255))
+                set: (v) => this.properties.set(key, GdiUtils.clamp(Math.round(v), 0, 255)),
+                onChanged: () => {
+                    if (target === 'OffSegments' || target === 'OnSegments') {
+                        this.invalidateCaches({ background: true, foreground: true, spectrum: true });
+                    } else if (target === 'Phosphor' || target === 'Scanlines' || target === 'Reflection') {
+                        this.invalidateCaches({ effect: true });
+                    }
+                }
+            };
+        });
+
+        [
+            ['MarkerBorderSize', 'Marker Border Size', 'markerBorderSize', MARKER_AREA_LOGICAL_MIN, MARKER_AREA_LOGICAL_MAX],
+            ['PanelPad',         'Panel Padding',      'panelPad',         PANEL_PAD_LOGICAL_MIN,   PANEL_PAD_LOGICAL_MAX],
+            ['PadLeft',          'Left Padding',       'padLeft',          0,                       SIDE_PAD_LOGICAL_MAX],
+            ['PadRight',         'Right Padding',      'padRight',         0,                       SIDE_PAD_LOGICAL_MAX],
+            ['PadTop',           'Top Padding',        'padTop',           0,                       SIDE_PAD_LOGICAL_MAX],
+            ['PadBottom',        'Bottom Padding',     'padBottom',        0,                       SIDE_PAD_LOGICAL_MAX]
+        ].forEach(([target, label, key, min, max]) => {
+            this.opacityAccessors[target] = {
+                label,
+                min,
+                max,
+                unit: 'px',
+                step: 1,
+                get: () => this.properties.values[key],
+                set: (v) => this.properties.set(key, GdiUtils.clamp(Math.round(v), min, max)),
+                onChanged: () => {
+                    this.invalidateCaches({ geometry: true, spectrum: true, background: true, foreground: true, effect: true });
+                }
             };
         });
 
@@ -3749,17 +3760,20 @@ class LCDPeakMeter {
         if (!acc) return;
         const value = acc.get();
         const barW = Math.min(SLIDER_BAR_MAX_WIDTH, width * 0.8), barH = SLIDER_BAR_HEIGHT;
-        const bx = Math.floor((width - barW) / 2), by = height - scaleDpi(20);
+        const bx = Math.floor((width - barW) / 2);
+        const lH = scaleDpi(20);
+        const by = Math.min(height - barH - scaleDpi(2), Math.max(lH + scaleDpi(2), height - scaleDpi(20)));
         if (by < 0) return;
+        const ratio = acc.max > acc.min ? (value - acc.min) / (acc.max - acc.min) : 0;
         const white = GdiUtils.colour(255, 255, 255);
         gr.FillSolidRect(bx, by, barW, barH, GdiUtils.withAlpha(white, 60));
-        gr.FillSolidRect(bx, by, Math.floor(barW * (value / 255)), barH, GdiUtils.withAlpha(white, 180));
+        gr.FillSolidRect(bx, by, Math.floor(barW * ratio), barH, GdiUtils.withAlpha(white, 180));
         const sliderFont = fonts.get('Segoe UI', scaleDpi(12), 0);
         if (!sliderFont) return;
-        const label = `${this.opacitySliderTarget}: ${value}`;
+        const label = `${acc.label}: ${value}${acc.unit}`;
         const ly = by - scaleDpi(22);
         if (ly >= 0) {
-            gr.DrawString(label, sliderFont, GdiUtils.withAlpha(white, 230), 0, ly, width, scaleDpi(20), 0x11000000);
+            gr.DrawString(label, sliderFont, GdiUtils.withAlpha(white, 230), 0, ly, width, lH, 0x11000000);
         }
     }
 
@@ -3880,6 +3894,10 @@ class LCDPeakMeter {
             this.invalidate();
             return true;
         }
+        if (this.opacitySliderTarget && !utils.IsKeyPressed(MeterConstants.VK_CONTROL) && !utils.IsKeyPressed(0x12)) {
+            if (vkey === MeterConstants.VK_UP || vkey === MeterConstants.VK_RIGHT) return this.onMouseWheel(1);
+            if (vkey === MeterConstants.VK_DOWN || vkey === MeterConstants.VK_LEFT) return this.onMouseWheel(-1);
+        }
         if (utils.IsKeyPressed(MeterConstants.VK_CONTROL) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
             if (vkey === MeterConstants.VK_UP) {
                 this.cycleBezel(-1);
@@ -3920,11 +3938,10 @@ class LCDPeakMeter {
         if (!this.opacitySliderTarget) return false;
         const acc = this.opacityAccessors[this.opacitySliderTarget];
         if (!acc) return false;
-        const delta = step > 0 ? MeterConstants.OPACITY_STEP : -MeterConstants.OPACITY_STEP;
-        acc.set(GdiUtils.clamp(acc.get() + delta, 0, 255));
-        const t = this.opacitySliderTarget;
-        if (t === 'OffSegments' || t === 'OnSegments') this.invalidateCaches({ background: true, foreground: true, spectrum: true });
-        else if (t === 'Phosphor' || t === 'Scanlines' || t === 'Reflection') this.invalidateCaches({ effect: true });
+        const inc = (acc.step === 1 && utils.IsKeyPressed(0x10)) ? 5 : acc.step;
+        const delta = step > 0 ? inc : -inc;
+        acc.set(GdiUtils.clamp(acc.get() + delta, acc.min, acc.max));
+        acc.onChanged();
         this.invalidate();
         return true;
     }

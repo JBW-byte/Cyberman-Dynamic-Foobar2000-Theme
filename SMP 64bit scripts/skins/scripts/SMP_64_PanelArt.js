@@ -1,6 +1,6 @@
 ﻿'use strict';
 		   // ============== AUTHOR L.E.D. ============== \\
-		  // ==-== Panel Artwork and Trackinfo v4.9  ==-== \\
+		  // ==-== Panel Artwork and Trackinfo v5.0  ==-== \\
          // ====== Staged Resize Pipeline + Full Blur ===== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -12,6 +12,7 @@
  * Copyright (c) 2026 [L.E.D.]
  * Allowed: Non-commercial use and modification.
  * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ * See License.txt.
  */
 
 window.DefineScript('SMP 64bit PanelArt', { 
@@ -1109,7 +1110,7 @@ class PanelArtController {
                 this.startImageMode(false);
             } else {
                 try {
-                    if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                    if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
                     else this.clearTrackDisplay();
                 } catch {
                     this.clearTrackDisplay();
@@ -1342,7 +1343,7 @@ class PanelArtController {
         window.Repaint();
     }
 
-    loadArtworkForTrack(metadb) {
+    loadArtworkForTrack(metadb, isTrackChange = false) {
         const handle = this.#getSafeHandle(metadb);
         if (!handle?.Path) {
             this.clearTrackDisplay();
@@ -1373,7 +1374,7 @@ class PanelArtController {
         const extraParts = [rawAlbum.trim(), rawDate.trim(), rawLen.trim()].filter(Boolean);
         this.#trackInfo.extra = extraParts.join(' | ');
 
-        if (this.config.glitchEnabled) {
+        if (isTrackChange && this.config.glitchEnabled) {
             this.triggerGlitch();
         }
 
@@ -1550,14 +1551,14 @@ class PanelArtController {
     }
 
     #rebuildBackground() {
-        this.#backdrop.rebuildBlur(
-            this.#coverImg,
-            window.Width,
-            window.Height,
-            this.config.backgroundEnabled && this.config.blurEnabled,
-            this.config.blurRadius,
-            this.config.bgUseUIColor
-        );
+			this.#backdrop.rebuildBlur(
+			this.#coverImg,
+			window.Width,
+			window.Height,
+			this.config.backgroundEnabled,
+			this.config.blurEnabled ? this.config.blurRadius : 0,
+			this.config.bgUseUIColor
+	);
         this.#backdrop.rebuildCache(
             window.Width,
             window.Height,
@@ -1752,7 +1753,7 @@ class PanelArtController {
             if (!images.length) {
                 this.config.imageMode = false;
                 this.requestSave();
-                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
                 else this.clearTrackDisplay();
                 return;
             }
@@ -1784,7 +1785,7 @@ class PanelArtController {
         this.requestSave();
 
         if (restoreTrack && fb.IsPlaying) {
-            this.loadArtworkForTrack(fb.GetNowPlaying());
+            this.loadArtworkForTrack(fb.GetNowPlaying(), false);
         } else {
             window.Repaint();
         }
@@ -1874,7 +1875,7 @@ class PanelArtController {
             if (!this.#slideImages.length) {
                 this.config.slideMode = false;
                 this.requestSave();
-                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
                 else this.clearTrackDisplay();
                 return;
             }
@@ -1897,7 +1898,7 @@ class PanelArtController {
         this.requestSave();
 
         if (restoreTrack && fb.IsPlaying) {
-            this.loadArtworkForTrack(fb.GetNowPlaying());
+            this.loadArtworkForTrack(fb.GetNowPlaying(), false);
         } else {
             window.Repaint();
         }
@@ -2235,19 +2236,37 @@ class PanelArtController {
         this.#dirtyFlags &= ~PanelArtController.DIRTY.TEXT;
     }
 
+    #getSliderMeta(target) {
+        switch (target) {
+            case 'Reflection':     return { key: 'opReflection',    label: 'Reflection',     min: 0, max: 255, unit: '',   step: 5 };
+            case 'Glow':           return { key: 'opGlow',          label: 'Glow',           min: 0, max: 255, unit: '',   step: 5 };
+            case 'Scanlines':      return { key: 'opScanlines',     label: 'Scanlines',      min: 0, max: 255, unit: '',   step: 5 };
+            case 'Phosphor':       return { key: 'opPhosphor',      label: 'Phosphor',       min: 0, max: 255, unit: '',   step: 5 };
+            case 'Padding':        return { key: 'albumArtPadding', label: 'Padding',        min: 0, max: 100, unit: 'px', step: 1 };
+            case 'Border Size':    return { key: 'borderSize',      label: 'Border Size',    min: 0, max: 50,  unit: 'px', step: 1 };
+            case 'Left Padding':   return { key: 'padLeft',         label: 'Left Padding',   min: 0, max: 100, unit: 'px', step: 1 };
+            case 'Right Padding':  return { key: 'padRight',        label: 'Right Padding',  min: 0, max: 100, unit: 'px', step: 1 };
+            case 'Top Padding':    return { key: 'padTop',          label: 'Top Padding',    min: 0, max: 100, unit: 'px', step: 1 };
+            case 'Bottom Padding': return { key: 'padBottom',       label: 'Bottom Padding', min: 0, max: 100, unit: 'px', step: 1 };
+            default:               return null;
+        }
+    }
+
     #drawSliderHud(gr, w, h) {
+        const meta = this.#getSliderMeta(this.#opacityTarget);
+        if (!meta) return;
         const barW = Math.min(this.scale(220), Math.round(w * 0.6));
         const barH = Math.max(4, this.scale(6));
         const bx = Math.floor((w - barW) / 2);
-        const by = h - Math.max(16, this.scale(24));
-        const font = this.getHudFont();
-        const val = this.getOpacity(this.#opacityTarget);
-        const max = this.#opacityTarget === 'Padding' ? 100 : 255;
-        const label = `${this.#opacityTarget}: ${val}${this.#opacityTarget === 'Padding' ? 'px' : ''}`;
         const lH = Math.max(16, this.scale(20));
+        const by = Math.min(h - barH - this.scale(2), Math.max(lH + this.scale(2), h - Math.max(16, this.scale(24))));
+        const font = this.getHudFont();
+        const val = this.config[meta.key];
+        const ratio = meta.max > meta.min ? (val - meta.min) / (meta.max - meta.min) : 0;
+        const label = `${meta.label}: ${val}${meta.unit}`;
 
         gr.FillSolidRect(bx, by, barW, barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 60));
-        gr.FillSolidRect(bx, by, Math.floor(barW * (val / max)), barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
+        gr.FillSolidRect(bx, by, Math.floor(barW * ratio), barH, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 180));
         gr.DrawString(label, font, GdiUtils.setAlpha(GdiUtils.RGB(255, 255, 255), 230), 0, by - lH - 2, w, lH, 0x11000000);
     }
 
@@ -2278,7 +2297,7 @@ class PanelArtController {
         const reloadTrackOrDisplay = () => {
             this.#scanner.clearCaches();
             this.#currentArtKey = '';
-            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
             else this.clearTrackDisplay();
         };
 
@@ -2498,17 +2517,7 @@ class PanelArtController {
             });
 
             panelM.addSubMenu('Border & Padding', (borderM) => {
-                borderM.addItem(`Set Border Size... (${cfg.borderSize}px)`, () => {
-                    const val = GdiUtils.prompt('Enter border thickness (0-50 px):', 'Border Frame', cfg.borderSize);
-                    if (val !== null && val.trim() !== '') {
-                        const n = parseInt(val, 10);
-                        if (!Number.isNaN(n)) {
-                            cfg.borderSize = GdiUtils.clamp(n, 0, 50);
-                            this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.OVERLAY);
-                            this.#rebuildOverlay();
-                        }
-                    }
-                });
+                borderM.addItem(`Set Border Size... (${cfg.borderSize}px)`, () => this.setOpacityTarget('Border Size'));
                 borderM.addItem('Change Border Color...', () => {
                     const c = utils.ColourPicker(window.ID, cfg.borderColor);
                     if (c !== -1) {
@@ -2518,20 +2527,10 @@ class PanelArtController {
                     }
                 });
                 borderM.addSeparator();
-                const promptPad = (label, key) => {
-                    const val = GdiUtils.prompt(`Enter ${label.toLowerCase()} padding (0-100 px):`, `${label} Padding`, cfg[key]);
-                    if (val !== null && val.trim() !== '') {
-                        const n = parseInt(val, 10);
-                        if (!Number.isNaN(n)) {
-                            cfg[key] = GdiUtils.clamp(n, 0, 100);
-                            this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT;
-                        }
-                    }
-                };
-                borderM.addItem(`Left Padding... (${cfg.padLeft}px)`,     () => promptPad('Left',   'padLeft'));
-                borderM.addItem(`Right Padding... (${cfg.padRight}px)`,   () => promptPad('Right',  'padRight'));
-                borderM.addItem(`Top Padding... (${cfg.padTop}px)`,       () => promptPad('Top',    'padTop'));
-                borderM.addItem(`Bottom Padding... (${cfg.padBottom}px)`, () => promptPad('Bottom', 'padBottom'));
+                borderM.addItem(`Left Padding... (${cfg.padLeft}px)`,     () => this.setOpacityTarget('Left Padding'));
+                borderM.addItem(`Right Padding... (${cfg.padRight}px)`,   () => this.setOpacityTarget('Right Padding'));
+                borderM.addItem(`Top Padding... (${cfg.padTop}px)`,       () => this.setOpacityTarget('Top Padding'));
+                borderM.addItem(`Bottom Padding... (${cfg.padBottom}px)`, () => this.setOpacityTarget('Bottom Padding'));
             });
 
             panelM.addSubMenu('Background', (bgM) => {
@@ -2679,7 +2678,7 @@ class PanelArtController {
             this.loadBezel();
             if (cfg.slideMode) this.startSlideMode(false);
             else if (cfg.imageMode) this.startImageMode(false);
-            else if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            else if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
             else this.clearTrackDisplay();
         });
 
@@ -2692,7 +2691,7 @@ class PanelArtController {
             this.#dirtyFlags = PanelArtController.DIRTY.ALL;
             this.#rebuildBackground();
             this.#rebuildOverlay();
-            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+            if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
             else this.clearTrackDisplay();
         });
 
@@ -2713,7 +2712,7 @@ class PanelArtController {
                 this.#dirtyFlags = PanelArtController.DIRTY.ALL;
                 this.#rebuildBackground();
                 this.#rebuildOverlay();
-                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying());
+                if (fb.IsPlaying) this.loadArtworkForTrack(fb.GetNowPlaying(), false);
                 else this.clearTrackDisplay();
             }
         });
@@ -2806,30 +2805,39 @@ class PanelArtController {
     }
 
     getOpacity(target) {
-        switch (target) {
-            case 'Reflection': return this.config.opReflection;
-            case 'Glow':       return this.config.opGlow;
-            case 'Scanlines':  return this.config.opScanlines;
-            case 'Phosphor':   return this.config.opPhosphor;
-            case 'Padding':    return this.config.albumArtPadding;
-            default:           return 255;
-        }
+        const meta = this.#getSliderMeta(target);
+        return meta ? this.config[meta.key] : 255;
     }
 
     setOpacity(target, val) {
-        const max = target === 'Padding' ? 100 : 255;
-        const clamped = GdiUtils.clamp(val, 0, max);
+        const meta = this.#getSliderMeta(target);
+        if (!meta) return;
+        const clamped = GdiUtils.clamp(val, meta.min, meta.max);
+        this.config[meta.key] = clamped;
+
         switch (target) {
-            case 'Reflection': this.config.opReflection = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; this.#rebuildOverlay(); break;
+            case 'Reflection':
+            case 'Scanlines':
+            case 'Phosphor':
+                this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY;
+                this.#rebuildOverlay();
+                break;
             case 'Glow':
-                this.config.opGlow = clamped;
                 if (this.#layout.artRect.w > 0) {
                     this.#backdrop.checkGlow(this.#layout.artRect.w, this.#layout.artRect.h, this.config.showGlow, clamped, this.config.overlayAllOff);
                 }
                 break;
-            case 'Scanlines':  this.config.opScanlines = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; this.#rebuildOverlay(); break;
-            case 'Phosphor':   this.config.opPhosphor = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.OVERLAY; this.#rebuildOverlay(); break;
-            case 'Padding':    this.config.albumArtPadding = clamped; this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT; break;
+            case 'Border Size':
+                this.#dirtyFlags |= (PanelArtController.DIRTY.LAYOUT | PanelArtController.DIRTY.OVERLAY);
+                this.#rebuildOverlay();
+                break;
+            case 'Padding':
+            case 'Left Padding':
+            case 'Right Padding':
+            case 'Top Padding':
+            case 'Bottom Padding':
+                this.#dirtyFlags |= PanelArtController.DIRTY.LAYOUT;
+                break;
         }
         this.requestSave();
         window.Repaint();
@@ -2838,7 +2846,10 @@ class PanelArtController {
     onMouseWheel(step) {
         if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return false;
         if (this.#opacityTarget) {
-            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? 5 : -5));
+            const meta = this.#getSliderMeta(this.#opacityTarget);
+            if (!meta) return false;
+            const inc = (meta.step === 1 && utils.IsKeyPressed(0x10)) ? 5 : meta.step;
+            this.setOpacity(this.#opacityTarget, this.getOpacity(this.#opacityTarget) + (step > 0 ? inc : -inc));
             return true;
         }
         return false;
@@ -2882,6 +2893,17 @@ class PanelArtController {
         if (this.#lifecycle !== PanelArtController.LIFECYCLE.LIVE) return;
         if (name === 'ArtFolder' && info && !fb.IsPlaying) {
             if (!utils.IsDirectory(info)) return;
+
+            const sel = this.#getSafeHandle(null);
+            if (sel && sel.Path) {
+                const lastSlash = Math.max(sel.Path.lastIndexOf('\\'), sel.Path.lastIndexOf('/'));
+                const trackDir = (lastSlash > 0 ? sel.Path.substring(0, lastSlash) : '').toLowerCase();
+                const targetDir = info.toLowerCase().replace(/[\\/]+$/, '');
+                if (trackDir && targetDir && (trackDir === targetDir || trackDir.startsWith(`${targetDir}\\`) || trackDir.startsWith(`${targetDir}/`))) {
+                    this.loadArtworkForTrack(sel, false);
+                    return;
+                }
+            }
 
             const thisToken = ++this.#artGenerationToken;
             if (this.#pendingSearchTimer) { window.ClearTimeout(this.#pendingSearchTimer); this.#pendingSearchTimer = null; }
@@ -2928,7 +2950,7 @@ class PanelArtController {
                 this.#dirtyFlags |= PanelArtController.DIRTY.TEXT;
                 window.Repaint();
             } else {
-                this.loadArtworkForTrack(np);
+                this.loadArtworkForTrack(np, false);
             }
         } catch {}
     }
@@ -2944,6 +2966,10 @@ class PanelArtController {
         if (vkey === 0x1B && this.#opacityTarget !== null) { // Escape
             this.setOpacityTarget(null);
             return true;
+        }
+        if (this.#opacityTarget !== null && !utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x12)) {
+            if (vkey === 0x26 || vkey === 0x27) return this.onMouseWheel(1);
+            if (vkey === 0x28 || vkey === 0x25) return this.onMouseWheel(-1);
         }
         if (utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) { // Ctrl only
             if (vkey === 0x26) { this.cycleBezel(-1); return true; } // UP
@@ -2992,7 +3018,7 @@ function on_size() {
 }
 
 function on_playback_new_track(metadb) {
-    app.loadArtworkForTrack(metadb);
+    app.loadArtworkForTrack(metadb, true);
 }
 
 function on_playback_stop(reason) {
@@ -3002,6 +3028,22 @@ function on_playback_stop(reason) {
 function on_playback_pause()    { window.Repaint(); }
 function on_playback_starting() {}
 function on_playback_seek()     { window.Repaint(); }
+
+function on_selection_changed() {
+    if (fb.IsPlaying) return;
+    try {
+        const sel = fb.GetSelection();
+        if (sel?.Path) app.loadArtworkForTrack(sel, false);
+    } catch {}
+}
+
+function on_item_focus_change() {
+    if (fb.IsPlaying) return;
+    try {
+        const sel = fb.GetSelection();
+        if (sel?.Path) app.loadArtworkForTrack(sel, false);
+    } catch {}
+}
 
 function on_colours_changed() {
     app.refreshColours();

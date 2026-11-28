@@ -1,7 +1,7 @@
 'use strict';
 
            // ============== AUTHOR L.E.D. ============== \\
-          // ==-== 	  Audio PlayBack Buttons v2.9    ==-== \\
+          // ==-== 	  Audio PlayBack Buttons v3.0    ==-== \\
          // ========== PlayBack and Custom Sets =========== \\
 
   // ===================*** Foobar2000 64bit ***================== \\
@@ -12,12 +12,13 @@
  * Custom License for foobar2000 Themes
  * Copyright (c) 2026 [L.E.D.]
  * Allowed: Non-commercial use and modification.
- * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
+ * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ * See License.txt.
  */
 
 window.DefineScript('Playback Buttons Pro', { 
     author: 'L.E.D.', 
-    version: '2.9', 
+    version: '3.0', 
     features: { grab_focus: true } 
 });
 
@@ -242,29 +243,29 @@ class AsyncImageLoader {
 
 class SettingsSchema {
     static FIELDS = [
-        { key: 'btnSize',       prop: 'Buttons: Size',                                          type: 'int',   def: 128, min: 16, max: 512, group: 'style' },
-        { key: 'paddingGap',    prop: 'Buttons: Padding Gap',                                   type: 'int',   def: 0,   min: 0,  max: 300, group: 'style' },
-        { key: 'paddingBorder', prop: 'Buttons: Padding Border',                                type: 'int',   def: 0,   min: 0,  max: 300, group: 'style' },
-        { key: 'alignV',        prop: 'Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)',type: 'int',   def: 1,   min: 0,  max: 2,   group: 'style' },
+        { key: 'btnSize',       prop: 'Buttons: Size',                                           type: 'int',   def: 128, min: 16, max: 512, group: 'style' },
+        { key: 'paddingGap',    prop: 'Buttons: Padding Gap',                                    type: 'int',   def: 0,   min: 0,  max: 300, group: 'style' },
+        { key: 'paddingBorder', prop: 'Buttons: Padding Border',                                 type: 'int',   def: 0,   min: 0,  max: 300, group: 'style' },
+        { key: 'alignV',        prop: 'Buttons: Vertical Alignment (0=Top, 1=Middle, 2=Bottom)', type: 'int',   def: 1,   min: 0,  max: 2,   group: 'style' },
         { key: 'alignH',        prop: 'Buttons: Horizontal Alignment (0=Left, 1=Centre, 2=Right)',type: 'int',  def: 1,   min: 0,  max: 2,   group: 'style' },
-        { key: 'sizeMode',      prop: 'Buttons: Size Mode',                                     type: 'int',   def: 1,   min: 0,  max: 2,   group: 'style' },
-        { key: 'stretchFill',   prop: 'Buttons: Stretch Fill',                                  type: 'bool',  def: false, group: 'style' },
-        { key: 'useTint',       prop: 'Colors: Use Tint',                                       type: 'bool',  def: false, group: 'style' },
-        { key: 'colorNormal',   prop: 'Colors: Normal',                                         type: 'color', def: GdiUtils.RGB(255, 255, 255), group: 'style' },
-        { key: 'colorHover',    prop: 'Colors: Hover',                                          type: 'color', def: GdiUtils.RGB(150, 150, 150), group: 'style' },
-        { key: 'colorDown',     prop: 'Colors: Down',                                           type: 'color', def: GdiUtils.RGB(100, 100, 100), group: 'style' },
-        { key: 'useBgColor',    prop: 'Colors: Use Background',                                 type: 'bool',  def: true,  group: 'style' },
-        { key: 'bgColor',       prop: 'Colors: Background',                                     type: 'color', def: GdiUtils.RGB(32, 32, 32), group: 'style' },
+        { key: 'sizeMode',      prop: 'Buttons: Size Mode',                                      type: 'int',   def: 1,   min: 0,  max: 2,   group: 'style' },
+        { key: 'stretchFill',   prop: 'Buttons: Stretch Fill',                                   type: 'bool',  def: false, group: 'style' },
+        { key: 'useTint',       prop: 'Colors: Use Tint',                                        type: 'bool',  def: false, group: 'style' },
+        { key: 'colorNormal',   prop: 'Colors: Normal',                                          type: 'color', def: GdiUtils.RGB(255, 255, 255), group: 'style' },
+        { key: 'colorHover',    prop: 'Colors: Hover',                                           type: 'color', def: GdiUtils.RGB(150, 150, 150), group: 'style' },
+        { key: 'colorDown',     prop: 'Colors: Down',                                            type: 'color', def: GdiUtils.RGB(100, 100, 100), group: 'style' },
+        { key: 'useBgColor',    prop: 'Colors: Use Background',                                  type: 'bool',  def: true,  group: 'style' },
+        { key: 'bgColor',       prop: 'Colors: Background',                                      type: 'color', def: GdiUtils.RGB(32, 32, 32), group: 'style' },
 
-        { key: 'buttonStyle',   prop: 'Buttons: Style',                                         type: 'str',   def: '',    group: 'meta',  resetAll: true },
+        { key: 'buttonStyle',   prop: 'Buttons: Style',                                          type: 'str',   def: '',    group: 'meta',  resetAll: true },
 
-        { key: 'padLeft',       prop: 'Buttons: Pad Left',                                      type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
-        { key: 'padRight',      prop: 'Buttons: Pad Right',                                     type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
-        { key: 'padTop',        prop: 'Buttons: Pad Top',                                       type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
-        { key: 'padBottom',     prop: 'Buttons: Pad Bottom',                                    type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
-        { key: 'bezelFolder',   prop: 'Buttons: Bezel Folder',                                  type: 'path',  def: '',    group: 'bezel', resetAll: true, fallbackToDef: true },
-        { key: 'bezelEnabled',  prop: 'Buttons: Bezel Enabled',                                 type: 'bool',  def: false, group: 'bezel' },
-        { key: 'bezelFile',     prop: 'Buttons: Bezel File',                                    type: 'str',   def: '',    group: 'bezel' }
+        { key: 'padLeft',       prop: 'Buttons: Pad Left',                                       type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'padRight',      prop: 'Buttons: Pad Right',                                      type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'padTop',        prop: 'Buttons: Pad Top',                                        type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'padBottom',     prop: 'Buttons: Pad Bottom',                                     type: 'int',   def: 4,   min: 0,  max: 100, group: 'bezel' },
+        { key: 'bezelFolder',   prop: 'Buttons: Bezel Folder',                                   type: 'path',  def: '',    group: 'bezel', resetAll: true, fallbackToDef: true },
+        { key: 'bezelEnabled',  prop: 'Buttons: Bezel Enabled',                                  type: 'bool',  def: false, group: 'bezel' },
+        { key: 'bezelFile',     prop: 'Buttons: Bezel File',                                     type: 'str',   def: '',    group: 'bezel' }
     ];
 
     static #byKey = new Map(SettingsSchema.FIELDS.map(f => [f.key, f]));
@@ -705,6 +706,9 @@ class PlayButtonsController {
     #notifyText    = '';
     #notifyTimeout = null;
     #notifyFont    = null;
+    #sliderTarget  = null;
+    #hudFont       = null;
+    #saveTimeout   = null;
 
     #imgLoader = new AsyncImageLoader();
     fonts  = new FontRegistry();
@@ -1213,6 +1217,7 @@ class PlayButtonsController {
     }
 
     #showNotification(text) {
+        this.#sliderTarget = null;
         this.#notifyText = text;
         if (this.#notifyTimeout) window.ClearTimeout(this.#notifyTimeout);
         this.#notifyTimeout = window.SetTimeout(() => {
@@ -1221,6 +1226,87 @@ class PlayButtonsController {
             window.Repaint();
         }, 1500);
         window.Repaint();
+    }
+
+    // ========================================================================================
+    // INTERACTIVE PADDING SLIDER HUD
+    // ========================================================================================
+    #getSliderMeta(target) {
+        switch (target) {
+            case 'PaddingGap':    return { key: 'paddingGap',    label: 'Padding Gap',    min: 0, max: 300, unit: 'px', step: 1, group: 'style' };
+            case 'PaddingBorder': return { key: 'paddingBorder', label: 'Padding Border', min: 0, max: 300, unit: 'px', step: 1, group: 'style' };
+            case 'PadLeft':       return { key: 'padLeft',       label: 'Left Padding',   min: 0, max: 100, unit: 'px', step: 1, group: 'bezel' };
+            case 'PadRight':      return { key: 'padRight',      label: 'Right Padding',  min: 0, max: 100, unit: 'px', step: 1, group: 'bezel' };
+            case 'PadTop':        return { key: 'padTop',        label: 'Top Padding',    min: 0, max: 100, unit: 'px', step: 1, group: 'bezel' };
+            case 'PadBottom':     return { key: 'padBottom',     label: 'Bottom Padding', min: 0, max: 100, unit: 'px', step: 1, group: 'bezel' };
+            default:              return null;
+        }
+    }
+
+    setSliderTarget(target) {
+        if (this.#sliderTarget === target) return;
+        this.#sliderTarget = target;
+        window.Repaint();
+    }
+
+    #requestSaveSlider(group) {
+        if (this.#saveTimeout) window.ClearTimeout(this.#saveTimeout);
+        this.#saveTimeout = window.SetTimeout(() => {
+            this.#saveTimeout = null;
+            if (group === 'style') this.saveStyleConfig(this.config.buttonStyle);
+            else this.saveBezelConfig();
+        }, 250);
+    }
+
+    #setSliderValue(target, val) {
+        const meta = this.#getSliderMeta(target);
+        if (!meta) return;
+        const clamped = SettingsSchema.setField(this.config, meta.key, GdiUtils.clamp(val, meta.min, meta.max));
+        this.config[meta.key] = clamped;
+        this.#requestSaveSlider(meta.group);
+        this.buildLayout(window.Width, window.Height);
+        window.Repaint();
+    }
+
+    onMouseWheel(step) {
+        if (this.#lifecycle !== PlayButtonsController.LIFECYCLE.LIVE) return false;
+        if (!this.#sliderTarget) return false;
+        const meta = this.#getSliderMeta(this.#sliderTarget);
+        if (!meta) return false;
+        const inc = utils.IsKeyPressed(0x10) ? 5 : meta.step;
+        this.#setSliderValue(this.#sliderTarget, this.config[meta.key] + (step > 0 ? inc : -inc));
+        return true;
+    }
+
+    #drawSliderHud(gr, w, h) {
+        const meta = this.#getSliderMeta(this.#sliderTarget);
+        if (!meta) return;
+        const barW = Math.min(this.scale(220), Math.max(this.scale(40), Math.round(w * 0.6)));
+        const barH = Math.max(4, this.scale(6));
+        const bx = Math.floor((w - barW) / 2);
+        const lH = Math.max(16, this.scale(20));
+        const by = Math.min(h - barH - this.scale(2), Math.max(lH + this.scale(2), h - Math.max(16, this.scale(24))));
+        const val = this.config[meta.key];
+        const ratio = meta.max > meta.min ? (val - meta.min) / (meta.max - meta.min) : 0;
+        const label = `${meta.label}: ${val}${meta.unit}`;
+
+        this.#hudFont ??= gdi.Font('Segoe UI', Math.max(9, this.scale(12)));
+
+        const pillPadX = this.scale(10);
+        const textW = this.#hudFont ? Math.ceil(gr.MeasureString(label, this.#hudFont, 0, 0, w, lH).Width) : barW;
+        const pillInnerW = Math.max(barW, textW);
+        const pillW = Math.min(w, pillInnerW + pillPadX * 2);
+        const pillX = Math.max(0, Math.floor((w - pillW) / 2));
+        const pillY = Math.max(0, by - lH - this.scale(4));
+        const pillH = Math.min(h - pillY, lH + barH + this.scale(8));
+        gr.FillSolidRect(pillX, pillY, pillW, pillH, GdiUtils.RGBA(0, 0, 0, 175));
+
+        gr.FillSolidRect(bx, by, barW, barH, GdiUtils.RGBA(255, 255, 255, 60));
+        gr.FillSolidRect(bx, by, Math.floor(barW * ratio), barH, GdiUtils.RGBA(255, 255, 255, 180));
+        if (this.#hudFont) {
+            gr.SetTextRenderingHint(4);
+            gr.DrawString(label, this.#hudFont, GdiUtils.RGBA(255, 255, 255, 230), 0, by - lH - 2, w, lH, 0x11000000);
+        }
     }
 
     onPaint(gr) {
@@ -1238,7 +1324,9 @@ class PlayButtonsController {
             gr.DrawImage(this.#bezelLayerBmp, 0, 0, window.Width, window.Height, 0, 0, window.Width, window.Height, 0, 255);
         }
 
-        if (this.#notifyText) {
+        if (this.#sliderTarget) {
+            this.#drawSliderHud(gr, window.Width, window.Height);
+        } else if (this.#notifyText) {
             this.#notifyFont ??= gdi.Font('Segoe UI Semibold', this.scale(11), 0);
             if (this.#notifyFont) {
                 const boxH = Math.max(20, this.scale(24));
@@ -1286,6 +1374,10 @@ class PlayButtonsController {
 
     onMouseDown(mx, my) {
         if (this.#lifecycle !== PlayButtonsController.LIFECYCLE.LIVE) return;
+        if (this.#sliderTarget) {
+            this.setSliderTarget(null);
+            return;
+        }
         if (!this.#hovered || !this.#hovered.contains(mx, my)) {
             this.onMouseMove(mx, my);
         }
@@ -1329,6 +1421,14 @@ class PlayButtonsController {
 
     onKeyDown(vkey) {
         if (this.#lifecycle !== PlayButtonsController.LIFECYCLE.LIVE) return false;
+        if (vkey === 0x1B && this.#sliderTarget) {
+            this.setSliderTarget(null);
+            return true;
+        }
+        if (this.#sliderTarget && !utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x12)) {
+            if (vkey === 0x26 || vkey === 0x27) return this.onMouseWheel(1);
+            if (vkey === 0x28 || vkey === 0x25) return this.onMouseWheel(-1);
+        }
         if (utils.IsKeyPressed(0x11) && !utils.IsKeyPressed(0x10) && !utils.IsKeyPressed(0x12)) {
             if (vkey === 0x26) { this.cycleBezel(-1); return true; }
             if (vkey === 0x28) { this.cycleBezel(1);  return true; }
@@ -1349,6 +1449,10 @@ class PlayButtonsController {
             try { this.#notifyFont.Dispose(); } catch {}
         }
         this.#notifyFont = null;
+        if (this.#hudFont?.Dispose) {
+            try { this.#hudFont.Dispose(); } catch {}
+        }
+        this.#hudFont = null;
         this.fonts.clear();
         for (const item of this.#items) item.invalidateScaledCache();
         this.initTooltip();
@@ -1360,6 +1464,11 @@ class PlayButtonsController {
     // CONTEXT MENU (DECLARATIVE MENU BUILDER)
     // ========================================================================================
     showContextMenu(x, y) {
+        if (this.#sliderTarget) {
+            this.#sliderTarget = null;
+            window.Repaint();
+        }
+
         const cfg = this.config;
         const m = new MenuBuilder();
         let dirty = false;
@@ -1474,32 +1583,8 @@ class PlayButtonsController {
 
         // 5. Padding
         m.addSubMenu('Padding', (p) => {
-            p.addItem(`Padding Gap: ${cfg.paddingGap}px...`, () => {
-                const val = GdiUtils.prompt('Enter gap between buttons (0-300 pixels):', 'Padding Gap', cfg.paddingGap);
-                if (val !== null && val.trim() !== '') {
-                    const parsed = parseInt(val, 10);
-                    if (!Number.isNaN(parsed)) {
-                        const newGap = GdiUtils.clamp(parsed, 0, 300);
-                        if (newGap !== cfg.paddingGap) {
-                            SettingsSchema.setField(cfg, 'paddingGap', newGap);
-                            commitStyle();
-                        }
-                    }
-                }
-            });
-            p.addItem(`Padding Border: ${cfg.paddingBorder}px...`, () => {
-                const val = GdiUtils.prompt('Enter outer border padding to panel edge (0-300 pixels):', 'Padding Border', cfg.paddingBorder);
-                if (val !== null && val.trim() !== '') {
-                    const parsed = parseInt(val, 10);
-                    if (!Number.isNaN(parsed)) {
-                        const newBorder = GdiUtils.clamp(parsed, 0, 300);
-                        if (newBorder !== cfg.paddingBorder) {
-                            SettingsSchema.setField(cfg, 'paddingBorder', newBorder);
-                            commitStyle();
-                        }
-                    }
-                }
-            });
+            p.addItem(`Padding Gap: ${cfg.paddingGap}px...`,       () => this.setSliderTarget('PaddingGap'));
+            p.addItem(`Padding Border: ${cfg.paddingBorder}px...`, () => this.setSliderTarget('PaddingBorder'));
         });
 
         // 6. Colors & Tint
@@ -1590,21 +1675,10 @@ class PlayButtonsController {
             });
 
             bez.addSeparator();
-            const promptPad = (label, key) => {
-                const v = GdiUtils.prompt(`Enter ${label} padding in pixels (0-100):`, 'Per-Side Padding', cfg[key]);
-                if (v !== null && v.trim() !== '') {
-                    const parsed = parseInt(v, 10);
-                    if (!Number.isNaN(parsed)) {
-                        SettingsSchema.setField(cfg, key, GdiUtils.clamp(parsed, 0, 100));
-                        this.saveBezelConfig();
-                        dirty = true;
-                    }
-                }
-            };
-            bez.addItem(`Left padding... (${cfg.padLeft}px)`,     () => promptPad('left',   'padLeft'));
-            bez.addItem(`Right padding... (${cfg.padRight}px)`,   () => promptPad('right',  'padRight'));
-            bez.addItem(`Top padding... (${cfg.padTop}px)`,       () => promptPad('top',    'padTop'));
-            bez.addItem(`Bottom padding... (${cfg.padBottom}px)`, () => promptPad('bottom', 'padBottom'));
+            bez.addItem(`Left padding... (${cfg.padLeft}px)`,     () => this.setSliderTarget('PadLeft'));
+            bez.addItem(`Right padding... (${cfg.padRight}px)`,   () => this.setSliderTarget('PadRight'));
+            bez.addItem(`Top padding... (${cfg.padTop}px)`,       () => this.setSliderTarget('PadTop'));
+            bez.addItem(`Bottom padding... (${cfg.padBottom}px)`, () => this.setSliderTarget('PadBottom'));
         });
 
         m.addSeparator();
@@ -1648,6 +1722,12 @@ class PlayButtonsController {
         this.#bezelLoadToken++;
         this.#imgLoader.clear();
         if (this.#notifyTimeout) window.ClearTimeout(this.#notifyTimeout);
+        if (this.#saveTimeout) {
+            window.ClearTimeout(this.#saveTimeout);
+            this.#saveTimeout = null;
+            this.saveStyleConfig(this.config.buttonStyle);
+            this.saveBezelConfig();
+        }
         this.clearButtons();
         if (this.#bezelBmp)      { try { this.#bezelBmp.Dispose(); } catch {} this.#bezelBmp = null; }
         if (this.#bezelLayerBmp) { try { this.#bezelLayerBmp.Dispose(); } catch {} this.#bezelLayerBmp = null; }
@@ -1656,6 +1736,10 @@ class PlayButtonsController {
             try { this.#notifyFont.Dispose(); } catch {}
         }
         this.#notifyFont = null;
+        if (this.#hudFont?.Dispose) {
+            try { this.#hudFont.Dispose(); } catch {}
+        }
+        this.#hudFont = null;
         this.#cachedBezelImages = null;
         this.#cachedStyles = null;
     }
@@ -1709,6 +1793,10 @@ function on_mouse_lbtn_dblclk(x, y) {
 
 function on_mouse_lbtn_up(x, y) {
     app.onMouseUp(x, y);
+}
+
+function on_mouse_wheel(step) {
+    return app.onMouseWheel(step);
 }
 
 function on_key_down(vkey) {
