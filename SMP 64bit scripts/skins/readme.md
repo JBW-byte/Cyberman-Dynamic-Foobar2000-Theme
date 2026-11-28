@@ -248,8 +248,6 @@ Custom Software License for foobar2000 Themes Copyright (c) 2026 [L.E.D.]
 
 Grant of License You are welcome to use, modify, and distribute these JavaScript (.js) scripts solely for NON-COMMERCIAL purposes within themes for foobar2000.
 
-- use it for commercial performances, commercial exhibitions, paid services, resale, advertising services, or other profit-making activities;
-
 Restrictions Commercial use of this software is strictly prohibited. You may NOT include, bundle, or use this software in any of the following:
 
 You may not, without explicit written permission from the copyright holder:
@@ -259,3 +257,5 @@ You may not, without explicit written permission from the copyright holder:
 
 This project is provided "as is", without warranty of any kind. The copyright holder is not liable for any claims, damages, or other liability arising from use of the project.
 Attribution You MUST give clear credit to the original author (L.E.D.) in your theme's documentation, code comments, or user interface.
+
+This project is provided "as is", without warranty of any kind. The copyright holder is not liable for any claims, damages, or other liability arising from use of the project.
