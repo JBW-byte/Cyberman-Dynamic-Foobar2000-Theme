@@ -1,7 +1,7 @@
 'use strict';
 
 		  // ======= AUTHOR L.E.D. (AI-assisted) ========\\
-		 // ========  SMP 64bit Volume Knob V4.8  ========\\
+		 // ========  SMP 64bit Volume Knob V5.0  ========\\
 		// ======= Custom Theme Creator + JSON I/O ========\\
 
  // ===================*** Foobar2000 64bit ***================== \\
@@ -10,14 +10,14 @@
 /* 
  * Custom License for foobar2000 Themes
  * Copyright (c) 2026 [L.E.D.]
- * 
  * Allowed: Non-commercial use and modification.
- * Prohibited: Paid themes, subscriptions, or cloud-bundled services.
+ * Prohibited: Paid products/themes, subscriptions, or cloud-bundled services.
+ * See License.txt.
  */
 
-window.DefineScript('Volume Knob v4.8', { 
+window.DefineScript('Volume Knob', { 
     author: 'L.E.D.', 
-    version: '4.8',
+    version: '5.0',
     features: { grab_focus: true } 
 });
 
@@ -25,7 +25,7 @@ if ('DrawMode' in window) window.DrawMode = 0; // 0 = GDI+, 1 = Direct2D
 window.DlgCode = 0x0004; // DLGC_WANTALLKEYS: Preserves Ctrl/Shift + Arrow key capture
 
 // ============================================================================================
-// 1. HELPERS, MATH & GDI UTILITIES
+// 1. HELPERS, MATH, MENU BUILDER & GDI UTILITIES
 // ============================================================================================
 class GdiUtils {
     static clamp(val, min, max) {
@@ -66,6 +66,10 @@ class GdiUtils {
         return clean.replace(/[\/\\]+$/, '');
     }
 
+    static escapeMenuLabel(str) {
+        return String(str ?? '').replace(/&/g, '&&');
+    }
+
     static prompt(promptText, titleText, defaultVal) {
         try {
             const res = utils.InputBox(window.ID, promptText, titleText, String(defaultVal ?? ''), true);
@@ -73,6 +77,67 @@ class GdiUtils {
         } catch {
             return null;
         }
+    }
+}
+
+class MenuBuilder {
+    #menu;
+    #state;
+
+    constructor(state = null, startId = 1) {
+        this.#menu = window.CreatePopupMenu();
+        this.#state = state || {
+            nextId: startId,
+            callbacks: new Map(),
+            menus: []
+        };
+        this.#state.menus.push(this.#menu);
+    }
+
+    get raw() {
+        return this.#menu;
+    }
+
+    addItem(label, callback, opts = {}) {
+        const id = this.#state.nextId++;
+        const flags = opts.disabled ? 0x0001 : 0;
+        this.#menu.AppendMenuItem(flags, id, label);
+        if (opts.checked || opts.radio) {
+            this.#menu.CheckMenuRadioItem(id, id, id);
+        }
+        if (typeof callback === 'function') {
+            this.#state.callbacks.set(id, callback);
+        }
+        return this;
+    }
+
+    addSeparator() {
+        this.#menu.AppendMenuSeparator();
+        return this;
+    }
+
+    addSubMenu(title, buildFn, disabled = false) {
+        const sub = new MenuBuilder(this.#state);
+        buildFn(sub);
+        sub.#menu.AppendTo(this.#menu, disabled ? 0x0001 : 0, title);
+        return this;
+    }
+
+    track(x, y) {
+        let selected = 0;
+        try {
+            selected = this.#menu.TrackPopupMenu(x, y);
+        } finally {
+            for (const m of this.#state.menus) {
+                try { if (m && typeof m.Dispose === 'function') m.Dispose(); } catch {}
+            }
+            this.#state.menus.length = 0;
+        }
+        if (selected > 0) {
+            const cb = this.#state.callbacks.get(selected);
+            if (cb) cb();
+        }
+        return selected;
     }
 }
 
@@ -168,7 +233,6 @@ class VolumeConstants {
         { name: 'Nakamichi Gold',  color: GdiUtils.colour(247, 193, 67) },
         { name: 'JVC Violet',      color: GdiUtils.colour(210, 102, 255) }
     ];
-
 }
 
 // ============================================================================================
@@ -466,20 +530,20 @@ class ThemeManager {
         return p;
     }
 
-    loadFromFile(filePath, propertyManager, applySettings = true) {
+    loadFromFile(filePath, propertyManager, applySettings = true, state = null) {
         if (!filePath?.trim()) return { ok: false, error: 'No file path given.' };
         const cleanPath = GdiUtils.sanitizePath(filePath);
         try {
             if (!utils.IsFile(cleanPath)) return { ok: false, error: `File not found:\n${cleanPath}` };
             const raw = (typeof utils.ReadUTF8 === 'function') ? utils.ReadUTF8(cleanPath) : utils.ReadTextFile(cleanPath);
             if (!raw?.trim()) return { ok: false, error: `JSON file is empty or unreadable:\n${cleanPath}` };
-            return this.#parseAndRegister(raw, cleanPath, propertyManager, applySettings);
+            return this.#parseAndRegister(raw, cleanPath, propertyManager, applySettings, state);
         } catch (e) { 
             return { ok: false, error: `File read error:\n${e.message || e}` }; 
         }
     }
 
-    #parseAndRegister(jsonText, sourceLabel, propertyManager, applySettings) {
+    #parseAndRegister(jsonText, sourceLabel, propertyManager, applySettings, state = null) {
         let parsed;
         try { parsed = JSON.parse(jsonText); } catch (e) { return { ok: false, error: `JSON parse error: ${e.message || e}` }; }
 
@@ -508,12 +572,14 @@ class ThemeManager {
                 const t = this.makeTheme(name, d.bg, d.knob, d.inner, d.tick, d.marker, d.settings || null);
                 t.custom = true;
                 if (this.#themeMap.has(name)) {
-                    const oldTheme = this.#themeMap.get(name);
-                    const idx = this.#themes.indexOf(oldTheme);
-                    if (idx !== -1) this.#themes[idx] = t;
-                    const ci = this.#customThemes.indexOf(oldTheme);
-                    if (ci !== -1) this.#customThemes[ci] = t;
-                    updated++;
+				const oldTheme = this.#themeMap.get(name);
+				const idx = this.#themes.indexOf(oldTheme);
+				if (idx !== -1) this.#themes[idx] = t;
+				const ci = this.#customThemes.indexOf(oldTheme);
+				if (ci !== -1) this.#customThemes[ci] = t;
+				else this.#customThemes.push(t);
+				this.#themeMap.set(name, t);
+				updated++;
                 } else {
                     this.#themes.push(t);
                     this.#themeMap.set(name, t);
@@ -528,7 +594,7 @@ class ThemeManager {
         if (applySettings && settingsObj) {
             propertyManager.applySettings(settingsObj);
             if (typeof settingsObj.theme === 'string' && this.#themeMap.has(settingsObj.theme)) {
-                propertyManager.setTheme(settingsObj.theme, this, false);
+                propertyManager.setTheme(settingsObj.theme, this, false, state);
             }
             settingsCount = Object.keys(settingsObj).length;
         }
@@ -607,15 +673,10 @@ class ThemeManager {
 // 5. PROPERTY MANAGER
 // ============================================================================================
 class SettingsSchema {
-    // Single source of truth for every persisted setting.
-    // group: 'core'  = handled specially (theme / file paths)
-    //        'style' = per-theme look; saved inside each custom theme AND in the JSON "settings" block
-    //        'panel' = panel-wide options (sync button); saved in the JSON "settings" block only
-    // noVisualReset: kept by "Reset Visual Settings" (only "Factory Reset" clears it)
     static FIELDS = [
         { key: 'theme',             prop: 'VolumeKnob.ThemeName',          type: 'str',   def: 'Classic Gray', group: 'core' },
         { key: 'customThemeFile',   prop: 'VolumeKnob.ThemeFilePath',      type: 'path',  def: VolumeConstants.DEFAULT_THEME_FILE, group: 'core', resetAll: true },
-        { key: 'currentLcdTheme',   prop: 'VolumeKnob.CurrentLcdTheme',    type: 'str',   def: 'Pioneer Amber', group: 'core', resetAll: true },
+        { key: 'currentLcdTheme',   prop: 'VolumeKnob.CurrentLcdTheme',    type: 'str',   def: 'Pioneer Amber', group: 'core', exportable: true, resetAll: true },
 
         { key: 'bgMode',            prop: 'VolumeKnob.BgMode',             type: 'int',   def: VolumeConstants.BG_MODE.SOLID, min: 0, max: 4, group: 'style' },
         { key: 'customBgImage',     prop: 'VolumeKnob.CustomBgImage',      type: 'image', def: '', group: 'style', resetAll: true, noVisualReset: true },
@@ -664,8 +725,7 @@ class SettingsSchema {
         return Boolean(v);
     }
 
-    // mode: 'load' (from panel properties) or 'apply' (from a JSON/theme settings block)
-    static coerce(f, raw, mode) {
+    static coerce(f, raw) {
         switch (f.type) {
             case 'int': {
                 const v = this.clampInt(raw, f.min, f.max);
@@ -705,7 +765,6 @@ class DialPresets {
     static #L = VolumeConstants.LIGHT_STYLE;
     static #M = VolumeConstants.MARKER_STYLE;
 
-    // Defaults applied when the user picks / cycles to a dial finish
     static #byMode() {
         const D = this.#D, L = this.#L, M = this.#M;
         return {
@@ -719,7 +778,6 @@ class DialPresets {
         };
     }
 
-    // The "Studio" dial only allows Arrow / Studio-line pointers; every other finish cannot use Studio-line
     static normaliseMarker(properties, mode) {
         const M = this.#M, cur = properties.values.markerStyle;
         if (mode === this.#D.STUDIO) {
@@ -729,7 +787,6 @@ class DialPresets {
         }
     }
 
-    // Used by the context menu and the Ctrl+Up/Down cycle keys
     static apply(properties, mode) {
         properties.set('dialMode', mode);
         const p = this.#byMode()[mode];
@@ -742,7 +799,6 @@ class DialPresets {
         this.normaliseMarker(properties, mode);
     }
 
-    // Used by Randomize: returns a coherent highlight / lighting / marker pool for the finish
     static randomLook(mode, rand) {
         const D = this.#D, L = this.#L, M = this.#M;
         let highlight = true, lights = [L.SPOTLIGHT];
@@ -788,7 +844,7 @@ class PropertyManager {
         this.values = {};
         for (const f of SettingsSchema.FIELDS) {
             if (f.key === 'theme') { this.values.theme = String(initialTheme); continue; }
-            this.values[f.key] = SettingsSchema.coerce(f, window.GetProperty(f.prop, f.def), 'load');
+            this.values[f.key] = SettingsSchema.coerce(f, window.GetProperty(f.prop, f.def));
         }
 
         this.lastFinalizedTheme = (this.values.theme !== '~Preview' && this.values.theme !== 'Custom') ? this.values.theme : this.defaults.theme;
@@ -798,17 +854,17 @@ class PropertyManager {
 
     parseBool(v) { return SettingsSchema.parseBool(v); }
 
-    // Style values stored inside each custom theme
     getStyleSettings() {
         const out = {};
         for (const f of SettingsSchema.FIELDS) if (f.group === 'style') out[f.key] = this.values[f.key];
         return out;
     }
 
-    // Everything written to the "settings" block of the JSON file
     getExportSettings() {
         const out = { theme: this.values.theme !== '~Preview' ? this.values.theme : this.lastFinalizedTheme };
-        for (const f of SettingsSchema.FIELDS) if (f.group === 'style' || f.group === 'panel') out[f.key] = this.values[f.key];
+        for (const f of SettingsSchema.FIELDS) {
+            if (f.group === 'style' || f.group === 'panel' || f.exportable) out[f.key] = this.values[f.key];
+        }
         return out;
     }
 
@@ -860,9 +916,9 @@ class PropertyManager {
         this.beginBatch();
         try {
             for (const f of SettingsSchema.FIELDS) {
-                if (f.group !== 'style' && f.group !== 'panel') continue;
+                if (f.group !== 'style' && f.group !== 'panel' && !f.exportable) continue;
                 if (f.type === 'image' ? typeof s[f.key] !== 'string' : !has(f.key)) continue;
-                const v = SettingsSchema.coerce(f, s[f.key], 'apply');
+                const v = SettingsSchema.coerce(f, s[f.key]);
                 this.set(f.key, v);
                 if (f.onApply) f.onApply(v);
             }
@@ -890,10 +946,10 @@ class PropertyManager {
         }
     }
 
-    resetVisuals(themeManager) {
+    resetVisuals(themeManager, state = null) {
         this.beginBatch();
         try {
-            this.setTheme(this.defaults.theme, themeManager);
+            this.setTheme(this.defaults.theme, themeManager, true, state);
             for (const f of SettingsSchema.FIELDS) {
                 if ((f.group === 'style' || f.group === 'panel') && !f.noVisualReset) {
                     this.set(f.key, f.def);
@@ -905,10 +961,10 @@ class PropertyManager {
         }
     }
 
-    resetAll(themeManager) {
+    resetAll(themeManager, state = null) {
         this.beginBatch();
         try {
-            this.resetVisuals(themeManager);
+            this.resetVisuals(themeManager, state);
             for (const f of SettingsSchema.FIELDS) {
                 if (f.resetAll) {
                     this.set(f.key, f.def);
@@ -937,67 +993,94 @@ class BackgroundRenderer {
         const hit = this.#carbonTiles.get(c);
         if (hit) return hit;
         const n = c * 2;
-        const img = gdi.CreateImage(n, n);
-        const g = img.GetGraphics();
-        g.FillSolidRect(0, 0, n, n, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 0));
-        for (let y = 0; y < n; y++) {
-            for (let x = 0; x < n; x++) {
-                const warp = ((x < c) === (y < c));
-                const u = warp ? (x % c) : (y % c);
-                const v = Math.sin(((u + 0.5) / c) * Math.PI);
-                const hi = Math.round(v * 46), lo = Math.round((1 - v) * 70);
-                if (lo > 0) g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), lo));
-                if (hi > 0) g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), hi));
+        let img = null;
+        try {
+            img = gdi.CreateImage(n, n);
+            const g = img.GetGraphics();
+            try {
+                g.FillSolidRect(0, 0, n, n, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 0));
+                for (let y = 0; y < n; y++) {
+                    for (let x = 0; x < n; x++) {
+                        const warp = ((x < c) === (y < c));
+                        const u = warp ? (x % c) : (y % c);
+                        const v = Math.sin(((u + 0.5) / c) * Math.PI);
+                        const hi = Math.round(v * 46), lo = Math.round((1 - v) * 70);
+                        if (lo > 0) g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), lo));
+                        if (hi > 0) g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), hi));
+                    }
+                }
+            } finally {
+                img.ReleaseGraphics(g);
             }
+            this.#carbonTiles.set(c, img);
+            return img;
+        } catch {
+            if (img?.Dispose) { try { img.Dispose(); } catch {} }
+            return null;
         }
-        img.ReleaseGraphics(g);
-        this.#carbonTiles.set(c, img);
-        return img;
     }
 
     getSandblastTile() {
         if (this.#sandblastTile) return this.#sandblastTile;
         const size = 256;
-        const img = gdi.CreateImage(size, size);
-        const g = img.GetGraphics();
-        g.FillSolidRect(0, 0, size, size, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 0));
-        let seed = 777111;
-        const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+        let img = null;
+        try {
+            img = gdi.CreateImage(size, size);
+            const g = img.GetGraphics();
+            try {
+                g.FillSolidRect(0, 0, size, size, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 0));
+                let seed = 777111;
+                const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
 
-        for (let i = 0; i < 24000; i++) {
-            const x = Math.floor(rnd() * size);
-            const y = Math.floor(rnd() * size);
-            const isLight = rnd() > 0.48;
-            const a = Math.floor(rnd() * 7) + 2; 
-            g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(isLight ? GdiUtils.colour(255, 255, 255) : GdiUtils.colour(0, 0, 0), a));
+                for (let i = 0; i < 24000; i++) {
+                    const x = Math.floor(rnd() * size);
+                    const y = Math.floor(rnd() * size);
+                    const isLight = rnd() > 0.48;
+                    const a = Math.floor(rnd() * 7) + 2;
+                    g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(isLight ? GdiUtils.colour(255, 255, 255) : GdiUtils.colour(0, 0, 0), a));
+                }
+            } finally {
+                img.ReleaseGraphics(g);
+            }
+            this.#sandblastTile = img;
+            return this.#sandblastTile;
+        } catch {
+            if (img?.Dispose) { try { img.Dispose(); } catch {} }
+            return null;
         }
-        img.ReleaseGraphics(g);
-        this.#sandblastTile = img;
-        return this.#sandblastTile;
     }
 
     getSatinTile() {
         if (this.#satinTile) return this.#satinTile;
         const size = 128;
-        const img = gdi.CreateImage(size, size);
-        const g = img.GetGraphics();
-        g.FillSolidRect(0, 0, size, size, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 0));
-        let seed = 889911;
-        const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+        let img = null;
+        try {
+            img = gdi.CreateImage(size, size);
+            const g = img.GetGraphics();
+            try {
+                g.FillSolidRect(0, 0, size, size, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 0));
+                let seed = 889911;
+                const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
 
-        for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-                const n = (rnd() + rnd() - 1.0);
-                if (n > 0.04) {
-                    g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), Math.round(n * 16)));
-                } else if (n < -0.04) {
-                    g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), Math.round(-n * 18)));
+                for (let y = 0; y < size; y++) {
+                    for (let x = 0; x < size; x++) {
+                        const n = (rnd() + rnd() - 1.0);
+                        if (n > 0.04) {
+                            g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), Math.round(n * 16)));
+                        } else if (n < -0.04) {
+                            g.FillSolidRect(x, y, 1, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), Math.round(-n * 18)));
+                        }
+                    }
                 }
+            } finally {
+                img.ReleaseGraphics(g);
             }
+            this.#satinTile = img;
+            return this.#satinTile;
+        } catch {
+            if (img?.Dispose) { try { img.Dispose(); } catch {} }
+            return null;
         }
-        img.ReleaseGraphics(g);
-        this.#satinTile = img;
-        return this.#satinTile;
     }
 
     draw(gr, w, h, bgMode, customImgPath, theme, assetManager) {
@@ -1018,89 +1101,99 @@ class BackgroundRenderer {
         this.invalidate();
         this.#key = key;
 
+        let bmp = null;
         try {
-            const bmp = gdi.CreateImage(w, h);
+            bmp = gdi.CreateImage(w, h);
             const g = bmp.GetGraphics();
-            g.SetSmoothingMode(2);
+            try {
+                g.SetSmoothingMode(2);
 
-            if (bgMode === VolumeConstants.BG_MODE.BRUSHED) {
-                g.FillSolidRect(0, 0, w, h, theme.bg);
-                let seed = 48271;
-                const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+                if (bgMode === VolumeConstants.BG_MODE.BRUSHED) {
+                    g.FillSolidRect(0, 0, w, h, theme.bg);
+                    let seed = 48271;
+                    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
 
-                for (let y = 0; y < h; y++) {
-                    const isLight = rnd() > 0.50;
-                    const a = Math.floor(rnd() * 5) + 1;
-                    g.FillSolidRect(0, y, w, 1, GdiUtils.setAlpha(isLight ? GdiUtils.colour(255, 255, 255) : GdiUtils.colour(0, 0, 0), a));
-                }
-                const scratchCount = Math.max(160, Math.floor(h * 2.8));
-                for (let i = 0; i < scratchCount; i++) {
-                    const y = Math.floor(rnd() * h);
-                    const startX = Math.floor(rnd() * (w * 0.40));
-                    const len = Math.floor((0.30 + rnd() * 0.70) * w);
-                    const drawW = Math.min(len, w - startX);
-                    if (drawW <= 0) continue;
-                    const isLight = rnd() > 0.47;
-                    const a = Math.floor(rnd() * 6) + 2;
-                    g.FillSolidRect(startX, y, drawW, 1, GdiUtils.setAlpha(isLight ? GdiUtils.colour(255, 255, 255) : GdiUtils.colour(0, 0, 0), a));
-                }
-                for (let x = 0; x < w; x++) {
-                    const nx = x / w;
-                    const band1 = Math.exp(-((nx - 0.38) ** 2) * 20);
-                    const band2 = Math.exp(-((nx - 0.70) ** 2) * 16);
-                    const val = (band1 * 12.0) + (band2 * 8.0);
-                    const dither = (rnd() - 0.5) * 1.5;
-                    const finalVal = Math.round(val + dither);
-                    if (finalVal > 0) g.FillSolidRect(x, 0, 1, h, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), Math.min(255, finalVal)));
-                    const shadow = Math.exp(-((nx - 0.92) ** 2) * 14);
-                    const shadowVal = Math.round((shadow * 12) + dither);
-                    if (shadowVal > 0) g.FillSolidRect(x, 0, 1, h, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), Math.min(255, shadowVal)));
-                }
-                g.FillSolidRect(0, 0, w, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 45));
-                g.FillSolidRect(0, h - 1, w, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 60));
+                    for (let y = 0; y < h; y++) {
+                        const isLight = rnd() > 0.50;
+                        const a = Math.floor(rnd() * 5) + 1;
+                        g.FillSolidRect(0, y, w, 1, GdiUtils.setAlpha(isLight ? GdiUtils.colour(255, 255, 255) : GdiUtils.colour(0, 0, 0), a));
+                    }
+                    const scratchCount = Math.max(160, Math.floor(h * 2.8));
+                    for (let i = 0; i < scratchCount; i++) {
+                        const y = Math.floor(rnd() * h);
+                        const startX = Math.floor(rnd() * (w * 0.40));
+                        const len = Math.floor((0.30 + rnd() * 0.70) * w);
+                        const drawW = Math.min(len, w - startX);
+                        if (drawW <= 0) continue;
+                        const isLight = rnd() > 0.47;
+                        const a = Math.floor(rnd() * 6) + 2;
+                        g.FillSolidRect(startX, y, drawW, 1, GdiUtils.setAlpha(isLight ? GdiUtils.colour(255, 255, 255) : GdiUtils.colour(0, 0, 0), a));
+                    }
+                    for (let x = 0; x < w; x++) {
+                        const nx = x / w;
+                        const band1 = Math.exp(-((nx - 0.38) ** 2) * 20);
+                        const band2 = Math.exp(-((nx - 0.70) ** 2) * 16);
+                        const val = (band1 * 12.0) + (band2 * 8.0);
+                        const dither = (rnd() - 0.5) * 1.5;
+                        const finalVal = Math.round(val + dither);
+                        if (finalVal > 0) g.FillSolidRect(x, 0, 1, h, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), Math.min(255, finalVal)));
+                        const shadow = Math.exp(-((nx - 0.92) ** 2) * 14);
+                        const shadowVal = Math.round((shadow * 12) + dither);
+                        if (shadowVal > 0) g.FillSolidRect(x, 0, 1, h, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), Math.min(255, shadowVal)));
+                    }
+                    g.FillSolidRect(0, 0, w, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 45));
+                    g.FillSolidRect(0, h - 1, w, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 60));
 
-            } else if (bgMode === VolumeConstants.BG_MODE.SANDBLAST) {
-                g.FillSolidRect(0, 0, w, h, theme.bg);
-                const tile = this.getSandblastTile();
-                for (let y = 0; y < h; y += 256) {
-                    for (let x = 0; x < w; x += 256) {
-                        g.DrawImage(tile, x, y, 256, 256, 0, 0, 256, 256);
+                } else if (bgMode === VolumeConstants.BG_MODE.SANDBLAST) {
+                    g.FillSolidRect(0, 0, w, h, theme.bg);
+                    const tile = this.getSandblastTile();
+                    if (tile) {
+                        for (let y = 0; y < h; y += 256) {
+                            for (let x = 0; x < w; x += 256) {
+                                g.DrawImage(tile, x, y, 256, 256, 0, 0, 256, 256);
+                            }
+                        }
+                    }
+                    g.FillSolidRect(0, 0, w, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 25));
+                    g.FillSolidRect(0, h - 1, w, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 45));
+
+                } else if (bgMode === VolumeConstants.BG_MODE.SATIN) {
+                    g.FillSolidRect(0, 0, w, h, theme.bg);
+                    g.FillGradRect(0, 0, w, h, 90, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 18), GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 22));
+
+                    const tile = this.getSatinTile();
+                    if (tile) {
+                        for (let y = 0; y < h; y += 128) {
+                            for (let x = 0; x < w; x += 128) {
+                                g.DrawImage(tile, x, y, 128, 128, 0, 0, 128, 128, 0, 185);
+                            }
+                        }
+                    }
+
+                } else if (bgMode === VolumeConstants.BG_MODE.IMAGE) {
+                    const loaded = assetManager.getImage(customImgPath);
+                    if (loaded) {
+                        g.SetInterpolationMode(7);
+                        const scale = Math.max(w / loaded.Width, h / loaded.Height);
+                        const renderW = Math.round(loaded.Width * scale);
+                        const renderH = Math.round(loaded.Height * scale);
+                        const renderX = Math.round((w - renderW) / 2);
+                        const renderY = Math.round((h - renderH) / 2);
+                        g.DrawImage(loaded, renderX, renderY, renderW, renderH, 0, 0, loaded.Width, loaded.Height);
+                    } else { 
+                        g.FillSolidRect(0, 0, w, h, theme.bg); 
                     }
                 }
-                g.FillSolidRect(0, 0, w, 1, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 25));
-                g.FillSolidRect(0, h - 1, w, 1, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 45));
-
-            } else if (bgMode === VolumeConstants.BG_MODE.SATIN) {
-                g.FillSolidRect(0, 0, w, h, theme.bg);
-                g.FillGradRect(0, 0, w, h, 90, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 18), GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 22));
-
-                const tile = this.getSatinTile();
-                for (let y = 0; y < h; y += 128) {
-                    for (let x = 0; x < w; x += 128) {
-                        g.DrawImage(tile, x, y, 128, 128, 0, 0, 128, 128, 0, 185);
-                    }
-                }
-
-            } else if (bgMode === VolumeConstants.BG_MODE.IMAGE) {
-                const loaded = assetManager.getImage(customImgPath);
-                if (loaded) {
-                    g.SetInterpolationMode(7);
-                    const scale = Math.max(w / loaded.Width, h / loaded.Height);
-                    const renderW = Math.round(loaded.Width * scale);
-                    const renderH = Math.round(loaded.Height * scale);
-                    const renderX = Math.round((w - renderW) / 2);
-                    const renderY = Math.round((h - renderH) / 2);
-                    g.DrawImage(loaded, renderX, renderY, renderW, renderH, 0, 0, loaded.Width, loaded.Height);
-                } else { 
-                    g.FillSolidRect(0, 0, w, h, theme.bg); 
-                }
+            } finally {
+                bmp.ReleaseGraphics(g);
             }
 
-            bmp.ReleaseGraphics(g);
             this.#bitmap = bmp;
+            bmp = null;
             gr.SetInterpolationMode(2);
             gr.DrawImage(this.#bitmap, 0, 0, w, h, 0, 0, w, h);
-        } catch { 
+        } catch {
+            if (bmp?.Dispose) { try { bmp.Dispose(); } catch {} }
             gr.FillSolidRect(0, 0, w, h, theme.bg); 
         }
     }
@@ -1140,12 +1233,14 @@ class DialRenderer {
         }
 
         const drawAngle = spinImage ? rotationAngleDeg : 0;
+        const strMul = Math.max(0, lightStrength / 100);
+        const needLight = Boolean(showHighlight && strMul > 0.01);
         const key = `${size}|${dialMode}|${theme.inner}|${customImgPath}|${lightStyle}|${lightAngleDeg}|${lightStrength}|${showHighlight ? 1 : 0}`;
 
         if (this.#bmpBase && this.#key === key) {
             gr.SetInterpolationMode(2);
             gr.DrawImage(this.#bmpBase, x, y, size, size, 0, 0, size, size, drawAngle, 255);
-            if (showHighlight && this.#bmpLight) {
+            if (needLight && this.#bmpLight) {
                 gr.DrawImage(this.#bmpLight, x, y, size, size, 0, 0, size, size, 0, 255);
             }
             return;
@@ -1154,14 +1249,18 @@ class DialRenderer {
         this.invalidate();
         this.#key = key;
 
+        let bmpBase = null, gBase = null;
+        let bmpLight = null, gLight = null;
         try {
-            const bmpBase = gdi.CreateImage(size, size);
-            const gBase = bmpBase.GetGraphics();
+            bmpBase = gdi.CreateImage(size, size);
+            gBase = bmpBase.GetGraphics();
             gBase.SetSmoothingMode(2);
 
-            const bmpLight = gdi.CreateImage(size, size);
-            const gLight = bmpLight.GetGraphics();
-            gLight.SetSmoothingMode(2);
+            if (needLight) {
+                bmpLight = gdi.CreateImage(size, size);
+                gLight = bmpLight.GetGraphics();
+                gLight.SetSmoothingMode(2);
+            }
 
             const cx = size / 2;
             const cy = size / 2;
@@ -1171,7 +1270,6 @@ class DialRenderer {
             const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
 
             const lightRad = ((lightAngleDeg % 360 + 360) % 360) * VolumeConstants.DEG2RAD;
-            const strMul = Math.max(0, lightStrength / 100);
 
             if (dialMode === VolumeConstants.DIAL_MODE.SOLID) {
                 gBase.FillSolidRect(0, 0, size, size, theme.inner);
@@ -1241,8 +1339,10 @@ class DialRenderer {
             } else if (dialMode === VolumeConstants.DIAL_MODE.BEADBLAST) {
                 gBase.FillSolidRect(0, 0, size, size, theme.inner);
                 const tile = bgRenderer.getSandblastTile();
-                for (let ty = 0; ty < size; ty += 256) {
-                    for (let tx = 0; tx < size; tx += 256) gBase.DrawImage(tile, tx, ty, 256, 256, 0, 0, 256, 256);
+                if (tile) {
+                    for (let ty = 0; ty < size; ty += 256) {
+                        for (let tx = 0; tx < size; tx += 256) gBase.DrawImage(tile, tx, ty, 256, 256, 0, 0, 256, 256);
+                    }
                 }
                 gBase.DrawEllipse(cx - R + 1, cy - R + 1, (R - 1) * 2, (R - 1) * 2, 1.5, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 65));
 
@@ -1257,8 +1357,10 @@ class DialRenderer {
                     gBase.FillEllipse(cx - r + size * 0.15, cy - r + size * 0.15, r * 2, r * 2, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 1));
                 }
                 const tile = bgRenderer.getSandblastTile();
-                for (let ty = 0; ty < size; ty += 256) {
-                    for (let tx = 0; tx < size; tx += 256) gBase.DrawImage(tile, tx, ty, 256, 256, 0, 0, 256, 256);
+                if (tile) {
+                    for (let ty = 0; ty < size; ty += 256) {
+                        for (let tx = 0; tx < size; tx += 256) gBase.DrawImage(tile, tx, ty, 256, 256, 0, 0, 256, 256);
+                    }
                 }
 
             } else if (dialMode === VolumeConstants.DIAL_MODE.STUDIO) {
@@ -1300,43 +1402,51 @@ class DialRenderer {
                     if (res > 4) {
                         coreBmp = gdi.CreateImage(res, res);
                         const cg = coreBmp.GetGraphics();
-                        cg.SetSmoothingMode(2);
-                        const cCenter = res / 2;
-                        const cR = res / 2;
+                        try {
+                            cg.SetSmoothingMode(2);
+                            const cCenter = res / 2;
+                            const cR = res / 2;
 
-                        cg.FillSolidRect(0, 0, res, res, theme.inner);
+                            cg.FillSolidRect(0, 0, res, res, theme.inner);
 
-                        const stepCore = Math.max(0.6, cR / 160);
-                        for (let r = 0; r <= cR; r += stepCore) {
-                            const t = r / cR;
-                            const z = Math.sqrt(Math.max(0, 1 - t * t));
+                            const stepCore = Math.max(0.6, cR / 160);
+                            for (let r = 0; r <= cR; r += stepCore) {
+                                const t = r / cR;
+                                const z = Math.sqrt(Math.max(0, 1 - t * t));
 
-                            const alphaGlow = GdiUtils.clamp(Math.round((z ** 3.5) * 40), 0, 255);
-                            if (alphaGlow > 0) {
-                                cg.DrawEllipse(cCenter - r, cCenter - r, r * 2, r * 2, 1.5, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), alphaGlow));
+                                const alphaGlow = GdiUtils.clamp(Math.round((z ** 3.5) * 40), 0, 255);
+                                if (alphaGlow > 0) {
+                                    cg.DrawEllipse(cCenter - r, cCenter - r, r * 2, r * 2, 1.5, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), alphaGlow));
+                                }
+
+                                const alphaDark = GdiUtils.clamp(Math.round(((1 - z) ** 1.5) * 160), 0, 255);
+                                if (alphaDark > 0) {
+                                    cg.DrawEllipse(cCenter - r, cCenter - r, r * 2, r * 2, 1.5, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), alphaDark));
+                                }
                             }
 
-                            const alphaDark = GdiUtils.clamp(Math.round(((1 - z) ** 1.5) * 160), 0, 255);
-                            if (alphaDark > 0) {
-                                cg.DrawEllipse(cCenter - r, cCenter - r, r * 2, r * 2, 1.5, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), alphaDark));
+                            const tile = bgRenderer.getSandblastTile();
+                            if (tile) {
+                                const tw = tile.Width, th = tile.Height;
+                                for (let ty = 0; ty < res; ty += th) {
+                                    for (let tx = 0; tx < res; tx += tw) {
+                                        cg.DrawImage(tile, tx, ty, tw, th, 0, 0, tw, th, 0, 50);
+                                    }
+                                }
                             }
+                        } finally {
+                            coreBmp.ReleaseGraphics(cg);
                         }
-
-                        const tile = bgRenderer.getSandblastTile();
-                        const tw = tile.Width, th = tile.Height;
-                        for (let ty = 0; ty < res; ty += th) {
-                            for (let tx = 0; tx < res; tx += tw) {
-                                cg.DrawImage(tile, tx, ty, tw, th, 0, 0, tw, th, 0, 50);
-                            }
-                        }
-                        coreBmp.ReleaseGraphics(cg);
 
                         coreMask = gdi.CreateImage(res, res);
                         const cmg = coreMask.GetGraphics();
-                        cmg.SetSmoothingMode(2);
-                        cmg.FillSolidRect(0, 0, res, res, GdiUtils.colour(255, 255, 255));
-                        cmg.FillEllipse(0, 0, res, res, GdiUtils.colour(0, 0, 0));
-                        coreMask.ReleaseGraphics(cmg);
+                        try {
+                            cmg.SetSmoothingMode(2);
+                            cmg.FillSolidRect(0, 0, res, res, GdiUtils.colour(255, 255, 255));
+                            cmg.FillEllipse(0, 0, res, res, GdiUtils.colour(0, 0, 0));
+                        } finally {
+                            coreMask.ReleaseGraphics(cmg);
+                        }
 
                         coreBmp.ApplyMask(coreMask);
                         gBase.DrawImage(coreBmp, Math.round(cx - rBorderInner), Math.round(cy - rBorderInner), res, res, 0, 0, res, res);
@@ -1351,9 +1461,11 @@ class DialRenderer {
                 gBase.FillSolidRect(0, 0, size, size, GdiUtils.colour(ic[0] * 0.45, ic[1] * 0.45, ic[2] * 0.45));
                 const cell = GdiUtils.clamp(Math.round(size * 0.014), 3, 6);
                 const tile = bgRenderer.getCarbonTile(cell);
-                const tn = tile.Width;
-                for (let ty = 0; ty < size; ty += tn) {
-                    for (let tx = 0; tx < size; tx += tn) gBase.DrawImage(tile, tx, ty, tn, tn, 0, 0, tn, tn);
+                if (tile) {
+                    const tn = tile.Width;
+                    for (let ty = 0; ty < size; ty += tn) {
+                        for (let tx = 0; tx < size; tx += tn) gBase.DrawImage(tile, tx, ty, tn, tn, 0, 0, tn, tn);
+                    }
                 }
                 gBase.DrawEllipse(cx - R + 1, cy - R + 1, (R - 1) * 2, (R - 1) * 2, 1.5, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 50));
 
@@ -1370,7 +1482,7 @@ class DialRenderer {
             }
 
             // Render Specular Profiles
-            if (showHighlight && strMul > 0.01) {
+            if (needLight) {
                 const isAuto = (lightStyle === VolumeConstants.LIGHT_STYLE.AUTO);
 
                 const renderSoftSheen = (intensity, maxRadius = R) => {
@@ -1386,16 +1498,22 @@ class DialRenderer {
                         const res = 128;
                         gradBmp = gdi.CreateImage(res, res);
                         const gi = gradBmp.GetGraphics();
-                        gi.SetSmoothingMode(2);
-                        gi.FillGradRect(0, 0, res, res, gdiAngle, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 0), GdiUtils.colour(255, 255, 255));
-                        gradBmp.ReleaseGraphics(gi);
+                        try {
+                            gi.SetSmoothingMode(2);
+                            gi.FillGradRect(0, 0, res, res, gdiAngle, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 0), GdiUtils.colour(255, 255, 255));
+                        } finally {
+                            gradBmp.ReleaseGraphics(gi);
+                        }
 
                         maskBmp = gdi.CreateImage(res, res);
                         const gm = maskBmp.GetGraphics();
-                        gm.SetSmoothingMode(2);
-                        gm.FillSolidRect(0, 0, res, res, GdiUtils.colour(255, 255, 255));
-                        gm.FillEllipse(0, 0, res, res, GdiUtils.colour(0, 0, 0));
-                        maskBmp.ReleaseGraphics(gm);
+                        try {
+                            gm.SetSmoothingMode(2);
+                            gm.FillSolidRect(0, 0, res, res, GdiUtils.colour(255, 255, 255));
+                            gm.FillEllipse(0, 0, res, res, GdiUtils.colour(0, 0, 0));
+                        } finally {
+                            maskBmp.ReleaseGraphics(gm);
+                        }
 
                         gradBmp.ApplyMask(maskBmp);
 
@@ -1602,17 +1720,23 @@ class DialRenderer {
                         const res = 128;
                         barBmp = gdi.CreateImage(res, res);
                         const bg = barBmp.GetGraphics();
-                        bg.SetSmoothingMode(2);
-                        const barAlpha = GdiUtils.clamp(Math.round(48 * strMul), 0, 255);
-                        bg.FillGradRect(0, 0, res, res, 0, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 0), GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), barAlpha), 0.5);
-                        barBmp.ReleaseGraphics(bg);
+                        try {
+                            bg.SetSmoothingMode(2);
+                            const barAlpha = GdiUtils.clamp(Math.round(48 * strMul), 0, 255);
+                            bg.FillGradRect(0, 0, res, res, 0, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 0), GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), barAlpha), 0.5);
+                        } finally {
+                            barBmp.ReleaseGraphics(bg);
+                        }
 
                         maskBmp = gdi.CreateImage(res, res);
                         const mg = maskBmp.GetGraphics();
-                        mg.SetSmoothingMode(2);
-                        mg.FillSolidRect(0, 0, res, res, GdiUtils.colour(255, 255, 255));
-                        mg.FillEllipse(0, 0, res, res, GdiUtils.colour(0, 0, 0));
-                        maskBmp.ReleaseGraphics(mg);
+                        try {
+                            mg.SetSmoothingMode(2);
+                            mg.FillSolidRect(0, 0, res, res, GdiUtils.colour(255, 255, 255));
+                            mg.FillEllipse(0, 0, res, res, GdiUtils.colour(0, 0, 0));
+                        } finally {
+                            maskBmp.ReleaseGraphics(mg);
+                        }
 
                         barBmp.ApplyMask(maskBmp);
                         gLight.SetInterpolationMode(2);
@@ -1675,32 +1799,45 @@ class DialRenderer {
             }
 
             bmpBase.ReleaseGraphics(gBase);
-            bmpLight.ReleaseGraphics(gLight);
+            gBase = null;
+            if (bmpLight && gLight) {
+                bmpLight.ReleaseGraphics(gLight);
+                gLight = null;
+            }
 
             let mask = null;
             try {
                 mask = gdi.CreateImage(size, size);
                 const mg = mask.GetGraphics();
-                mg.SetSmoothingMode(2);
-                mg.FillSolidRect(0, 0, size, size, GdiUtils.colour(255, 255, 255));
-                mg.FillEllipse(0, 0, size, size, GdiUtils.colour(0, 0, 0));
-                mask.ReleaseGraphics(mg);
+                try {
+                    mg.SetSmoothingMode(2);
+                    mg.FillSolidRect(0, 0, size, size, GdiUtils.colour(255, 255, 255));
+                    mg.FillEllipse(0, 0, size, size, GdiUtils.colour(0, 0, 0));
+                } finally {
+                    mask.ReleaseGraphics(mg);
+                }
 
                 bmpBase.ApplyMask(mask);
-                bmpLight.ApplyMask(mask);
+                if (bmpLight) bmpLight.ApplyMask(mask);
             } finally {
                 if (mask?.Dispose) { try { mask.Dispose(); } catch {} }
             }
 
             this.#bmpBase = bmpBase;
+            bmpBase = null;
             this.#bmpLight = bmpLight;
+            bmpLight = null;
 
             gr.SetInterpolationMode(2);
             gr.DrawImage(this.#bmpBase, x, y, size, size, 0, 0, size, size, drawAngle, 255);
-            if (showHighlight) {
+            if (needLight && this.#bmpLight) {
                 gr.DrawImage(this.#bmpLight, x, y, size, size, 0, 0, size, size, 0, 255);
             }
         } catch {
+            if (gBase && bmpBase) { try { bmpBase.ReleaseGraphics(gBase); } catch {} gBase = null; }
+            if (gLight && bmpLight) { try { bmpLight.ReleaseGraphics(gLight); } catch {} gLight = null; }
+            if (bmpBase?.Dispose) { try { bmpBase.Dispose(); } catch {} }
+            if (bmpLight?.Dispose) { try { bmpLight.Dispose(); } catch {} }
             gr.FillEllipse(x, y, size, size, theme.inner);
         }
     }
@@ -1811,7 +1948,6 @@ class SceneCache {
         if (dialRenderer) dialRenderer.cleanup();
     }
 
-    // ---- Shared helpers (static scene + live overlays) ----
     static arcBand(props) { return props && props.levelArc ? Math.max(3, GdiUtils.scale(4)) : 0; }
 
     static layout(cache, props) {
@@ -1830,7 +1966,6 @@ class SceneCache {
         };
     }
 
-    // Colour used by lit arc / lit ticks / glow pointers
     static accentColour(props, theme) {
         if (props.glowSource === 'custom') {
             return (Number(props.customGlowColor) >>> 0) || theme.marker;
@@ -1843,7 +1978,6 @@ class SceneCache {
         return theme.marker;
     }
 
-    // Unlit look for ticks / arc track (theme tick colour sunk toward whatever is behind it)
     static dimColour(theme, props) {
         const a = GdiUtils.toRGB(theme.tick);
         const b = GdiUtils.toRGB(props.showOuterRing ? theme.knob : theme.bg);
@@ -1851,7 +1985,6 @@ class SceneCache {
         return GdiUtils.colour(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k);
     }
 
-    // Arc along the dial using the knob's angle convention (x = sin a, y = -cos a)
     static drawArc(g, cx, cy, r, a0, a1, width, colour) {
         const len = Math.abs(a1 - a0) * r;
         const segs = Math.max(12, Math.ceil(len / 3));
@@ -1865,7 +1998,6 @@ class SceneCache {
         }
     }
 
-    // Draws tick marks iMin..iMax. overlay=true skips decorative arcs / text (used for lit ticks)
     static drawTickMarks(g, o) {
         const { props, cache, config, cx, cy, rBase, span, sizeMul, sweepTotal, iMin, iMax, overlay } = o;
         const theme = Object.assign({}, o.theme, { tick: o.tickCol });
@@ -2102,67 +2234,73 @@ class SceneCache {
         this.#bitmap = null;
         this.#key = key;
 
+        let bmp = null;
         try {
-            const bmp = gdi.CreateImage(w, h);
+            bmp = gdi.CreateImage(w, h);
             const g = bmp.GetGraphics();
-            g.SetSmoothingMode(2);
+            try {
+                g.SetSmoothingMode(2);
 
-            const cx = cache.cx;
-            const cy = cache.cy;
+                const cx = cache.cx;
+                const cy = cache.cy;
 
-            const L = SceneCache.layout(cache, props);
-            const { aoPad, sizeMul, rBase, rOuter, span } = L;
+                const L = SceneCache.layout(cache, props);
+                const { aoPad, sizeMul, rBase, rOuter, span } = L;
 
-            const sweepTotal = config.ANGLE_MAX - config.ANGLE_MIN;
+                const sweepTotal = config.ANGLE_MAX - config.ANGLE_MIN;
 
-            // 1. Backplate
-            bgRenderer.draw(g, w, h, props.bgMode, bgImagePath, theme, assetManager);
+                // 1. Backplate
+                bgRenderer.draw(g, w, h, props.bgMode, bgImagePath, theme, assetManager);
 
-            // 2. Outer Knob Body
-            if (props.showOuterRing) {
-                g.FillEllipse(cx - rOuter, cy - rOuter, rOuter * 2, rOuter * 2, theme.knob);
-            }
-
-            // 3. Ambient Occlusion Shadow
-            if (props.showDropShadow && aoPad > 0) {
-                const aoSteps = Math.max(6, aoPad * 2);
-                for (let s = aoSteps; s >= 1; s--) {
-                    const sp = (s / aoSteps) * aoPad;
-                    const alpha = Math.round(((1 - (s / aoSteps)) ** 1.4) * 80);
-                    if (alpha <= 0) continue;
-                    const dia = cache.innerSize + sp * 2;
-                    g.FillEllipse(cx - dia / 2, cy - dia / 2, dia, dia, GdiUtils.setAlpha(GdiUtils.colour(16, 16, 16), alpha));
+                // 2. Outer Knob Body
+                if (props.showOuterRing) {
+                    g.FillEllipse(cx - rOuter, cy - rOuter, rOuter * 2, rOuter * 2, theme.knob);
                 }
+
+                // 3. Ambient Occlusion Shadow
+                if (props.showDropShadow && aoPad > 0) {
+                    const aoSteps = Math.max(6, aoPad * 2);
+                    for (let s = aoSteps; s >= 1; s--) {
+                        const sp = (s / aoSteps) * aoPad;
+                        const alpha = Math.round(((1 - (s / aoSteps)) ** 1.4) * 80);
+                        if (alpha <= 0) continue;
+                        const dia = cache.innerSize + sp * 2;
+                        g.FillEllipse(cx - dia / 2, cy - dia / 2, dia, dia, GdiUtils.setAlpha(GdiUtils.colour(16, 16, 16), alpha));
+                    }
+                }
+
+                // 3b. Level-arc track (dim ring; lit portion is drawn live)
+                if (props.levelArc && cache.tickAngles) {
+                    SceneCache.drawArc(g, cx, cy, L.arcR, cache.tickAngles[0], cache.tickAngles[config.TICK_COUNT - 1], L.arcW, SceneCache.dimColour(theme, props));
+                }
+
+                // 4. Tick Marks (8 Styles)
+                if (props.showTicks && cache.tickAngles) {
+                    SceneCache.drawTickMarks(g, {
+                        props, cache, config, theme, cx, cy, rBase, span, sizeMul, sweepTotal,
+                        tickCol: props.litTicks ? SceneCache.dimColour(theme, props) : theme.tick,
+                        iMin: 0, iMax: config.TICK_COUNT - 1, overlay: false
+                    });
+                }
+
+                // 5. Main Dial Face
+                if (dialBakesIntoBase) {
+                    const innerX = cache.cx - cache.innerSize / 2;
+                    const innerY = cy - cache.innerSize / 2;
+                    dialRenderer.draw(
+                        g, innerX, innerY, cache.innerSize, props.dialMode, dialImagePath, 
+                        theme, assetManager, bgRenderer, 0, false, props.dialLightStyle, props.dialLightAngle, props.dialLightStrength, props.showHighlight
+                    );
+                }
+            } finally {
+                bmp.ReleaseGraphics(g);
             }
 
-            // 3b. Level-arc track (dim ring; lit portion is drawn live)
-            if (props.levelArc && cache.tickAngles) {
-                SceneCache.drawArc(g, cx, cy, L.arcR, cache.tickAngles[0], cache.tickAngles[config.TICK_COUNT - 1], L.arcW, SceneCache.dimColour(theme, props));
-            }
-
-            // 4. Tick Marks (8 Styles)
-            if (props.showTicks && cache.tickAngles) {
-                SceneCache.drawTickMarks(g, {
-                    props, cache, config, theme, cx, cy, rBase, span, sizeMul, sweepTotal,
-                    tickCol: props.litTicks ? SceneCache.dimColour(theme, props) : theme.tick,
-                    iMin: 0, iMax: config.TICK_COUNT - 1, overlay: false
-                });
-            }
-
-            // 5. Main Dial Face
-            if (dialBakesIntoBase) {
-                const innerX = cache.cx - cache.innerSize / 2;
-                const innerY = cy - cache.innerSize / 2;
-                dialRenderer.draw(
-                    g, innerX, innerY, cache.innerSize, props.dialMode, dialImagePath, 
-                    theme, assetManager, bgRenderer, 0, false, props.dialLightStyle, props.dialLightAngle, props.dialLightStrength, props.showHighlight
-                );
-            }
-
-            bmp.ReleaseGraphics(g);
             this.#bitmap = bmp;
+            bmp = null;
             return this.#bitmap;
         } catch {
+            if (bmp?.Dispose) { try { bmp.Dispose(); } catch {} }
             return null;
         }
     }
@@ -2206,6 +2344,9 @@ const VOL_SLOPE_3 = Math.abs(VolumeConfig.DB_BREAKPOINT_2) / (100 - VolumeConfig
 // ============================================================================================
 class VolumeState {
     dragging = false;
+    hasDragged = false;
+    dragStartX = 0;
+    dragStartY = 0;
     lastX = 0;
     lastY = 0;
     uiVolume = 50;
@@ -2297,7 +2438,7 @@ class VolumeState {
     }
 
     startAnimation() {
-        if (this.#animationTimer) return;
+        if (this.#animationTimer || !window.IsVisible) return;
         this.#animationTimer = window.SetInterval(() => {
             if (!window.IsVisible) {
                 this.stopAnimation();
@@ -2382,18 +2523,35 @@ class VolumeEngine {
         return db;
     }
 
-    static syncFromFoobar(state, props, snap = true) {
+    static refreshMuteState(state) {
         try {
             state.isMuted = fb.IsMainMenuCommandChecked('Playback/Volume/Mute');
         } catch {
             state.isMuted = false;
         }
+    }
+
+    static syncFromFoobar(state, props, snap = true) {
+        const prevMuted = state.isMuted;
+        const prevTarget = state.targetAngle;
+        const prevCurrent = state.currentAngle;
+        this.refreshMuteState(state);
         try {
             const fbVol = GdiUtils.clamp(fb.Volume, -100, 0);
             state.uiVolume = this.dbToUi(fbVol, props);
             state.targetAngle = state.dragTargetAngle = this.uiToAngle(state.uiVolume);
             if (snap) state.currentAngle = state.targetAngle;
-            state.requestRepaint();
+
+            const muteChanged = prevMuted !== state.isMuted;
+            const angleChanged = Math.abs(prevTarget - state.targetAngle) > 0.001 || Math.abs(prevCurrent - state.currentAngle) > 0.001;
+            if (muteChanged || angleChanged) {
+                if (snap || Math.abs(state.currentAngle - state.targetAngle) < VolumeConfig.ANGLE_EPSILON) {
+                    state.currentAngle = state.targetAngle;
+                    state.requestSubRectRepaint();
+                } else {
+                    state.requestRepaint();
+                }
+            }
         } catch {}
     }
 
@@ -2407,6 +2565,7 @@ class VolumeEngine {
                     state.uiVolume = this.dbToUi(newDb, props);
                     state.targetAngle = state.dragTargetAngle = this.uiToAngle(state.uiVolume);
                 }
+                this.refreshMuteState(state);
             }
         } catch {}
     }
@@ -2695,7 +2854,7 @@ class MainRenderer {
 
                 if (font) {
                     const lSize = gr.MeasureString(valStr, font, 0, 0, 9999, 9999);
-                    gr.DrawString(valStr, font, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 235), (w - lSize.Width) / 2, by + 6, lSize.Width + 4, lSize.Height);
+                    gr.DrawString(valStr, font, GdiUtils.setAlpha(GdiUtils.colour(255, 255, 255), 235), (w - lSize.Width) / 2, by + 6, lSize.Width + 4, lSize.Height + 2);
                 }
 
                 const trackX = bx + pad, trackY = by + 26;
@@ -2725,18 +2884,25 @@ class InputManager {
             return true;
         }
         if (!this.hitTest(x, y, state, w, h, props)) return false;
-        
+
         state.dragging = true;
+        state.hasDragged = false;
+        state.dragStartX = x;
+        state.dragStartY = y;
         state.lastX = x;
         state.lastY = y;
-        state.startAnimation();
         return true;
     }
 
     static handleDragEnd(state, props) {
         if (!state.dragging) return false;
+        const didDrag = state.hasDragged;
         state.dragging = false;
+        state.hasDragged = false;
+        if (!didDrag) return true;
+
         VolumeEngine.setFoobarVolume(state.uiVolume, false, state, props);
+        VolumeEngine.refreshMuteState(state);
         state.targetAngle = state.dragTargetAngle;
         state.requestRepaint();
         return true;
@@ -2744,8 +2910,21 @@ class InputManager {
 
     static handleDragMove(x, y, state, props) {
         if (!state.dragging) return false;
-        
+
+        if (!state.hasDragged) {
+            const threshold = Math.max(3, GdiUtils.scale(3));
+            if (Math.hypot(x - state.dragStartX, y - state.dragStartY) < threshold) {
+                return true;
+            }
+            state.hasDragged = true;
+            state.lastX = x;
+            state.lastY = y;
+            state.startAnimation();
+            return true;
+        }
+
         const delta = ((x - state.lastX) + (state.lastY - y)) * VolumeConfig.DRAG_SCALE;
+        if (delta === 0) return true;
         state.lastX = x;
         state.lastY = y;
 
@@ -2780,9 +2959,10 @@ class InputManager {
 
         if (!this.hitTest(x, y, state, w, h, props)) return false;
         state.dragging = false;
+        state.hasDragged = false;
         try {
             fb.RunMainMenuCommand('Playback/Volume/Mute');
-            try { state.isMuted = fb.IsMainMenuCommandChecked('Playback/Volume/Mute'); } catch {}
+            VolumeEngine.refreshMuteState(state);
             if (state.muteResyncTimer) { window.ClearTimeout(state.muteResyncTimer); state.muteResyncTimer = null; }
             state.muteResyncTimer = window.SetTimeout(() => {
                 state.muteResyncTimer = null;
@@ -2796,7 +2976,7 @@ class InputManager {
 }
 
 // ============================================================================================
-// 15. CONTEXT MENU MANAGER
+// 15. CONTEXT MENU MANAGER (DECLARATIVE MENU BUILDER)
 // ============================================================================================
 class ContextMenuManager {
     constructor(controller) {
@@ -2805,11 +2985,11 @@ class ContextMenuManager {
 
     #doColorPicker(label, key) {
         const applied = this.controller.properties.values.theme;
-        
+
         if (applied !== 'Custom' && applied !== '~Preview') {
             this.controller.themes.seedDraftFromTheme(this.controller.themes.get(applied));
         }
-        
+
         const d = this.controller.themes.draftTheme;
         const startArgb = d[key] >>> 0;
         let picked;
@@ -2850,13 +3030,12 @@ class ContextMenuManager {
         }
 
         const currentStyleSettings = this.controller.properties.getStyleSettings();
-
         const d = this.controller.themes.draftTheme;
         const t = this.controller.themes.makeTheme(name, d.bg, d.knob, d.inner, d.tick, d.marker, currentStyleSettings);
         t.custom = true;
 
-        this.controller.themes.addOrUpdate(t, true);
-        this.controller.properties.setTheme(name, this.controller.themes);
+        this.controller.themes.addOrUpdate(t, true, this.controller.properties);
+        this.controller.properties.setTheme(name, this.controller.themes, true, this.controller.state);
         this.controller.state.invalidateGeometry();
         this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
         this.controller.state.requestRepaint();
@@ -2945,7 +3124,7 @@ class ContextMenuManager {
             const fallback = (this.controller.properties.lastFinalizedTheme !== name) ? this.controller.properties.lastFinalizedTheme : this.controller.themes.themes[0].name;
             this.controller.properties.lastFinalizedTheme = fallback;
             this.controller.themes.clearPreview();
-            this.controller.properties.setTheme(fallback, this.controller.themes);
+            this.controller.properties.setTheme(fallback, this.controller.themes, true, this.controller.state);
         }
 
         if (this.controller.properties.values.customThemeFile) {
@@ -2965,582 +3144,536 @@ class ContextMenuManager {
         return parts.length > 2 ? `…/${parts[parts.length - 1]}` : p;
     }
 
-    show(x, y) {
-        if (this.controller.properties.values.theme !== '~Preview' && this.controller.properties.values.theme !== 'Custom') {
-            if (this.controller.themes.draftBaseTheme !== this.controller.properties.values.theme) {
-                this.controller.themes.seedDraftFromTheme(this.controller.themes.get(this.controller.properties.values.theme));
-            }
-        }
-
-        const m = window.CreatePopupMenu();
-        const themeMenu = window.CreatePopupMenu();
-        const themeCustomMenu = window.CreatePopupMenu();
-        const creatorMenu = window.CreatePopupMenu();
-        const removeThemeMenu = window.CreatePopupMenu();
-        const lcdSyncMenu = window.CreatePopupMenu();
-        const syncStylesMenu = window.CreatePopupMenu();
-        const lcdThemeListMenu = window.CreatePopupMenu();
-        const syncBtnPosMenu = window.CreatePopupMenu();
-        const lcdBtnSideMenu = window.CreatePopupMenu();
-        const bgMenu = window.CreatePopupMenu();
-        const dialMenu = window.CreatePopupMenu();
-        const lightSubMenu = window.CreatePopupMenu();
-        const lightStyleMenu = window.CreatePopupMenu();
-        const lightAngleMenu = window.CreatePopupMenu();
-        const lightStrengthMenu = window.CreatePopupMenu();
-        const effectsMenu = window.CreatePopupMenu();
-        const tickStyleMenu = window.CreatePopupMenu();
-        const majorIntervalMenu = window.CreatePopupMenu();
-        const markerStyleMenu = window.CreatePopupMenu();
-        const rangeMenu = window.CreatePopupMenu();
-        const glowSrcMenu = window.CreatePopupMenu();
-        const bgImgSubMenu = window.CreatePopupMenu();
-        const dialImgSubMenu = window.CreatePopupMenu();
-
-        const allMenus = [
-            m, themeMenu, themeCustomMenu, creatorMenu, removeThemeMenu, lcdSyncMenu,
-            syncStylesMenu, lcdThemeListMenu, syncBtnPosMenu, lcdBtnSideMenu,
-            bgMenu, dialMenu, lightSubMenu, lightStyleMenu, lightAngleMenu, lightStrengthMenu,
-            effectsMenu, glowSrcMenu, tickStyleMenu, majorIntervalMenu, markerStyleMenu, rangeMenu, bgImgSubMenu, dialImgSubMenu
-        ];
-
-        const names = this.controller.themes.names();
-        const props = this.controller.properties.values;
-        const availableImages = this.controller.assetManager.getAvailableImages();
-
-        let activeThemeIdx = 0;
-        for (let i = 0; i < names.length; i++) {
-            const isCustom = this.controller.themes.get(names[i])?.custom;
-            themeMenu.AppendMenuItem(0, 100 + i, `${names[i]}${isCustom ? '  [custom]' : ''}`);
-            if (names[i] === props.theme) activeThemeIdx = i;
-        }
-        if (names.length > 0) themeMenu.CheckMenuRadioItem(100, 100 + names.length - 1, 100 + activeThemeIdx);
-        themeMenu.AppendMenuSeparator();
-
-        themeCustomMenu.AppendMenuItem(0, 2000, 'Load Settings & Themes from JSON…');
-        const hasFile = props.customThemeFile && props.customThemeFile.trim() !== '';
-        themeCustomMenu.AppendMenuItem(hasFile ? 0 : 1, 2001, `Reload from last file${hasFile ? `  (${this.#shortPath(props.customThemeFile)})` : ''}`);
-        themeCustomMenu.AppendMenuItem(0, 2002, 'Save Settings & Custom Themes to JSON…');
-        themeCustomMenu.AppendMenuItem(0, 2003, 'Export All (Settings & All Themes)…');
-        themeCustomMenu.AppendMenuItem(0, 2004, 'Export Template (Built-in Themes Only)…');
-        themeCustomMenu.AppendMenuSeparator();
-        themeCustomMenu.AppendMenuItem(0, 2005, `Set Default JSON File Path…${hasFile ? `  (${this.#shortPath(props.customThemeFile)})` : ''}`);
-        themeCustomMenu.AppendTo(themeMenu, 0, 'Settings & Themes (JSON)');
-
-        creatorMenu.AppendMenuItem(0, 3001, '1. Set Background Color…');
-        creatorMenu.AppendMenuItem(0, 3002, '2. Set Main Dial (Inner Face Color)...');
-        creatorMenu.AppendMenuItem(0, 3003, '3. Set Outer Ring (Knob Body Color)...');
-        creatorMenu.AppendMenuItem(0, 3004, '4. Set Tick Marks Color…');
-        creatorMenu.AppendMenuItem(0, 3005, '5. Set Dial Marker (Pointer Color)...');
-
-        const customs = this.controller.themes.customThemes;
-        if (customs.length) {
-            for (let ci = 0; ci < customs.length; ci++) {
-                removeThemeMenu.AppendMenuItem(0, 4000 + ci, customs[ci].name);
-            }
-        } else {
-            removeThemeMenu.AppendMenuItem(1, 4000, 'No custom themes');
-        }
-        creatorMenu.AppendMenuSeparator();
-        removeThemeMenu.AppendTo(creatorMenu, 0, 'Remove Custom Theme…');
-        creatorMenu.AppendTo(themeMenu, 0, 'Theme Creator');
-
-        // LCD Theme Sync Menu
-        lcdSyncMenu.AppendMenuItem(0, 8000, 'Sync LCD Theme (PeakMeter & Timer)');
-        if (props.syncLcdTheme) lcdSyncMenu.CheckMenuRadioItem(8000, 8000, 8000);
-        lcdSyncMenu.AppendMenuItem(0, 8001, 'Show LCD Sync Button');
-        if (props.showLcdSyncBtn) lcdSyncMenu.CheckMenuRadioItem(8001, 8001, 8001);
-        lcdSyncMenu.AppendMenuSeparator();
-        lcdSyncMenu.AppendMenuItem(0, 8002, 'Cycle Next LCD Theme');
-        lcdSyncMenu.AppendMenuItem(0, 8003, 'Cycle Previous LCD Theme');
-
-        // Direct pick lists
-        VolumeConstants.LCD_THEMES.forEach((t, i) => lcdThemeListMenu.AppendMenuItem(0, 8200 + i, t.name));
-        const lcdCurIdx = VolumeConstants.LCD_THEMES.findIndex(t => t.name.toLowerCase() === String(props.currentLcdTheme).toLowerCase());
-        if (lcdCurIdx !== -1) lcdThemeListMenu.CheckMenuRadioItem(8200, 8200 + VolumeConstants.LCD_THEMES.length - 1, 8200 + lcdCurIdx);
-        lcdThemeListMenu.AppendTo(lcdSyncMenu, 0, 'Select LCD Theme');
-
-        // Button placement / text
-        syncBtnPosMenu.AppendMenuItem(0, 8010, 'Top of Panel');
-        syncBtnPosMenu.AppendMenuItem(0, 8011, 'Bottom of Panel');
-        syncBtnPosMenu.CheckMenuRadioItem(8010, 8011, props.syncBtnPosition === 'bottom' ? 8011 : 8010);
-
-        // Combined "Sync Styles" menu
-        lcdSyncMenu.AppendTo(syncStylesMenu, 0, 'LCD Themes (Peak & Timer)');
-        syncStylesMenu.AppendMenuSeparator();
-        syncBtnPosMenu.AppendTo(syncStylesMenu, 0, 'Button Position');
-        lcdBtnSideMenu.AppendMenuItem(0, 8013, 'Left');
-        lcdBtnSideMenu.AppendMenuItem(0, 8014, 'Right');
-        lcdBtnSideMenu.CheckMenuRadioItem(8013, 8014, props.lcdBtnSide === 'left' ? 8013 : 8014);
-        lcdBtnSideMenu.AppendTo(syncStylesMenu, 0, 'LCD Button Side');
-        syncStylesMenu.AppendMenuItem(0, 8012, 'Show Button Text (LCD)');
-        if (props.syncBtnShowText) syncStylesMenu.CheckMenuRadioItem(8012, 8012, 8012);
-
-        bgMenu.AppendMenuItem(0, 6000, 'Solid (Theme Color)');
-        bgMenu.AppendMenuItem(0, 6001, 'Brushed Aluminum (Horizontal)');
-        bgMenu.AppendMenuItem(0, 6002, 'Sandblast Matte (Bead-Blasted)');
-        bgMenu.AppendMenuItem(0, 6003, 'Satin Velvet (Smooth Matte)');
-        bgMenu.AppendMenuSeparator();
-
-        if (availableImages.length === 0) {
-            bgImgSubMenu.AppendMenuItem(1, 0, '(No images in skins\\scripts\\VolumeKnob)');
-        } else {
-            for (let i = 0; i < availableImages.length; i++) bgImgSubMenu.AppendMenuItem(0, 10000 + i, availableImages[i]);
-        }
-        bgImgSubMenu.AppendTo(bgMenu, 0, 'Custom Image');
-
-        if (props.bgMode === VolumeConstants.BG_MODE.IMAGE && availableImages.includes(props.customBgImage)) {
-            bgImgSubMenu.CheckMenuRadioItem(10000, 10000 + availableImages.length - 1, 10000 + availableImages.indexOf(props.customBgImage));
-        } else if (props.bgMode >= VolumeConstants.BG_MODE.SOLID && props.bgMode <= VolumeConstants.BG_MODE.SATIN) {
-            bgMenu.CheckMenuRadioItem(6000, 6003, 6000 + props.bgMode);
-        }
-
-        dialMenu.AppendMenuItem(0, 6100, 'Solid (Theme Inner Color)');
-        dialMenu.AppendMenuItem(0, 6101, 'Concentric Micro-Groove (Hi-Fi Lathe)');
-        dialMenu.AppendMenuItem(0, 6102, 'Studio Fluted (3D Milled Console Rim)');
-        dialMenu.AppendMenuItem(0, 6103, 'Bead-Blasted Matte (Backplate Grain)');
-        dialMenu.AppendMenuItem(0, 6104, 'Sandblast (Grainy Dome)');
-        dialMenu.AppendMenuItem(0, 6105, 'Studio Dial (Convex Dome + Sandblast Core)');
-        dialMenu.AppendMenuItem(0, 6108, 'Carbon Fibre Weave');
-        dialMenu.AppendMenuSeparator();
-
-        if (availableImages.length === 0) {
-            dialImgSubMenu.AppendMenuItem(1, 0, '(No images in skins\\scripts\\VolumeKnob)');
-        } else {
-            for (let i = 0; i < availableImages.length; i++) dialImgSubMenu.AppendMenuItem(0, 20000 + i, availableImages[i]);
-        }
-        dialImgSubMenu.AppendTo(dialMenu, 0, 'Custom Image');
-
-        if (props.dialMode === VolumeConstants.DIAL_MODE.IMAGE && availableImages.includes(props.customDialImage)) {
-            dialImgSubMenu.CheckMenuRadioItem(20000, 20000 + availableImages.length - 1, 20000 + availableImages.indexOf(props.customDialImage));
-        } else if (props.dialMode !== VolumeConstants.DIAL_MODE.IMAGE && props.dialMode >= VolumeConstants.DIAL_MODE.SOLID && props.dialMode <= VolumeConstants.DIAL_MODE.CARBON && props.dialMode !== 7) {
-            dialMenu.CheckMenuRadioItem(6100, 6108, 6100 + props.dialMode);
-        }
-
-        dialMenu.AppendMenuSeparator();
-        dialMenu.AppendMenuItem(0, 6120, 'Rotate Dial (Procedural & Custom Image)');
-        if (props.spinDialImage) dialMenu.CheckMenuRadioItem(6120, 6120, 6120);
-
-        effectsMenu.AppendMenuItem(0, 7001, 'Ambient Occlusion (Dial Face Shadow)');
-        if (props.showDropShadow) effectsMenu.CheckMenuRadioItem(7001, 7001, 7001);
-        effectsMenu.AppendMenuSeparator();
-        effectsMenu.AppendMenuItem(0, 7002, 'Show Outer Ring (Solid Classic)');
-        if (props.showOuterRing) effectsMenu.CheckMenuRadioItem(7002, 7002, 7002);
-        effectsMenu.AppendMenuSeparator();
-
-        tickStyleMenu.AppendMenuItem(0, 7200, 'Uniform Lines');
-        tickStyleMenu.AppendMenuItem(0, 7201, 'Lines (Major & Minor)');
-        tickStyleMenu.AppendMenuItem(0, 7202, 'Precision Dots / Pips');
-        tickStyleMenu.AppendMenuItem(0, 7203, 'Milled Studio Wedges (Blocks)');
-        tickStyleMenu.AppendMenuItem(0, 7204, 'Precision Diamond Pips');
-        tickStyleMenu.AppendMenuItem(0, 7205, 'Laboratory Bounded Arc');
-        tickStyleMenu.AppendMenuItem(0, 7206, 'Min / Max Text Arc');
-        tickStyleMenu.AppendMenuItem(0, 7207, 'Precision Dots + Outer Arc');
-        tickStyleMenu.CheckMenuRadioItem(7200, 7207, 7200 + GdiUtils.clamp(props.tickStyle, 0, 7));
-        tickStyleMenu.AppendMenuSeparator();
-        tickStyleMenu.AppendMenuItem(0, 7210, `Tick Margin Slider... (Current: ${props.tickMargin}px)`);
-        tickStyleMenu.AppendMenuItem(0, 7211, `Tick Size Slider... (Current: +${props.tickSizeBonus}%)`);
-        tickStyleMenu.AppendTo(effectsMenu, 0, 'Tick Mark Style');
-
-        majorIntervalMenu.AppendMenuItem(0, 7300, 'None (All Uniform)');
-        majorIntervalMenu.AppendMenuItem(0, 7301, '0%, 50%, 100% (Min / Mid / Max)');
-        majorIntervalMenu.AppendMenuItem(0, 7302, '0%, 25%, 50%, 75%, 100% (Quarters)');
-        majorIntervalMenu.AppendMenuItem(0, 7303, 'Every 10% (0, 10, 20... 100%)');
-        majorIntervalMenu.CheckMenuRadioItem(7300, 7303, 7300 + props.majorTickInterval);
-        majorIntervalMenu.AppendTo(effectsMenu, 0, 'Major Scale Markings (Large Ticks)');
-
-        effectsMenu.AppendMenuItem(0, 7003, 'Show Tick Marks');
-        if (props.showTicks) effectsMenu.CheckMenuRadioItem(7003, 7003, 7003);
-        effectsMenu.AppendMenuSeparator();
-
-        const isStudioDial = (props.dialMode === VolumeConstants.DIAL_MODE.STUDIO);
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7100, 'Standard Line');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7101, 'Dot');
-        markerStyleMenu.AppendMenuItem(0, 7102, 'Arrow Indicator');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7103, 'Short Line');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7104, 'Beveled Wedge (Stamped Recessed Chevron)');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7105, 'Beveled Slot (Stamped Recessed Cavity)');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 0 : 1, 7106, 'Very Short Line (Studio Dial Only: 0.8 - 1.0 R)');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7107, 'Full Line (Center to 0.975 R)');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7108, 'LED Dot (Glow Colour)');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7109, 'Glow Line (Glow Colour)');
-        markerStyleMenu.AppendMenuItem(isStudioDial ? 1 : 0, 7110, 'Recessed Groove (Glow Inlay)');
-        markerStyleMenu.CheckMenuRadioItem(7100, 7110, 7100 + props.markerStyle);
-        markerStyleMenu.AppendTo(effectsMenu, 0, 'Dial Pointer Style');
-
-        effectsMenu.AppendMenuItem(0, 7004, 'Show Dial Pointer (Indicator)');
-        if (props.showDialMarker) effectsMenu.CheckMenuRadioItem(7004, 7004, 7004);
-        effectsMenu.AppendMenuSeparator();
-        effectsMenu.AppendMenuItem(0, 7005, 'Lit Level Arc (Volume Ring)');
-        if (props.levelArc) effectsMenu.CheckMenuRadioItem(7005, 7005, 7005);
-        effectsMenu.AppendMenuItem(0, 7006, 'Lit Tick Marks (Follow Volume)');
-        if (props.litTicks) effectsMenu.CheckMenuRadioItem(7006, 7006, 7006);
-        glowSrcMenu.AppendMenuItem(0, 7010, 'Pointer / Theme Colour');
-        glowSrcMenu.AppendMenuItem(0, 7011, 'LCD Theme Colour (follows Sync Styles)');
-        glowSrcMenu.AppendMenuItem(0, 7012, 'Custom Colour');
-        const glowIdx = props.glowSource === 'lcd' ? 7011 : (props.glowSource === 'custom' ? 7012 : 7010);
-        glowSrcMenu.CheckMenuRadioItem(7010, 7012, glowIdx);
-        glowSrcMenu.AppendMenuSeparator();
-        glowSrcMenu.AppendMenuItem(0, 7013, 'Set Custom Glow Colour…');
-        glowSrcMenu.AppendTo(effectsMenu, 0, 'Glow Colour (Arc, Ticks, Glow Pointers)');
-
-        lightSubMenu.AppendMenuItem(0, 6199, 'Enable Specular Highlights');
-        if (props.showHighlight) lightSubMenu.CheckMenuRadioItem(6199, 6199, 6199);
-        lightSubMenu.AppendMenuSeparator();
-
-        lightStyleMenu.AppendMenuItem(0, 6200, 'Auto (Material Native - Physically Coupled)');
-        lightStyleMenu.AppendMenuItem(0, 6201, 'Dual Anisotropic Cones (Turned Lathe Sheen)');
-        lightStyleMenu.AppendMenuItem(0, 6202, 'Directional Soft Sheen (Full Dial Gradient)');
-        lightStyleMenu.AppendMenuItem(0, 6203, 'Linear Hairline Sheen (Brushed Metal Bar)');
-        lightStyleMenu.AppendMenuItem(0, 6204, 'Quad Cross Specular (4-Axis Diamond Sheen)');
-        lightStyleMenu.AppendMenuItem(0, 6205, 'Dual-Zone: Studio Key + Dark Ring + Soft Sheen');
-        lightStyleMenu.AppendMenuItem(0, 6206, 'Dual Anisotropic Cones + 0.98 Edge Micro-Bevel');
-        lightStyleMenu.AppendMenuItem(0, 6207, 'Convex Contour Dome Gradient (Centered)');
-        lightStyleMenu.AppendMenuItem(0, 6208, 'Concave Bowl Gradient (Centered)');
-        lightStyleMenu.AppendMenuItem(0, 6209, 'Studio Key Rim + Anisotropic Inner (0.618)');
-        lightStyleMenu.AppendMenuItem(0, 6210, 'Spun Metal (Turned Aluminum Texture)');
-        lightStyleMenu.CheckMenuRadioItem(6200, 6210, 6200 + props.dialLightStyle);
-        lightStyleMenu.AppendTo(lightSubMenu, props.showHighlight ? 0 : 1, 'Specular Style');
-
-        lightAngleMenu.AppendMenuItem(0, 6300, 'Top-Left (315° - Audio Console Standard)');
-        lightAngleMenu.AppendMenuItem(0, 6301, 'Top / Overhead (0° - 12:00)');
-        lightAngleMenu.AppendMenuItem(0, 6302, 'Top-Right (45° - 1:30)');
-        lightAngleMenu.AppendMenuItem(0, 6303, 'Right / Side (90° - 3:00)');
-        lightAngleMenu.AppendMenuItem(0, 6304, 'Bottom-Right (135° - 4:30)');
-        lightAngleMenu.AppendMenuItem(0, 6305, 'Bottom / Underlit (180° - 6:00)');
-        lightAngleMenu.AppendMenuItem(0, 6306, 'Bottom-Left (225° - 7:30)');
-        lightAngleMenu.AppendMenuItem(0, 6307, 'Left / Side (270° - 9:00)');
-        const angleMap = [315, 0, 45, 90, 135, 180, 225, 270];
-        if (angleMap.includes(props.dialLightAngle)) lightAngleMenu.CheckMenuRadioItem(6300, 6307, 6300 + angleMap.indexOf(props.dialLightAngle));
-        lightAngleMenu.AppendMenuSeparator();
-        lightAngleMenu.AppendMenuItem(0, 6310, `Interactive 360° Arc Slider... (Current: ${props.dialLightAngle}°)`);
-        lightAngleMenu.AppendTo(lightSubMenu, props.showHighlight ? 0 : 1, 'Specular Position (360° Arc)');
-
-        lightStrengthMenu.AppendMenuItem(0, 6400, 'Off (0%)');
-        lightStrengthMenu.AppendMenuItem(0, 6401, 'Subtle (50%)');
-        lightStrengthMenu.AppendMenuItem(0, 6402, 'Standard (100%)');
-        lightStrengthMenu.AppendMenuItem(0, 6403, 'Vivid (150%)');
-        lightStrengthMenu.AppendMenuItem(0, 6404, 'Maximum Sheen (200%)');
-        const strMap = [0, 50, 100, 150, 200];
-        if (strMap.includes(props.dialLightStrength)) lightStrengthMenu.CheckMenuRadioItem(6400, 6404, 6400 + strMap.indexOf(props.dialLightStrength));
-        lightStrengthMenu.AppendMenuSeparator();
-        lightStrengthMenu.AppendMenuItem(0, 6410, `Interactive Strength Slider... (Current: ${props.dialLightStrength}%)`);
-        lightStrengthMenu.AppendTo(lightSubMenu, props.showHighlight ? 0 : 1, 'Specular Strength');
-
-        rangeMenu.AppendMenuItem(0, 7400, '270° (Compact)');
-        rangeMenu.AppendMenuItem(0, 7401, '280°');
-        rangeMenu.AppendMenuItem(0, 7402, '290° (Default)');
-        rangeMenu.AppendMenuItem(0, 7403, '300° (Wide)');
-        const sweepIdx = [270, 280, 290, 300].indexOf(props.sweepRange);
-        if (sweepIdx !== -1) rangeMenu.CheckMenuRadioItem(7400, 7403, 7400 + sweepIdx);
-        rangeMenu.AppendMenuSeparator();
-        rangeMenu.AppendMenuItem(0, 7500, 'Volume Scale: Non-Linear (Hearing Optimized)');
-        rangeMenu.AppendMenuItem(0, 7501, 'Volume Scale: Linear dB (-100dB to 0dB)');
-        rangeMenu.CheckMenuRadioItem(7500, 7501, 7500 + props.volumeScalingMode);
-
-        themeMenu.AppendTo(m, 0, 'Theme');
-        syncStylesMenu.AppendTo(m, 0, 'Sync Styles');
-        bgMenu.AppendTo(m, 0, 'Backplate Finish');
-        dialMenu.AppendTo(m, 0, 'Dial Face Finish');
-        effectsMenu.AppendTo(m, 0, 'Markers and Shadow');
-        lightSubMenu.AppendTo(m, 0, 'Highlight & Specular Engine');
-        rangeMenu.AppendTo(m, 0, 'Dial Sweep Range & Scaling');
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(0, 5100, 'Randomize');
-        m.AppendMenuItem(0, 3006, 'Save Custom Theme…');
-        m.AppendMenuSeparator();
-        m.AppendMenuItem(0, 900, "Clear Image Cache & Reload");
-        m.AppendMenuItem(0, 5000, 'Reset Visual Settings to Defaults');
-        m.AppendMenuItem(0, 5001, 'Factory Reset (All Settings & Themes)...');
-
-        let selected = 0;
-        try {
-            selected = m.TrackPopupMenu(x, y);
-        } finally {
-            allMenus.forEach(menu => { try { if (menu) menu.Dispose(); } catch {} });
-        }
-
-        if (selected === 0) return true;
-        this.#dispatchMenuCommand(selected, names, availableImages, props, angleMap, strMap);
-        this.controller.isLcdBtnHovered = false;
-        this.controller.refreshSyncTooltip();
-        return true;
+    #invalidateScene(invalidateDial = false) {
+        if (invalidateDial) this.controller.dialRenderer.invalidate();
+        this.controller.state.invalidateGeometry();
+        this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
+        this.controller.state.requestRepaint();
     }
 
-    #dispatchMenuCommand(selected, names, availableImages, props, angleMap, strMap) {
-        if (selected >= 100 && selected < 100 + names.length) {
-            this.controller.themes.clearPreview();
-            this.controller.properties.setTheme(names[selected - 100], this.controller.themes);
-            this.controller.state.invalidateGeometry();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
+    #loadConfigFile(path, isReload) {
+        const result = this.controller.themes.loadFromFile(path, this.controller.properties, true, this.controller.state);
+        if (result.ok) {
+            if (!isReload) this.controller.properties.set('customThemeFile', GdiUtils.sanitizePath(path));
+            this.#invalidateScene(true);
+            VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
             this.controller.state.requestRepaint();
-        } else if (selected === 8000) {
-            const next = !props.syncLcdTheme;
-            this.controller.properties.set('syncLcdTheme', next);
-            if (next) {
-                try { window.NotifyOthers('LcdThemeSync', this.controller.properties.values.currentLcdTheme); } catch {}
+            fb.ShowPopupMessage(
+                result.summary || (isReload ? 'Configuration reloaded successfully.' : `Configuration successfully loaded from:\n${path}`),
+                VolumeConstants.SCRIPT_NAME
+            );
+        } else {
+            fb.ShowPopupMessage(`Failed to ${isReload ? 'reload' : 'load'} JSON:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
+        }
+    }
+
+    show(x, y) {
+        const c = this.controller;
+        const props = c.properties.values;
+
+        if (HudManager.activeSlider) {
+            HudManager.activeSlider = null;
+            HudManager.clearTimer();
+            window.Repaint();
+        }
+
+        if (props.theme !== '~Preview' && props.theme !== 'Custom') {
+            if (c.themes.draftBaseTheme !== props.theme) {
+                c.themes.seedDraftFromTheme(c.themes.get(props.theme));
             }
-            this.controller.showNotification(`LCD Theme Sync: ${next ? 'ON' : 'OFF'}`);
-            window.Repaint();
-        } else if (selected === 8010 || selected === 8011) {
-            this.controller.properties.set('syncBtnPosition', selected === 8011 ? 'bottom' : 'top');
-            window.Repaint();
-        } else if (selected === 8013 || selected === 8014) {
-            this.controller.properties.set('lcdBtnSide', selected === 8013 ? 'left' : 'right');
-            this.controller.isLcdBtnHovered = false;
-            window.Repaint();
-        } else if (selected === 8012) {
-            this.controller.properties.set('syncBtnShowText', !props.syncBtnShowText);
-            window.Repaint();
-        } else if (selected >= 8200 && selected < 8200 + VolumeConstants.LCD_THEMES.length) {
-            this.controller.setLcdThemeIndex(selected - 8200);
-        } else if (selected === 8001) {
-            this.controller.properties.set('showLcdSyncBtn', !props.showLcdSyncBtn);
-            window.Repaint();
-        } else if (selected === 8002) {
-            this.controller.cycleLcdTheme(1);
-        } else if (selected === 8003) {
-            this.controller.cycleLcdTheme(-1);
-        } else if (selected >= 6000 && selected <= 6003) {
-            this.controller.properties.set('bgMode', selected - 6000);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected >= 10000 && selected < 10000 + availableImages.length) {
-            this.controller.properties.set('customBgImage', availableImages[selected - 10000]);
-            this.controller.properties.set('bgMode', VolumeConstants.BG_MODE.IMAGE);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected >= 6100 && selected <= 6108 && selected !== 6106 && selected !== 6107) {
-            DialPresets.apply(this.controller.properties, selected - 6100);
-            this.controller.dialRenderer.invalidate();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected >= 20000 && selected < 20000 + availableImages.length) {
-            this.controller.properties.set('customDialImage', availableImages[selected - 20000]);
-            this.controller.properties.set('dialMode', VolumeConstants.DIAL_MODE.IMAGE);
-            DialPresets.normaliseMarker(this.controller.properties, VolumeConstants.DIAL_MODE.IMAGE);
-            this.controller.dialRenderer.invalidate();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 6120) {
-            this.controller.properties.set('spinDialImage', !props.spinDialImage);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 6199) {
-            this.controller.properties.set('showHighlight', !props.showHighlight);
-            this.controller.dialRenderer.invalidate();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected >= 6200 && selected <= 6210) {
-            this.controller.properties.set('dialLightStyle', selected - 6200);
-            this.controller.dialRenderer.invalidate();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected >= 6300 && selected <= 6307) {
-            this.controller.properties.set('dialLightAngle', angleMap[selected - 6300]);
-            this.controller.dialRenderer.invalidate();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 6310) {
-            HudManager.activeSlider = 'LightAngle';
-            HudManager.clearTimer();
-            window.Repaint();
-        } else if (selected >= 6400 && selected <= 6404) {
-            this.controller.properties.set('dialLightStrength', strMap[selected - 6400]);
-            this.controller.dialRenderer.invalidate();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 6410) {
-            HudManager.activeSlider = 'LightStrength';
-            HudManager.clearTimer();
-            window.Repaint();
-        } else if (selected >= 7200 && selected <= 7207) {
-            this.controller.properties.set('tickStyle', selected - 7200);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7210) {
-            HudManager.activeSlider = 'TickMargin';
-            HudManager.clearTimer();
-            window.Repaint();
-        } else if (selected === 7211) {
-            HudManager.activeSlider = 'TickSize';
-            HudManager.clearTimer();
-            window.Repaint();
-        } else if (selected >= 7300 && selected <= 7303) {
-            this.controller.properties.set('majorTickInterval', selected - 7300);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected >= 7100 && selected <= 7110) {
-            this.controller.properties.set('markerStyle', selected - 7100);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7001) {
-            this.controller.properties.set('showDropShadow', !props.showDropShadow);
-            this.controller.state.invalidateGeometry();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7002) {
-            this.controller.properties.set('showOuterRing', !props.showOuterRing);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7003) {
-            this.controller.properties.set('showTicks', !props.showTicks);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7005) {
-            this.controller.properties.set('levelArc', !props.levelArc);
-            this.controller.state.invalidateGeometry();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7006) {
-            this.controller.properties.set('litTicks', !props.litTicks);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.requestRepaint();
-        } else if (selected === 7010 || selected === 7011 || selected === 7012) {
-            this.controller.properties.set('glowSource', selected === 7011 ? 'lcd' : (selected === 7012 ? 'custom' : 'theme'));
-            this.controller.state.requestRepaint();
-        } else if (selected === 7013) {
-            const startArgb = (this.controller.properties.values.customGlowColor >>> 0) || this.controller.themes.get(props.theme).marker;
-            let picked = -1;
-            try { picked = utils.ColourPicker(window.ID, startArgb); } catch { picked = -1; }
-            if (picked !== -1) {
-                const newArgb = (0xFF000000 | picked) >>> 0;
-                if (newArgb !== startArgb) {
-                    this.controller.properties.set('customGlowColor', newArgb);
-                    this.controller.properties.set('glowSource', 'custom');
-                    this.controller.state.requestRepaint();
+        }
+
+        const names = c.themes.names();
+        const availableImages = c.assetManager.getAvailableImages(true);
+        const customs = c.themes.customThemes;
+        const hasFile = Boolean(props.customThemeFile && props.customThemeFile.trim() !== '');
+        const isStudioDial = (props.dialMode === VolumeConstants.DIAL_MODE.STUDIO);
+
+        const m = new MenuBuilder();
+
+        // 1. Theme
+        m.addSubMenu('Theme', (themeMenu) => {
+            for (const name of names) {
+                const isCustom = c.themes.get(name)?.custom;
+                const safeName = GdiUtils.escapeMenuLabel(name);
+                themeMenu.addItem(`${safeName}${isCustom ? '  [custom]' : ''}`, () => {
+                    c.themes.clearPreview();
+                    c.properties.setTheme(name, c.themes, true, c.state);
+                    this.#invalidateScene(false);
+                }, { radio: name === props.theme });
+            }
+            themeMenu.addSeparator();
+
+            themeMenu.addSubMenu('Settings & Themes (JSON)', (jsonMenu) => {
+                const safeShort = GdiUtils.escapeMenuLabel(this.#shortPath(props.customThemeFile));
+                jsonMenu.addItem('Load Settings & Themes from JSON…', () => {
+                    const path = GdiUtils.prompt('Enter the full path to your JSON configuration file:', 'Load Settings & Themes JSON', props.customThemeFile || '');
+                    if (path?.trim()) this.#loadConfigFile(path, false);
+                });
+                jsonMenu.addItem(`Reload from last file${hasFile ? `  (${safeShort})` : ''}`, () => {
+                    if (props.customThemeFile?.trim()) this.#loadConfigFile(props.customThemeFile, true);
+                }, { disabled: !hasFile });
+                jsonMenu.addItem('Save Settings & Custom Themes to JSON…', () => {
+                    const path = GdiUtils.prompt('Enter the full path to save the JSON configuration file:', 'Save Settings & Custom Themes', props.customThemeFile || `${VolumeConstants.PROFILE_BASE}volumeknob_config.json`);
+                    if (path?.trim()) {
+                        const result = c.themes.saveToFile(path, null, c.properties);
+                        if (result.ok) {
+                            c.properties.set('customThemeFile', GdiUtils.sanitizePath(path));
+                            fb.ShowPopupMessage(`All settings and ${result.count} custom theme(s) saved to:\n${path}`, VolumeConstants.SCRIPT_NAME);
+                        } else {
+                            fb.ShowPopupMessage(`Save failed:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
+                        }
+                    }
+                });
+                jsonMenu.addItem('Export All (Settings & All Themes)…', () => {
+                    const path = GdiUtils.prompt('Enter the full path to save the JSON configuration file:', 'Export All Settings & Themes', `${VolumeConstants.PROFILE_BASE}volumeknob_all_config.json`);
+                    if (path?.trim()) {
+                        const result = c.themes.saveToFile(path, '*', c.properties);
+                        if (result.ok) fb.ShowPopupMessage(`Exported all settings and ${result.count} theme(s) to:\n${path}`, VolumeConstants.SCRIPT_NAME);
+                        else fb.ShowPopupMessage(`Export failed:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
+                    }
+                });
+                jsonMenu.addItem('Export Template (Built-in Themes Only)…', () => {
+                    const path = GdiUtils.prompt('Enter the full path to save the JSON configuration file:', 'Export Built-in Theme Template', `${VolumeConstants.PROFILE_BASE}volumeknob_theme_template.json`);
+                    if (path?.trim()) {
+                        const result = c.themes.exportTemplate(path, c.properties);
+                        if (result.ok) fb.ShowPopupMessage(`Template exported (${result.count} built-in themes) to:\n${path}`, VolumeConstants.SCRIPT_NAME);
+                        else fb.ShowPopupMessage(`Export failed:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
+                    }
+                });
+                jsonMenu.addSeparator();
+                jsonMenu.addItem(`Set Default JSON File Path…${hasFile ? `  (${safeShort})` : ''}`, () => {
+                    const path = GdiUtils.prompt('Enter default path for custom config JSON file:', 'Set Default Save Path', props.customThemeFile || `${VolumeConstants.PROFILE_BASE}volumeknob_config.json`);
+                    if (path?.trim()) {
+                        c.properties.set('customThemeFile', GdiUtils.sanitizePath(path));
+                        fb.ShowPopupMessage(`Default save path set to:\n${path}`, VolumeConstants.SCRIPT_NAME);
+                    }
+                });
+            });
+
+            themeMenu.addSubMenu('Theme Creator', (creatorMenu) => {
+                creatorMenu.addItem('1. Set Background Color…', () => this.#doColorPicker('Background', 'bg'));
+                creatorMenu.addItem('2. Set Main Dial (Inner Face Color)...', () => this.#doColorPicker('Main Dial (Inner Face)', 'inner'));
+                creatorMenu.addItem('3. Set Outer Ring (Knob Body Color)...', () => this.#doColorPicker('Outer Ring (Knob Body)', 'knob'));
+                creatorMenu.addItem('4. Set Tick Marks Color…', () => this.#doColorPicker('Tick Marks', 'tick'));
+                creatorMenu.addItem('5. Set Dial Marker (Pointer Color)...', () => this.#doColorPicker('Dial Marker (Pointer)', 'marker'));
+                creatorMenu.addSeparator();
+                creatorMenu.addSubMenu('Remove Custom Theme…', (remMenu) => {
+                    if (customs.length) {
+                        for (const ct of customs) {
+                            remMenu.addItem(GdiUtils.escapeMenuLabel(ct.name), () => this.#doRemoveCustomTheme(ct.name));
+                        }
+                    } else {
+                        remMenu.addItem('No custom themes', null, { disabled: true });
+                    }
+                });
+            });
+        });
+
+        // 2. Sync Styles
+        m.addSubMenu('Sync Styles', (syncMenu) => {
+            syncMenu.addSubMenu('LCD Themes (Peak & Timer)', (lcdMenu) => {
+                lcdMenu.addItem('Sync LCD Theme (PeakMeter & Timer)', () => {
+                    const next = !props.syncLcdTheme;
+                    c.properties.set('syncLcdTheme', next);
+                    if (next) {
+                        try { window.NotifyOthers('LcdThemeSync', c.properties.values.currentLcdTheme); } catch {}
+                    }
+                    c.showNotification(`LCD Theme Sync: ${next ? 'ON' : 'OFF'}`);
+                    window.Repaint();
+                }, { checked: props.syncLcdTheme });
+
+                lcdMenu.addItem('Show LCD Sync Button', () => {
+                    c.properties.set('showLcdSyncBtn', !props.showLcdSyncBtn);
+                    window.Repaint();
+                }, { checked: props.showLcdSyncBtn });
+
+                lcdMenu.addSeparator();
+                lcdMenu.addItem('Cycle Next LCD Theme', () => c.cycleLcdTheme(1));
+                lcdMenu.addItem('Cycle Previous LCD Theme', () => c.cycleLcdTheme(-1));
+
+                lcdMenu.addSubMenu('Select LCD Theme', (listMenu) => {
+                    const lcdCurIdx = VolumeConstants.LCD_THEMES.findIndex(t => t.name.toLowerCase() === String(props.currentLcdTheme).toLowerCase());
+                    VolumeConstants.LCD_THEMES.forEach((t, i) => {
+                        listMenu.addItem(t.name, () => c.setLcdThemeIndex(i), { radio: i === lcdCurIdx });
+                    });
+                });
+            });
+
+            syncMenu.addSeparator();
+            syncMenu.addSubMenu('Button Position', (posMenu) => {
+                posMenu.addItem('Top of Panel', () => { c.properties.set('syncBtnPosition', 'top'); window.Repaint(); }, { radio: props.syncBtnPosition !== 'bottom' });
+                posMenu.addItem('Bottom of Panel', () => { c.properties.set('syncBtnPosition', 'bottom'); window.Repaint(); }, { radio: props.syncBtnPosition === 'bottom' });
+            });
+            syncMenu.addSubMenu('LCD Button Side', (sideMenu) => {
+                sideMenu.addItem('Left', () => { c.properties.set('lcdBtnSide', 'left'); c.isLcdBtnHovered = false; window.Repaint(); }, { radio: props.lcdBtnSide === 'left' });
+                sideMenu.addItem('Right', () => { c.properties.set('lcdBtnSide', 'right'); c.isLcdBtnHovered = false; window.Repaint(); }, { radio: props.lcdBtnSide !== 'left' });
+            });
+            syncMenu.addItem('Show Button Text (LCD)', () => {
+                c.properties.set('syncBtnShowText', !props.syncBtnShowText);
+                window.Repaint();
+            }, { checked: props.syncBtnShowText });
+        });
+
+        // 3. Backplate Finish
+        m.addSubMenu('Backplate Finish', (bgMenu) => {
+            const bgModes = [
+                [VolumeConstants.BG_MODE.SOLID,     'Solid (Theme Color)'],
+                [VolumeConstants.BG_MODE.BRUSHED,   'Brushed Aluminum (Horizontal)'],
+                [VolumeConstants.BG_MODE.SANDBLAST, 'Sandblast Matte (Bead-Blasted)'],
+                [VolumeConstants.BG_MODE.SATIN,     'Satin Velvet (Smooth Matte)']
+            ];
+            for (const [mode, label] of bgModes) {
+                bgMenu.addItem(label, () => {
+                    c.properties.set('bgMode', mode);
+                    c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                    c.state.requestRepaint();
+                }, { radio: props.bgMode === mode });
+            }
+            bgMenu.addSeparator();
+            bgMenu.addSubMenu('Custom Image', (imgMenu) => {
+                if (availableImages.length === 0) {
+                    imgMenu.addItem('(No images in skins\\scripts\\VolumeKnob)', null, { disabled: true });
+                } else {
+                    for (const imgName of availableImages) {
+                        imgMenu.addItem(GdiUtils.escapeMenuLabel(imgName), () => {
+                            c.properties.set('customBgImage', imgName);
+                            c.properties.set('bgMode', VolumeConstants.BG_MODE.IMAGE);
+                            c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                            c.state.requestRepaint();
+                        }, { radio: props.bgMode === VolumeConstants.BG_MODE.IMAGE && props.customBgImage === imgName });
+                    }
                 }
+            });
+        });
+
+        // 4. Dial Face Finish
+        m.addSubMenu('Dial Face Finish', (dialMenu) => {
+            const dialModes = [
+                [VolumeConstants.DIAL_MODE.SOLID,      'Solid (Theme Inner Color)'],
+                [VolumeConstants.DIAL_MODE.CONCENTRIC, 'Concentric Micro-Groove (Hi-Fi Lathe)'],
+                [VolumeConstants.DIAL_MODE.KNURLED,    'Studio Fluted (3D Milled Console Rim)'],
+                [VolumeConstants.DIAL_MODE.BEADBLAST,  'Bead-Blasted Matte (Backplate Grain)'],
+                [VolumeConstants.DIAL_MODE.SANDBLAST,  'Sandblast (Grainy Dome)'],
+                [VolumeConstants.DIAL_MODE.STUDIO,     'Studio Dial (Convex Dome + Sandblast Core)'],
+                [VolumeConstants.DIAL_MODE.CARBON,     'Carbon Fibre Weave']
+            ];
+            for (const [mode, label] of dialModes) {
+                dialMenu.addItem(label, () => {
+                    DialPresets.apply(c.properties, mode);
+                    c.dialRenderer.invalidate();
+                    c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                    c.state.requestRepaint();
+                }, { radio: props.dialMode === mode });
             }
-        } else if (selected === 7004) {
-            this.controller.properties.set('showDialMarker', !props.showDialMarker);
-            this.controller.state.requestRepaint();
-        } else if (selected === 5100) {
-            this.doRandom();
-        } else if (selected >= 7400 && selected <= 7403) {
-            const newRange = 270 + (selected - 7400) * 10;
-            if (newRange !== props.sweepRange) {
-                VolumeConfig.sweepRangeDeg = newRange;
-                this.controller.properties.set('sweepRange', newRange);
-                this.controller.state.invalidateGeometry();
-                this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-                VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
-                this.controller.state.requestRepaint();
+            dialMenu.addSeparator();
+            dialMenu.addSubMenu('Custom Image', (imgMenu) => {
+                if (availableImages.length === 0) {
+                    imgMenu.addItem('(No images in skins\\scripts\\VolumeKnob)', null, { disabled: true });
+                } else {
+                    for (const imgName of availableImages) {
+                        imgMenu.addItem(GdiUtils.escapeMenuLabel(imgName), () => {
+                            c.properties.set('customDialImage', imgName);
+                            c.properties.set('dialMode', VolumeConstants.DIAL_MODE.IMAGE);
+                            DialPresets.normaliseMarker(c.properties, VolumeConstants.DIAL_MODE.IMAGE);
+                            c.dialRenderer.invalidate();
+                            c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                            c.state.requestRepaint();
+                        }, { radio: props.dialMode === VolumeConstants.DIAL_MODE.IMAGE && props.customDialImage === imgName });
+                    }
+                }
+            });
+            dialMenu.addSeparator();
+            dialMenu.addItem('Rotate Dial (Procedural & Custom Image)', () => {
+                c.properties.set('spinDialImage', !props.spinDialImage);
+                c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                c.state.requestRepaint();
+            }, { checked: props.spinDialImage });
+        });
+
+        // 5. Markers and Shadow
+        m.addSubMenu('Markers and Shadow', (effMenu) => {
+            effMenu.addItem('Ambient Occlusion (Dial Face Shadow)', () => {
+                c.properties.set('showDropShadow', !props.showDropShadow);
+                this.#invalidateScene(false);
+            }, { checked: props.showDropShadow });
+            effMenu.addSeparator();
+            effMenu.addItem('Show Outer Ring (Solid Classic)', () => {
+                c.properties.set('showOuterRing', !props.showOuterRing);
+                c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                c.state.requestRepaint();
+            }, { checked: props.showOuterRing });
+            effMenu.addSeparator();
+
+            effMenu.addSubMenu('Tick Mark Style', (tickMenu) => {
+                const tickLabels = [
+                    'Uniform Lines', 'Lines (Major & Minor)', 'Precision Dots / Pips',
+                    'Milled Studio Wedges (Blocks)', 'Precision Diamond Pips',
+                    'Laboratory Bounded Arc', 'Min / Max Text Arc', 'Precision Dots + Outer Arc'
+                ];
+                tickLabels.forEach((label, i) => {
+                    tickMenu.addItem(label, () => {
+                        c.properties.set('tickStyle', i);
+                        c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                        c.state.requestRepaint();
+                    }, { radio: props.tickStyle === i });
+                });
+                tickMenu.addSeparator();
+                tickMenu.addItem(`Tick Margin Slider... (Current: ${props.tickMargin}px)`, () => {
+                    HudManager.activeSlider = 'TickMargin';
+                    HudManager.clearTimer();
+                    window.Repaint();
+                });
+                tickMenu.addItem(`Tick Size Slider... (Current: +${props.tickSizeBonus}%)`, () => {
+                    HudManager.activeSlider = 'TickSize';
+                    HudManager.clearTimer();
+                    window.Repaint();
+                });
+            });
+
+            effMenu.addSubMenu('Major Scale Markings (Large Ticks)', (majMenu) => {
+                const majLabels = [
+                    'None (All Uniform)',
+                    '0%, 50%, 100% (Min / Mid / Max)',
+                    '0%, 25%, 50%, 75%, 100% (Quarters)',
+                    'Every 10% (0, 10, 20... 100%)'
+                ];
+                majLabels.forEach((label, i) => {
+                    majMenu.addItem(label, () => {
+                        c.properties.set('majorTickInterval', i);
+                        c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                        c.state.requestRepaint();
+                    }, { radio: props.majorTickInterval === i });
+                });
+            });
+
+            effMenu.addItem('Show Tick Marks', () => {
+                c.properties.set('showTicks', !props.showTicks);
+                c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                c.state.requestRepaint();
+            }, { checked: props.showTicks });
+            effMenu.addSeparator();
+
+            effMenu.addSubMenu('Dial Pointer Style', (ptrMenu) => {
+                const ptrItems = [
+                    [VolumeConstants.MARKER_STYLE.LINE,        'Standard Line',                              isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.CIRCLE,      'Dot',                                        isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.ARROW,       'Arrow Indicator',                            false],
+                    [VolumeConstants.MARKER_STYLE.SHORT,       'Short Line',                                 isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.BEVEL_WEDGE, 'Beveled Wedge (Stamped Recessed Chevron)',   isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.BEVEL_SLOT,  'Beveled Slot (Stamped Recessed Cavity)',     isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.VSHORT,      'Very Short Line (Studio Dial Only: 0.8 - 1.0 R)', !isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.FULL_LINE,   'Full Line (Center to 0.975 R)',              isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.LED_DOT,     'LED Dot (Glow Colour)',                      isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.GLOW_LINE,   'Glow Line (Glow Colour)',                    isStudioDial],
+                    [VolumeConstants.MARKER_STYLE.GROOVE,      'Recessed Groove (Glow Inlay)',               isStudioDial]
+                ];
+                for (const [styleId, label, disabled] of ptrItems) {
+                    ptrMenu.addItem(label, () => {
+                        c.properties.set('markerStyle', styleId);
+                        c.state.requestRepaint();
+                    }, { radio: props.markerStyle === styleId, disabled });
+                }
+            });
+
+            effMenu.addItem('Show Dial Pointer (Indicator)', () => {
+                c.properties.set('showDialMarker', !props.showDialMarker);
+                c.state.requestRepaint();
+            }, { checked: props.showDialMarker });
+            effMenu.addSeparator();
+
+            effMenu.addItem('Lit Level Arc (Volume Ring)', () => {
+                c.properties.set('levelArc', !props.levelArc);
+                this.#invalidateScene(false);
+            }, { checked: props.levelArc });
+            effMenu.addItem('Lit Tick Marks (Follow Volume)', () => {
+                c.properties.set('litTicks', !props.litTicks);
+                c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                c.state.requestRepaint();
+            }, { checked: props.litTicks });
+
+            effMenu.addSubMenu('Glow Colour (Arc, Ticks, Glow Pointers)', (glowMenu) => {
+                glowMenu.addItem('Pointer / Theme Colour', () => { c.properties.set('glowSource', 'theme'); c.state.requestRepaint(); }, { radio: props.glowSource === 'theme' });
+                glowMenu.addItem('LCD Theme Colour (follows Sync Styles)', () => { c.properties.set('glowSource', 'lcd'); c.state.requestRepaint(); }, { radio: props.glowSource === 'lcd' });
+                glowMenu.addItem('Custom Colour', () => { c.properties.set('glowSource', 'custom'); c.state.requestRepaint(); }, { radio: props.glowSource === 'custom' });
+                glowMenu.addSeparator();
+                glowMenu.addItem('Set Custom Glow Colour…', () => {
+                    const startArgb = (props.customGlowColor >>> 0) || c.themes.get(props.theme).marker;
+                    let picked = -1;
+                    try { picked = utils.ColourPicker(window.ID, startArgb); } catch { picked = -1; }
+                    if (picked !== -1) {
+                        const newArgb = (0xFF000000 | picked) >>> 0;
+                        if (newArgb !== startArgb) {
+                            c.properties.set('customGlowColor', newArgb);
+                            c.properties.set('glowSource', 'custom');
+                            c.state.requestRepaint();
+                        }
+                    }
+                });
+            });
+        });
+
+        // 6. Highlight & Specular Engine
+        m.addSubMenu('Highlight & Specular Engine', (lightMenu) => {
+            lightMenu.addItem('Enable Specular Highlights', () => {
+                c.properties.set('showHighlight', !props.showHighlight);
+                c.dialRenderer.invalidate();
+                c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                c.state.requestRepaint();
+            }, { checked: props.showHighlight });
+            lightMenu.addSeparator();
+
+            lightMenu.addSubMenu('Specular Style', (styleMenu) => {
+                const lightStyles = [
+                    'Auto (Material Native - Physically Coupled)',
+                    'Dual Anisotropic Cones (Turned Lathe Sheen)',
+                    'Directional Soft Sheen (Full Dial Gradient)',
+                    'Linear Hairline Sheen (Brushed Metal Bar)',
+                    'Quad Cross Specular (4-Axis Diamond Sheen)',
+                    'Dual-Zone: Studio Key + Dark Ring + Soft Sheen',
+                    'Dual Anisotropic Cones + 0.98 Edge Micro-Bevel',
+                    'Convex Contour Dome Gradient (Centered)',
+                    'Concave Bowl Gradient (Centered)',
+                    'Studio Key Rim + Anisotropic Inner (0.618)',
+                    'Spun Metal (Turned Aluminum Texture)'
+                ];
+                lightStyles.forEach((label, i) => {
+                    styleMenu.addItem(label, () => {
+                        c.properties.set('dialLightStyle', i);
+                        c.dialRenderer.invalidate();
+                        c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                        c.state.requestRepaint();
+                    }, { radio: props.dialLightStyle === i });
+                });
+            }, !props.showHighlight);
+
+            lightMenu.addSubMenu('Specular Position (360° Arc)', (angleMenu) => {
+                const angles = [
+                    [315, 'Top-Left (315° - Audio Console Standard)'],
+                    [0,   'Top / Overhead (0° - 12:00)'],
+                    [45,  'Top-Right (45° - 1:30)'],
+                    [90,  'Right / Side (90° - 3:00)'],
+                    [135, 'Bottom-Right (135° - 4:30)'],
+                    [180, 'Bottom / Underlit (180° - 6:00)'],
+                    [225, 'Bottom-Left (225° - 7:30)'],
+                    [270, 'Left / Side (270° - 9:00)']
+                ];
+                for (const [deg, label] of angles) {
+                    angleMenu.addItem(label, () => {
+                        c.properties.set('dialLightAngle', deg);
+                        c.dialRenderer.invalidate();
+                        c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                        c.state.requestRepaint();
+                    }, { radio: props.dialLightAngle === deg });
+                }
+                angleMenu.addSeparator();
+                angleMenu.addItem(`Interactive 360° Arc Slider... (Current: ${props.dialLightAngle}°)`, () => {
+                    HudManager.activeSlider = 'LightAngle';
+                    HudManager.clearTimer();
+                    window.Repaint();
+                });
+            }, !props.showHighlight);
+
+            lightMenu.addSubMenu('Specular Strength', (strMenu) => {
+                const strengths = [
+                    [0,   'Off (0%)'],
+                    [50,  'Subtle (50%)'],
+                    [100, 'Standard (100%)'],
+                    [150, 'Vivid (150%)'],
+                    [200, 'Maximum Sheen (200%)']
+                ];
+                for (const [val, label] of strengths) {
+                    strMenu.addItem(label, () => {
+                        c.properties.set('dialLightStrength', val);
+                        c.dialRenderer.invalidate();
+                        c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                        c.state.requestRepaint();
+                    }, { radio: props.dialLightStrength === val });
+                }
+                strMenu.addSeparator();
+                strMenu.addItem(`Interactive Strength Slider... (Current: ${props.dialLightStrength}%)`, () => {
+                    HudManager.activeSlider = 'LightStrength';
+                    HudManager.clearTimer();
+                    window.Repaint();
+                });
+            }, !props.showHighlight);
+        });
+
+        // 7. Dial Sweep Range & Scaling
+        m.addSubMenu('Dial Sweep Range & Scaling', (rangeMenu) => {
+            const sweeps = [
+                [270, '270° (Compact)'],
+                [280, '280°'],
+                [290, '290° (Default)'],
+                [300, '300° (Wide)']
+            ];
+            for (const [deg, label] of sweeps) {
+                rangeMenu.addItem(label, () => {
+                    if (deg !== props.sweepRange) {
+                        VolumeConfig.sweepRangeDeg = deg;
+                        c.properties.set('sweepRange', deg);
+                        c.state.invalidateGeometry();
+                        c.sceneCache.invalidate(c.bgRenderer, c.dialRenderer);
+                        VolumeEngine.syncFromFoobar(c.state, c.properties.values);
+                        c.state.requestRepaint();
+                    }
+                }, { radio: props.sweepRange === deg });
             }
-        } else if (selected >= 7500 && selected <= 7501) {
-            this.controller.properties.set('volumeScalingMode', selected - 7500);
-            VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
-            this.controller.state.requestRepaint();
-        } else if (selected === 900) {
-            this.controller.assetManager.clear();
-            this.controller.assetManager.getAvailableImages(true);
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            this.controller.state.invalidateGeometry();
-            this.controller.state.requestRepaint();
-        } else if (selected === 5000) {
-            this.controller.properties.resetVisuals(this.controller.themes);
-            this.controller.themes.clearPreview();
-            this.controller.dialRenderer.invalidate();
-            this.controller.state.invalidateGeometry();
-            this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-            VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
-            this.controller.state.requestRepaint();
-        } else if (selected === 5001) {
+            rangeMenu.addSeparator();
+            rangeMenu.addItem('Volume Scale: Non-Linear (Hearing Optimized)', () => {
+                c.properties.set('volumeScalingMode', 0);
+                VolumeEngine.syncFromFoobar(c.state, c.properties.values);
+                c.state.requestRepaint();
+            }, { radio: props.volumeScalingMode === 0 });
+            rangeMenu.addItem('Volume Scale: Linear dB (-100dB to 0dB)', () => {
+                c.properties.set('volumeScalingMode', 1);
+                VolumeEngine.syncFromFoobar(c.state, c.properties.values);
+                c.state.requestRepaint();
+            }, { radio: props.volumeScalingMode === 1 });
+        });
+
+        m.addSeparator();
+        m.addItem('Randomize', () => this.doRandom());
+        m.addItem('Save Custom Theme…', () => this.#doFinalizeTheme());
+        m.addSeparator();
+        m.addItem('Clear Image Cache & Reload', () => {
+            c.assetManager.clear();
+            c.assetManager.getAvailableImages(true);
+            this.#invalidateScene(false);
+        });
+        m.addItem('Reset Visual Settings to Defaults', () => {
+            c.properties.resetVisuals(c.themes, c.state);
+            c.themes.clearPreview();
+            this.#invalidateScene(true);
+            VolumeEngine.syncFromFoobar(c.state, c.properties.values);
+            c.state.requestRepaint();
+        });
+        m.addItem('Factory Reset (All Settings & Themes)...', () => {
             const confirm = GdiUtils.prompt('Type YES to perform a factory reset (resets all settings, custom images and theme paths):', 'Confirm Factory Reset', '');
             if (confirm?.toUpperCase() === 'YES') {
-                this.controller.properties.resetAll(this.controller.themes);
-                this.controller.themes.clearPreview();
-                for (const ct of [...this.controller.themes.customThemes]) {
-                    this.controller.themes.removeCustom(ct.name);
+                c.properties.resetAll(c.themes, c.state);
+                c.themes.clearPreview();
+                for (const ct of [...c.themes.customThemes]) {
+                    c.themes.removeCustom(ct.name);
                 }
                 try {
-                    window.SetProperty('VolumeKnob.CustomThemes', '[]');
-                    window.SetProperty('VolumeKnob.DraftTheme', '');
+                    window.SetProperty('VolumeKnob.CustomThemes', null);
+                    window.SetProperty('VolumeKnob.DraftTheme', null);
                 } catch {}
-                this.controller.themes.seedDraftFromTheme(this.controller.themes.get(this.controller.properties.values.theme));
-                this.controller.assetManager.clear();
-                this.controller.dialRenderer.invalidate();
-                this.controller.state.invalidateGeometry();
-                this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-                VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
-                this.controller.state.requestRepaint();
+                c.themes.seedDraftFromTheme(c.themes.get(c.properties.values.theme));
+                c.assetManager.clear();
+                this.#invalidateScene(true);
+                VolumeEngine.syncFromFoobar(c.state, c.properties.values);
+                c.state.requestRepaint();
             }
-        } else if (selected === 2000) {
-            const path = GdiUtils.prompt('Enter the full path to your JSON configuration file:', 'Load Settings & Themes JSON', this.controller.properties.values.customThemeFile || '');
-            if (path?.trim()) {
-                const result = this.controller.themes.loadFromFile(path, this.controller.properties, true);
-                if (result.ok) {
-                    this.controller.properties.set('customThemeFile', GdiUtils.sanitizePath(path));
-                    this.controller.dialRenderer.invalidate();
-                    this.controller.state.invalidateGeometry();
-                    this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-                    VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
-                    this.controller.state.requestRepaint();
-                    fb.ShowPopupMessage(result.summary || `Configuration successfully loaded from:\n${path}`, VolumeConstants.SCRIPT_NAME);
-                } else {
-                    fb.ShowPopupMessage(`Failed to load JSON:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
-                }
-            }
-        } else if (selected === 2001) {
-            const path = this.controller.properties.values.customThemeFile;
-            if (path?.trim()) {
-                const result = this.controller.themes.loadFromFile(path, this.controller.properties, true);
-                if (result.ok) {
-                    this.controller.dialRenderer.invalidate();
-                    this.controller.state.invalidateGeometry();
-                    this.controller.sceneCache.invalidate(this.controller.bgRenderer, this.controller.dialRenderer);
-                    VolumeEngine.syncFromFoobar(this.controller.state, this.controller.properties.values);
-                    this.controller.state.requestRepaint();
-                    fb.ShowPopupMessage(result.summary || 'Configuration reloaded successfully.', VolumeConstants.SCRIPT_NAME);
-                } else {
-                    fb.ShowPopupMessage(`Failed to reload JSON:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
-                }
-            }
-        } else if (selected === 2002) {
-            const path = GdiUtils.prompt('Enter the full path to save the JSON configuration file:', 'Save Settings & Custom Themes', this.controller.properties.values.customThemeFile || `${VolumeConstants.PROFILE_BASE}volumeknob_config.json`);
-            if (path?.trim()) {
-                const result = this.controller.themes.saveToFile(path, null, this.controller.properties);
-                if (result.ok) {
-                    this.controller.properties.set('customThemeFile', GdiUtils.sanitizePath(path));
-                    fb.ShowPopupMessage(`All settings and ${result.count} custom theme(s) saved to:\n${path}`, VolumeConstants.SCRIPT_NAME);
-                } else {
-                    fb.ShowPopupMessage(`Save failed:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
-                }
-            }
-        } else if (selected === 2003) {
-            const path = GdiUtils.prompt('Enter the full path to save the JSON configuration file:', 'Export All Settings & Themes', `${VolumeConstants.PROFILE_BASE}volumeknob_all_config.json`);
-            if (path?.trim()) {
-                const result = this.controller.themes.saveToFile(path, '*', this.controller.properties);
-                if (result.ok) fb.ShowPopupMessage(`Exported all settings and ${result.count} theme(s) to:\n${path}`, VolumeConstants.SCRIPT_NAME);
-                else fb.ShowPopupMessage(`Export failed:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
-            }
-        } else if (selected === 2004) {
-            const path = GdiUtils.prompt('Enter the full path to save the JSON configuration file:', 'Export Built-in Theme Template', `${VolumeConstants.PROFILE_BASE}volumeknob_theme_template.json`);
-            if (path?.trim()) {
-                const result = this.controller.themes.exportTemplate(path, this.controller.properties);
-                if (result.ok) fb.ShowPopupMessage(`Template exported (${result.count} built-in themes) to:\n${path}`, VolumeConstants.SCRIPT_NAME);
-                else fb.ShowPopupMessage(`Export failed:\n\n${result.error || 'Unknown error'}`, VolumeConstants.SCRIPT_NAME);
-            }
-        } else if (selected === 2005) {
-            const path = GdiUtils.prompt('Enter default path for custom config JSON file:', 'Set Default Save Path', this.controller.properties.values.customThemeFile || `${VolumeConstants.PROFILE_BASE}volumeknob_config.json`);
-            if (path?.trim()) {
-                this.controller.properties.set('customThemeFile', GdiUtils.sanitizePath(path));
-                fb.ShowPopupMessage(`Default save path set to:\n${path}`, VolumeConstants.SCRIPT_NAME);
-            }
-        } else if (selected === 3001) {
-            this.#doColorPicker('Background', 'bg');
-        } else if (selected === 3002) {
-            this.#doColorPicker('Main Dial (Inner Face)', 'inner');
-        } else if (selected === 3003) {
-            this.#doColorPicker('Outer Ring (Knob Body)', 'knob');
-        } else if (selected === 3004) {
-            this.#doColorPicker('Tick Marks', 'tick');
-        } else if (selected === 3005) {
-            this.#doColorPicker('Dial Marker (Pointer)', 'marker');
-        } else if (selected === 3006) {
-            this.#doFinalizeTheme();
-        } else if (selected >= 4000 && selected < 4000 + this.controller.themes.customThemes.length) {
-            const target = this.controller.themes.customThemes[selected - 4000];
-            if (target) this.#doRemoveCustomTheme(target.name);
-        }
+        });
+
+        const selected = m.track(x, y);
+        const wasHovered = c.isLcdBtnHovered;
+        c.isLcdBtnHovered = false;
+        c.refreshSyncTooltip();
+        if (wasHovered && selected === 0) c.repaintLcdBtn();
+        return true;
     }
 }
 
@@ -3578,6 +3711,7 @@ class VolumeKnobController {
         VolumeConfig.sweepRangeDeg = this.properties.clampInt(this.properties.values.sweepRange, 270, 300);
 
         const curTheme = this.properties.values.theme;
+        let pendingCustomTheme = '';
         if (curTheme === '~Preview' || curTheme === 'Custom') {
             const d = this.themes.draftTheme;
             const t = this.themes.makeTheme('Custom', d.bg, d.knob, d.inner, d.tick, d.marker);
@@ -3585,6 +3719,7 @@ class VolumeKnobController {
             this.themes.addOrUpdate(t, false);
             this.properties.set('theme', 'Custom');
         } else if (!this.themes.names().includes(curTheme)) {
+            pendingCustomTheme = curTheme;
             this.properties.setTheme('Classic Gray', this.themes);
         } else {
             this.themes.seedDraftFromTheme(this.themes.get(curTheme));
@@ -3600,8 +3735,11 @@ class VolumeKnobController {
         window.SetTimeout(() => {
             if (this.#panelState === VolumeConstants.LIFECYCLE.SHUTDOWN) return;
             try { 
-                const res = this.themes.loadFromFile(this.properties.values.customThemeFile, this.properties, false);
+                const res = this.themes.loadFromFile(this.properties.values.customThemeFile, this.properties, false, this.state);
                 if (res?.ok) {
+                    if (pendingCustomTheme && this.themes.has(pendingCustomTheme)) {
+                        this.properties.setTheme(pendingCustomTheme, this.themes, true, this.state);
+                    }
                     this.dialRenderer.invalidate();
                     this.state.invalidateGeometry();
                     this.sceneCache.invalidate(this.bgRenderer, this.dialRenderer);
@@ -3623,7 +3761,6 @@ class VolumeKnobController {
         window.Repaint();
     }
 
-    // ====================== DUAL SYNC BUTTON HELPERS ======================
     getSyncBtnMetrics() {
         const showText = this.properties.values.syncBtnShowText;
         const m = GdiUtils.scale(6);
@@ -3637,6 +3774,13 @@ class VolumeKnobController {
         const k = this.getSyncBtnMetrics();
         const x = this.properties.values.lcdBtnSide === 'left' ? k.m : Math.max(0, window.Width - k.w - k.m);
         return { x, y: k.y, w: k.w, h: k.h };
+    }
+
+    repaintLcdBtn() {
+        if (!window.IsVisible || !this.properties.values.showLcdSyncBtn) return;
+        const r = this.getLcdBtnRect();
+        const pad = GdiUtils.scale(6);
+        window.RepaintRect(Math.max(0, r.x - pad), Math.max(0, r.y - pad), r.w + pad * 2, r.h + pad * 2);
     }
 
     setLcdThemeIndex(idx) {
@@ -3657,7 +3801,7 @@ class VolumeKnobController {
         if (!themes || !themes.length) return;
         const curName = this.properties.values.currentLcdTheme;
         let idx = themes.findIndex(t => t.name.toLowerCase() === curName.toLowerCase());
-        if (idx === -1) idx = Math.max(0, themes.findIndex(t => t.name === 'Pioneer Amber')); // Default theme
+        if (idx === -1) idx = Math.max(0, themes.findIndex(t => t.name === 'Pioneer Amber'));
         const nextIdx = (idx + direction + themes.length) % themes.length;
         const chosen = themes[nextIdx];
 
@@ -3670,7 +3814,6 @@ class VolumeKnobController {
         window.Repaint();
     }
 
-    // ---- Sync button visuals (theme-matched box, hollow/lit LED, playing brightness) ----
     #scaleColour(col, f) {
         const rgb = GdiUtils.toRGB(col);
         return GdiUtils.colour(rgb[0] * f, rgb[1] * f, rgb[2] * f);
@@ -3689,13 +3832,11 @@ class VolumeKnobController {
         const playing = fb.IsPlaying && !fb.IsPaused;
         const blinking = blinkWhenPaused && fb.IsPlaying && fb.IsPaused;
         if (!syncOn && !playing && !blinking) {
-            // Sync OFF and stopped: hollow dim ring
             const ring = GdiUtils.setAlpha(this.#scaleColour(col, 0.55), 170);
             gr.FillEllipse(cx - radius, cy - radius, radius * 2, radius * 2, GdiUtils.setAlpha(GdiUtils.colour(0, 0, 0), 150));
             gr.DrawEllipse(cx - radius, cy - radius, radius * 2, radius * 2, 1, ring);
             return;
         }
-        // Sync ON: filled LED, much brighter + stronger halo while a track is playing
         const bright = playing || (blinking && this.#pauseFlash);
         const body = bright ? col : this.#scaleColour(col, blinking ? 0.22 : 0.5);
         if (bright) {
@@ -3731,10 +3872,10 @@ class VolumeKnobController {
         } catch {}
     }
 
-    // Blink the LCD button at 500 ms while paused (same cadence as LCD TimerPro)
+    // True Zero-Idle: Halt pause blink timer when hidden or button disabled; resume onPaint
     #updatePauseBlink() {
-        const paused = fb.IsPlaying && fb.IsPaused;
-        if (!paused) {
+        const shouldBlink = fb.IsPlaying && fb.IsPaused && this.properties.values.showLcdSyncBtn && window.IsVisible;
+        if (!shouldBlink) {
             if (this.#pauseTimer) { window.ClearInterval(this.#pauseTimer); this.#pauseTimer = null; }
             this.#pauseFlash = true;
             return;
@@ -3742,24 +3883,19 @@ class VolumeKnobController {
         if (this.#pauseTimer) return;
         this.#pauseFlash = true;
         this.#pauseTimer = window.SetInterval(() => {
-            if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE || !fb.IsPlaying || !fb.IsPaused) {
+            if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE || !fb.IsPlaying || !fb.IsPaused || !this.properties.values.showLcdSyncBtn || !window.IsVisible) {
                 this.#updatePauseBlink();
                 return;
             }
-            if (!window.IsVisible) return;
             this.#pauseFlash = !this.#pauseFlash;
-            const v = this.properties.values;
-            if (!v.showLcdSyncBtn) return;
-            const r = this.getLcdBtnRect();
-            const pad = GdiUtils.scale(6);
-            window.RepaintRect(Math.max(0, r.x - pad), Math.max(0, r.y - pad), r.w + pad * 2, r.h + pad * 2);
+            this.repaintLcdBtn();
         }, 500);
     }
 
     onPlaybackStateChange() {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return;
         this.#updatePauseBlink();
-        window.Repaint();
+        this.repaintLcdBtn();
     }
 
     drawLcdSyncButton(gr) {
@@ -3788,7 +3924,6 @@ class VolumeKnobController {
         }
     }
 
-    // ====================== DEDICATED CYCLE FUNCTIONS ======================
     cycleTheme(direction) {
         const names = this.themes.names();
         if (!names.length) return;
@@ -3798,7 +3933,7 @@ class VolumeKnobController {
         const chosen = names[nextIdx];
 
         this.themes.clearPreview();
-        this.properties.setTheme(chosen, this.themes);
+        this.properties.setTheme(chosen, this.themes, true, this.state);
         this.state.invalidateGeometry();
         this.sceneCache.invalidate(this.bgRenderer, this.dialRenderer);
         this.showNotification(`Theme: ${chosen}`);
@@ -3878,9 +4013,15 @@ class VolumeKnobController {
         this.showNotification(`Lighting: ${labels[nextStyle]}`);
     }
 
-    // ====================== RENDER & EVENTS ======================
     onPaint(gr) {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE || !window.IsVisible) return;
+
+        // Re-evaluate zero-idle pause blink & animation when panel visibility is restored
+        this.#updatePauseBlink();
+        if (this.state.dragging || Math.abs(this.state.currentAngle - this.state.targetAngle) >= VolumeConfig.ANGLE_EPSILON) {
+            this.state.startAnimation();
+        }
+
         this.mainRenderer.draw(gr, window.Width, window.Height, this.state, this.themes, this.properties, this.sceneCache, this.dialRenderer, this.bgRenderer, this.assetManager);
 
         this.drawLcdSyncButton(gr);
@@ -3971,19 +4112,15 @@ class VolumeKnobController {
     onMouseMove(x, y, mask) {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return false;
 
-        let needsRepaint = false;
-
         if (this.properties.values.showLcdSyncBtn) {
             const r = this.getLcdBtnRect();
             const hovered = (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
             if (hovered !== this.isLcdBtnHovered) {
                 this.isLcdBtnHovered = hovered;
-                needsRepaint = true;
                 this.refreshSyncTooltip();
+                this.repaintLcdBtn();
             }
         }
-
-        if (needsRepaint) window.Repaint();
 
         if (this.state.dragging && (mask !== undefined && !(mask & 1))) {
             return InputManager.handleDragEnd(this.state, this.properties.values);
@@ -3992,12 +4129,11 @@ class VolumeKnobController {
     }
 
     onMouseLeave() {
-        let changed = false;
         if (this.isLcdBtnHovered) {
             this.isLcdBtnHovered = false;
-            changed = true;
+            this.refreshSyncTooltip();
+            this.repaintLcdBtn();
         }
-        if (changed) { this.refreshSyncTooltip(); window.Repaint(); }
     }
 
     onMouseWheel(step) {
@@ -4031,7 +4167,6 @@ class VolumeKnobController {
                 const nextSync = !this.properties.values.syncLcdTheme;
                 this.properties.set('syncLcdTheme', nextSync);
                 if (nextSync) {
-                    // Re-announce the current theme so other panels catch up immediately
                     try { window.NotifyOthers('LcdThemeSync', this.properties.values.currentLcdTheme); } catch {}
                 }
                 this.showNotification(`LCD Theme Sync: ${nextSync ? 'ON' : 'OFF'}`);
@@ -4071,52 +4206,43 @@ class VolumeKnobController {
         const isShift = utils.IsKeyPressed(0x10);
         const isAlt   = utils.IsKeyPressed(0x12);
 
-        // Ctrl + Alt + Left/Right -> Cycle LCD Themes (Peak Meter & Timer)
         if (isCtrl && isAlt && !isShift && (vkey === 0x25 || vkey === 0x27)) {
             this.cycleLcdTheme(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
-        // Shift + Alt + Left/Right belongs to Library/Playlist panels; ignore here
         if (isShift && isAlt && (vkey === 0x25 || vkey === 0x27)) return false;
 
-        // Ctrl + Shift + Left/Right OR Alt + Left/Right -> Cycle Volume Knob Themes
         if ((isCtrl && isShift && (vkey === 0x25 || vkey === 0x27)) || (!isCtrl && !isShift && isAlt && (vkey === 0x25 || vkey === 0x27))) {
             this.cycleTheme(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
-        // Ctrl + Shift + Up/Down OR Alt + Up/Down -> Cycle Specular Lighting Styles
         if ((isCtrl && isShift && (vkey === 0x26 || vkey === 0x28)) || (!isCtrl && !isShift && isAlt && (vkey === 0x26 || vkey === 0x28))) {
             this.cycleLightStyle(vkey === 0x28 ? 1 : -1);
             return true;
         }
 
-        // Ctrl + Up/Down -> Cycle Dial Face Finishes
         if (isCtrl && !isShift && !isAlt && (vkey === 0x26 || vkey === 0x28)) {
             this.cycleDialMode(vkey === 0x28 ? 1 : -1);
             return true;
         }
 
-        // Ctrl + Left/Right -> Cycle Tick Marker Styles
         if (isCtrl && !isShift && !isAlt && (vkey === 0x25 || vkey === 0x27)) {
             this.cycleTickStyle(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
-        // Shift + Up/Down -> Cycle Pointer Styles
         if (isShift && !isCtrl && !isAlt && (vkey === 0x26 || vkey === 0x28)) {
             this.cycleMarkerStyle(vkey === 0x28 ? 1 : -1);
             return true;
         }
 
-        // Shift + Left/Right -> Cycle Backplate Styles
         if (isShift && !isCtrl && !isAlt && (vkey === 0x25 || vkey === 0x27)) {
             this.cycleBgMode(vkey === 0x27 ? 1 : -1);
             return true;
         }
 
-        // Standard Volume Wheel Steps (unmodified arrow keys only)
         if (!isCtrl && !isShift && !isAlt) {
             if (vkey === 0x26 || vkey === 0x27) {
                 InputManager.handleWheel(1, this.state, this.properties.values);
@@ -4135,8 +4261,9 @@ class VolumeKnobController {
         if (this.#panelState !== VolumeConstants.LIFECYCLE.LIVE) return;
 
         if (name === 'LcdThemeSync' && typeof info === 'string') {
-            if (!this.properties.values.syncLcdTheme) return; // sync OFF: ignore broadcasts
+            if (!this.properties.values.syncLcdTheme) return;
             this.properties.set('currentLcdTheme', info);
+            this.refreshSyncTooltip();
             window.Repaint();
         }
     }
@@ -4195,7 +4322,7 @@ function on_playback_new_track() {
 
 function on_playback_starting() { app.onPlaybackStateChange(); }
 function on_playback_pause()    { app.onPlaybackStateChange(); }
-function on_playback_stop()     { app.onPlaybackStateChange(); }
+function on_playback_stop(reason) { if (reason !== 2) app.onPlaybackStateChange(); }
 
 function on_mouse_lbtn_down(x, y, mask) { 
     return app.onMouseLbtnDown(x, y, mask); 
